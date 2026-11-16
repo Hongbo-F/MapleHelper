@@ -1,0 +1,1391 @@
+{
+  "id": "flows",
+  "flows": [
+    {
+      "id": "look-to-keys",
+      "title": "How a look becomes key presses",
+      "summary": "One frame of the game, from the screen to a throw's key going down. The perception service captures and reads it, the hunting command decides on it, and the elevated key player presses the key with SendInput. Three processes take part, joined by a named pipe, shared memory and files in gamelab/lab.",
+      "trigger": "The perception service's frame loop takes its next frame (15 a second, rate.HZ) while a hunting command (`tour --loop`) is attached.",
+      "steps": [
+        {
+          "module": "gamelab/perception/frames.py",
+          "symbol": "ScreenFrames.next",
+          "text": "Finds the game window and checks it first (framecheck.window_problem: gone, minimized, another size, off screen, covered). A window not fit to read gives a not-visible Frame carrying its Problem; otherwise it asks the process's grabber for a shot shown at the frame's due time or later.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/capture.py",
+          "symbol": "Grabber.shot",
+          "text": "Takes the shot with DXGI desktop duplication (waiting a little for a frame presented after `after`); a capture error puts it on mss for a while. The client area is cropped and converted BGRA to RGB.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/feed.py",
+          "symbol": "run",
+          "text": "The frame loop. It drains what clients asked for (Service._poll), takes the frame, and runs the world step only if the frame is new or someone asked about it (an unchanged screen nobody asked about says nothing new). Each state goes to `emit`.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/worldstate.py",
+          "symbol": "WorldStep.step",
+          "text": "One pass over the frame. The whole-screen monster search starts on its own thread while her look runs (Eyes.look_at: name tag, HP/MP, minimap dot, HUD boxes); Senses.place puts her on the map; then her EXP, HP and touches, newborns at spawn points, the tracker (detections matched to numbered tracks, deaths, victims) and any drops asked for. The result is a WorldState.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/service.py",
+          "symbol": "Service._emit",
+          "text": "The frame goes into the shared-memory look Ring (slot = seq mod 16). The state, its picture removed, is pickled once and queued on every attached client's writer thread, which sends it down the named pipe.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/service.py",
+          "symbol": "ServiceClient._take",
+          "text": "In the hunting command, the client's own thread receives the state, keeps the 8 newest, and queues their events for the next look.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._look",
+          "text": "The hunt loop's pass starts with a look (Hunter.look), which first raises LieDetectorAlarm if the alarm file is up (client.check_alarm).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/localization/senses.py",
+          "symbol": "Senses.look",
+          "text": "Works out how fresh the frame must be (after the last look's frame, KEY_EFFECT_S = 68 ms after her last key, at most MAX_AGE_S = 0.1 s old) and takes the newest state that qualifies as a Scene (Feed.look, to_scene; the picture copied out of the ring). It drains the events up to that frame and runs every listener (her vitals, the ledger, the drop store, memory, attacks) and check (the stop checks).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._pass",
+          "text": "Bookkeeping, the health check, the backstops, then the ordered rules: close quarters first, then a valuable pile, then the trip she is on, else what to do at the ground (shoot, wait, leave).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/fight.py",
+          "symbol": "_take_stance",
+          "text": "For a shooting rule: gathers the monsters (seen and hidden), their bodies, her pace and the map's danger and asks attack.stance for one act.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/attack/stance.py",
+          "symbol": "stance",
+          "text": "Pure decision, no keys or clock: throw from here, a jump throw, a jump back, a step, an approach, or wait.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/fight.py",
+          "symbol": "throw_act",
+          "text": "Carries out a throwing act: jitters a jump's attack key, logs it, and calls Actions.throw, jump_throw or jump_back. False means the throw was dropped at its last look.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/actions.py",
+          "symbol": "Actions.throw",
+          "text": "Waits out her attack lock, asks `still` (a kill that came in since the look drops the throw), taps the arrow only if she might not face the target, gets the attack key (the attack choice), tells the throw listeners the key's time, then plays the plan. Afterwards lock_until is set 730 + 60 ms ahead.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/actions.py",
+          "symbol": "Actions.play",
+          "text": "hold_back keeps any jump or attack key out of the attack lock and arrows out of the 800 ms arrow lock; then client.submit hands the plan over and waits.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/client.py",
+          "symbol": "send",
+          "text": "Refuses with the alarm up unless the plan has an allowed kind; writes lab/inbox/<id>.tmp and renames it to <id>.json so the player never reads half a plan.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "_serve",
+          "text": "The elevated player polls the inbox every 10 ms, takes the first plan by name and claims it by renaming it <id>.running; from then on the client can only cancel it.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "Player.run",
+          "text": "Validates the plan, brings the game to the front if asked (refusing if it still isn't in front), and starts the `key-player` thread, which sleeps to each event's time in 15 ms steps, checking for a .cancel file, the alarm and a splice between them.",
+          "process": "player"
+        },
+        {
+          "module": "maplehelper/win32.py",
+          "symbol": "send_key",
+          "text": "Each key down or up is one SendInput keyboard event by scan code, tagged INJECTED_TAG (0x4D484C50) so maplehelper's own hook can tell it apart.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "_answer",
+          "text": "Once every held key is let go, the result (each key's real time, any problems) is written to lab/outbox/<id>.tmp and renamed to <id>.json.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/client.py",
+          "symbol": "wait",
+          "text": "Polling every 10 ms, the hunt reads and deletes the result. An error that names the Lie Detector raises LieDetectorAlarm; the next pass starts with a new look.",
+          "process": "hunt"
+        }
+      ],
+      "slices": [
+        "perception-eyes",
+        "shared",
+        "localization-feed",
+        "behavior-loops",
+        "localization-map",
+        "behavior-hunter",
+        "attack",
+        "control-nav",
+        "control-player",
+        "foundation"
+      ]
+    },
+    {
+      "id": "grind-iteration",
+      "title": "One iteration of the hunt loop (grinding)",
+      "summary": "`tour --loop` runs Grind, the default hunt loop: one decision after every look, by an ordered list of rules. This is one pass of it, from the look to either a throw, a wait, or a navigator trip to the next stop of her round.",
+      "trigger": "A person (or an external grind loop) runs `python -m gamelab tour --loop --minutes 20 --map <id>`.",
+      "steps": [
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "cmd_tour",
+          "text": "Records telemetry (_record, which also claims lab/hunt.json), builds the hunter, a fighting navigator and a Tour, and inside `retreat.on_alarm` runs Grind(tour).run(minutes) (`--camp` runs the plain Hunt). When the time is up she is parked (retreat.park).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt.run",
+          "text": "Grind.run calls it. One report for the hunt, hooks on the looter and attacks, a first look (mover.settle), the first stop (_next_ground), then `_pass()` in a loop. physics.settle() runs between passes, so a new walk speed read from her stat window takes effect only between key plans. LookLost makes her stand still (Senses.regain); KeyDoubt runs the key check.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/grind.py",
+          "symbol": "Grind._next_ground",
+          "text": "At the start and whenever she leaves a stop: the round is looked at again (_look_at_round, which asks Patrol.replan on its 20 s clock), then Patrol.choose names the next stop. A Visit and an Objective of kind 'spot' are made, and 'grind' and 'tour' records go to telemetry.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/patrol.py",
+          "symbol": "Patrol.choose",
+          "text": "Picks the next stop from where she is: a census trip in progress, else the stop choice of her round, or a trip off the round when one beats her bar.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._pass",
+          "text": "Each pass: a look (Grind._look), then _book, _publish, the stuck guard, the health check, and the objective's 60 s backstop (OBJECTIVE_S).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/grind.py",
+          "symbol": "Grind._look",
+          "text": "The hunt loop's band look (with her platform's drops), plus grinding's own learning: Patrol's belief updated from her memory, the HP she lost charged to the stop, the loop's promised EXP rate.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._book",
+          "text": "New kills from the ledger credited to the visit or 'on the way' (Grind._book_kills also credits the platform each died on); a pile seen gone counts as progress.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunter.py",
+          "symbol": "Hunter.health_check",
+          "text": "Potions and pet food if due (drink_if_low), then the safety stop: if HpWatch says it is due, SafetyStop is raised here and the hunt ends.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/grind.py",
+          "symbol": "Grind._targets",
+          "text": "The targets: fight._targets for the stop's platforms, plus the monsters the look missed (_with_unseen). With the target-first planner on (GAMELAB_TARGET, on by default) Targeting.decide narrows them to one primary target.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._pass",
+          "text": "The rules in order. Rule 1, close quarters, comes first and shoots at once (Hunt._shoot: one stance step, a throw through fight.throw_act, or a walk). Otherwise a valuable pile may go first (_go_for), a trip in progress goes on (_while_travelling), or the decision is made at the ground.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/grind.py",
+          "symbol": "Grind._at_ground",
+          "text": "At a stop with the planner on, _planned_step: the drops that go first, the stance against the primary (shoot, or a trip to the place it can be hit from), else stay or leave.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/grind.py",
+          "symbol": "Grind._leaving",
+          "text": "Stays while the stop's gain (_stay_gain) is at least the larger of the loop's rate and the next stop's gain; below it for LEAVE_CONFIRM_S (0.3 s) she leaves. STOP_MAX_S (40 s) with nothing in reach is the backstop.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/grind.py",
+          "symbol": "Grind._leave",
+          "text": "Sweeps the piles on her way out first (_sweep), then tells Patrol.left (stops that gave nothing count), calls _next_ground and starts the trip with the rule 'advance'.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._travel",
+          "text": "The objective becomes one navigator trip in TRANSIT mode (nav.begin with until=_interrupt), then nav.step until it arrives, stops 'in position' because a rule fired, or fails.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator.step",
+          "text": "One pass of the trip: a look, then a chain of route moves as one key plan to the player (see the navigator-trip flow).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/grind.py",
+          "symbol": "Grind._interrupt",
+          "text": "Asked before every chain. The hunt loop's reasons (close quarters, a valuable pile, a target in passing), and grinding's: every RECHOOSE_S (1 s) Patrol.choose is asked again, and a pull or 'back to the loop' reroutes her at the next pass.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._note",
+          "text": "Every step a rule takes is counted in the report (`rules`, and seconds in `rule_s`); a change of rule is logged and sent to telemetry for the mini-map.",
+          "process": "hunt"
+        }
+      ],
+      "slices": [
+        "runtime",
+        "behavior-loops",
+        "behavior-hunter",
+        "control-nav"
+      ]
+    },
+    {
+      "id": "fight",
+      "title": "A fight: target, stance, throw, kill and EXP",
+      "summary": "How grinding picks a monster, decides how to hit it, throws, and then confirms the kill from her EXP number. The decision runs in the hunting command; the kill is first bound to a monster in the perception service, then placed again by the hunter's own ledger.",
+      "trigger": "A grind look with monsters about and the target-first planner on (GAMELAB_TARGET, the default).",
+      "steps": [
+        {
+          "module": "gamelab/behavior/targeting.py",
+          "symbol": "Targeting.decide",
+          "text": "Builds Her (her_at: place, pace) and the Foes (foes_of: EXP, kill time, presence chance, speed, newborn fade) and asks the Chooser. Returns the primary as the hunt's only target.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/attack/target.py",
+          "symbol": "Chooser.choose",
+          "text": "Ranks the foes (rank: score = chance x EXP / (time to an attack + kill time)). The current primary is kept unless the top beats it by MARGIN = 1.3, so the plan doesn't flip.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._shoot",
+          "text": "With the primary in reach (or too close), the pass shoots: the rule is noted ('shoot' or 'close quarters') and the stance asked for.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/grind.py",
+          "symbol": "Grind._stance",
+          "text": "For the primary alone: the hunt loop's stance (no closing in), then Targeting.plan turns a 'wait' into the walk to the place it can be hit from, or sets the monster aside for NO_WAY_S (0.5 s).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/fight.py",
+          "symbol": "_take_stance",
+          "text": "Gathers the monsters (visible and hidden), each kind's body from the game data, her Pace, the map's Danger and the jump coverage, and calls attack.stance.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/attack/stance.py",
+          "symbol": "stance",
+          "text": "Sorts monsters into those beside her, too close and reachable (reach.can_hit). Too close: escape, a sure throw, or a clearing step. Something in reach: which way to throw (_throw_side). Nothing in reach from the ground: a jump shot (_jump_shot) or an approach.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/fight.py",
+          "symbol": "throw_act",
+          "text": "Back in Hunt._shoot (unless fight.knocked_move holds a move while a knock-back may still move her): the jump's attack key jittered, the jump logged, and Actions.throw, jump_throw or jump_back called. A throw that went is counted in the report.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/actions.py",
+          "symbol": "Actions._lock_for_attack",
+          "text": "Waits out her 730 ms attack lock. In a grind the lock is watched frame by frame (Targeting.watch_lock): a state that changes the plan calls the throw off.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunter.py",
+          "symbol": "Hunter._still",
+          "text": "Reads the feed's newest state after her keys' effect: an EXP gain of a kind in the throw's way, or the target dead by its own track, drops the throw ('dropped' event).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/attacks.py",
+          "symbol": "Attacks.key",
+          "text": "Finds the throw's target and what it has left as reckoned, and picks the attack key through attack.choice.pick: Lucky Seven while her MP surely pays for a cast and it finishes the monster faster, else the regular attack, or no throw.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/actions.py",
+          "symbol": "Actions._thrown",
+          "text": "Tells the throw listeners when the attack key will go down: Ledger.on_throw (what is in its path), Wounds, Memory, Aggro, Attacks.on_throw, and Hunter._tell_feed.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/localization/service.py",
+          "symbol": "ServiceClient.throw",
+          "text": "_tell_feed sends ('throw', time, side, attack, aim) up the pipe; the service's frame loop hands it to WorldStep.throw.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/localization/tracking.py",
+          "symbol": "MonsterTracker.throw",
+          "text": "Notes the throw, with which tracks its star could meet from where she stood and the monster it was aimed at. The plan itself goes to the key player as in the look-to-keys flow.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/worldstate.py",
+          "symbol": "WorldStep._vitals",
+          "text": "On a later frame her EXP number's pixels change (hud.exp_changed); exp_number.read reads it, an 'exp_gain' event goes out, and the ExpMeter splits the change into kills by kind (_told hands each to MonsterTracker.gain).",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/tracking.py",
+          "symbol": "MonsterTracker._bind",
+          "text": "The gain is bound to the throw keyed 0.1-0.6 s before it (her Shape's gain_after_key); _picks ranks the tracks its attack could take, and _victim marks the first DYING with a 'victim' event.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/tracking.py",
+          "symbol": "MonsterTracker._judge",
+          "text": "On later frames: its death seen, it is dead; re-found REBIND_S after the gain, it is let go; unseen long enough, dead. _dies emits a 'died' event with cause 'hers'.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/behavior/hunter.py",
+          "symbol": "Hunter._vitals",
+          "text": "At the next look the drained events become meter readings (feed_reads); ExpMeter.update gives Gains naming kinds, and each goes to Hunter._gained (counted, told, an 'exp' telemetry record).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/ledger.py",
+          "symbol": "Ledger.on_look",
+          "text": "Each new gain becomes a Kill placed on a monster (_place: the tracker's bound track first, else the throw keyed shortly before, else recent paths). DropStore.on_kill then expects a pile where it died.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/grind.py",
+          "symbol": "Grind._book_kills",
+          "text": "At the next pass the hunt loop credits the kill to the visit and to the platform it died on; from then on ledger.dying keeps its fading body from being a target.",
+          "process": "hunt"
+        }
+      ],
+      "slices": [
+        "behavior-hunter",
+        "attack",
+        "behavior-loops",
+        "control-nav",
+        "localization-feed"
+      ]
+    },
+    {
+      "id": "navigator-trip",
+      "title": "A navigator trip between platforms",
+      "summary": "How the navigator gets her onto another platform: a route over the map's move graph, as many moves as can be predicted chained into one key timeline, watched while it plays, cut short when she is touched or off her path, and replanned from wherever she ends up.",
+      "trigger": "The hunt loop starts a trip (Hunt._travel: Navigator.begin, then step), or a retreat or tour calls Navigator.go.",
+      "steps": [
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator.begin",
+          "text": "Makes a TripState (180 s by default, a mode: AVOID, HUNT or TRANSIT), reusing the caller's last look for the first pass if no key was sent since.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator.step",
+          "text": "At the start of each pass _follow_walk rebuilds the route planner if her walk speed changed (physics.EPOCH); then one _pass, and a 'trip' record when the trip ends.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator._pass",
+          "text": "Deadline, misses and the Lie Detector alarm checked; a look (_look -> Mover.locate with monsters); her potions and the safety stop (st.health); the caller's `until` may end it 'in position'; arrived is checked.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator._route",
+          "text": "The route from motion.route.Planner, each move weighed by the trip's random weights and penalized for moves a monster blocked recently. With several ways offered, route.choose draws one and the trip keeps to it while that stays close to the quickest.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "Planner._search",
+          "text": "Dijkstra over the move graph: each edge costs the walk to the move's start at WALK_SPEED, plus the move's seconds, plus its risk, times its weight, plus its penalty.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator._chain_monsters",
+          "text": "The monsters the chain must keep clear of: the look's, walking at their kind's speed, plus those her memory and the feed know but the look missed.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/motion/flow.py",
+          "symbol": "Flow.chain",
+          "text": "Chains as many route moves as can be predicted from where she stands into one key timeline, trying each move's variants and stopping short of a leg a monster could touch her on.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/motion/flow.py",
+          "symbol": "Flow.danger",
+          "text": "Samples her feet every 0.05 s along a leg's runs, arcs and climbs and tests her box against each monster's (motion.bodies.touches).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator._meet",
+          "text": "A monster blocking the first move: with an escort she shoots it, goes around, hops, waits, evades, or passes regardless.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator.follow",
+          "text": "Actions.hold_back keeps the chain's keys out of her attack and arrow locks; client.send hands the chain's Keys.sorted() events over with end_ms (its predicted landing plus any tail) and does not wait.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "Player.run",
+          "text": "The elevated player plays the chain's keys at their times; a later chain queued on the move starts the moment this one ends, and a splice can take over mid-plan.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator._watching",
+          "text": "Glances at her dot and HP from the feed about every GLANCE_S (0.03 s). A touch told since the look, or HP down by HIT (0.4%), cuts it; off the planned path for OFF_PATH_S (0.109 s) cuts it; a monster coming into a leg ahead (_coming) has it replanned (_switch) or cut. 0.9 s before the last landing a look ahead may queue the next chain (_queue_next).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/client.py",
+          "symbol": "cancel",
+          "text": "On a cut, the running and queued plans are cancelled: a plan not yet taken is withdrawn, a running one gets a .cancel file, and the player stops and lets go of every key.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator._after_chain",
+          "text": "A look once she has stopped (after a touch, the first state with her landed: KNOCK_REPLAN); after a clean end, the look the next pass will plan from.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator._note_landing",
+          "text": "Records the moves made ('moved' telemetry, for the coverage report) and compares where she landed with the plan: elsewhere with no touch and no deliberate stop is a miss (6 misses end the trip). The next pass replans from where she is.",
+          "process": "hunt"
+        }
+      ],
+      "slices": [
+        "control-nav",
+        "motion",
+        "control-player"
+      ]
+    },
+    {
+      "id": "continuous-feed",
+      "title": "The continuous feed: one service following monsters for every command",
+      "summary": "The perception service is its own long-running process, one per PC, that looks at the game 15 times a second and keeps every monster on a numbered track. Commands attach over a named pipe; their looks, glances and beliefs (memory, aggro, the spawn clock, unseen monsters) are all built from its states.",
+      "trigger": "A hunting command starts and calls __main__._perception; the babysitter keeps `perceive` running.",
+      "steps": [
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "_perception",
+          "text": "Makes a ServiceClient named for the command (acts: it sends keys; throws: it tells her throws) on the map, and waits up to 20 s for the welcome.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/localization/service.py",
+          "symbol": "ServiceClient._run",
+          "text": "Its thread connects to the pipe address and key in lab/perceive.json. With no service running, service.ensure starts `python -m gamelab perceive` detached through WMI (its console in lab/perceive.log), then it says hello.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/localization/service.py",
+          "symbol": "Service._hello",
+          "text": "A client that hunts on another map than the one looked at moves the service there (a new run and epoch); a second hunting command on a different map is refused. Otherwise it is welcomed with the run's rings.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/service.py",
+          "symbol": "Service.serve",
+          "text": "Builds a run when needed (_build: screen_world gives the map's Runner of ScreenFrames, Eyes and a WorldStep), tunes it for who is attached (_tune) and runs feed.run.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/feed.py",
+          "symbol": "run",
+          "text": "Every 1/15 s: merges clients' asks (Service._poll, Service._take; a 'throw' message goes to the step), takes the frame (ScreenFrames.next) and steps it. An ask never gets a frame of its own: it rides on the next frame due.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/worldstate.py",
+          "symbol": "WorldStep.step",
+          "text": "Her look and the whole-screen search on two threads, her place, EXP, HP and touches, newborns at spawn points, detections placed on the map, and the tracker.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/tracking.py",
+          "symbol": "MonsterTracker.update",
+          "text": "Detections matched to tracks, unseen ones judged, health bars read where due, deaths seen, her EXP gains bound to victims; the frame's events returned (spawned, victim, died, touch...).",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/service.py",
+          "symbol": "Service._emit",
+          "text": "The frame into the shared look Ring; the rolling recording and the Lie Detector tracking get it by reference; the state, without its picture, pickled to every client's queue and published (Publisher.state) to the service's own telemetry file.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/service.py",
+          "symbol": "Writer._run",
+          "text": "Each client's writer thread sends its queue down the pipe. A slow reader loses the oldest states (QUEUE_KEEP = 64) and is told a 'gap'.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/localization/service.py",
+          "symbol": "ServiceClient._take",
+          "text": "Keeps the 8 newest states (KEEP), drops one from an older run (epoch), and queues its events.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/localization/service.py",
+          "symbol": "ServiceClient.latest",
+          "text": "A look asks for a state shown after a given time. If none searched what it needs (drops) on a late enough frame, one 'ask' goes up the pipe and it waits up to FEED_WAIT_S (0.6 s).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/localization/senses.py",
+          "symbol": "Senses.look",
+          "text": "The newest fresh state becomes a Scene; its events are drained and every listener runs: Memory.on_look, the hunter's _births (SpawnClock.see) and _aggro (Aggro.update).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/localization/unseen.py",
+          "symbol": "unseen",
+          "text": "The hunt loop adds the monsters the look missed: the feed's hidden tracks still worth counting and her memory's recent sightings, walked on at their velocity (Hunt._unseen).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/localization/senses.py",
+          "symbol": "Senses.glance",
+          "text": "Between looks (a chain running, a throw's last check) a glance takes the feed's newest state without asking for anything: her dot and HP, and the tracks the navigator reacts to.",
+          "process": "hunt"
+        }
+      ],
+      "slices": [
+        "runtime",
+        "localization-feed",
+        "localization-map"
+      ]
+    },
+    {
+      "id": "looting",
+      "title": "Looting: from a kill to its drops picked up",
+      "summary": "A placed kill makes the drop store expect a pile; looks that search for loot confirm it; the loot sweep plans which piles are worth her time on her way; she travels there and stands on them pressing pick-up. In grinding with the planner on, several piles go as one navigator chain.",
+      "trigger": "The ledger places a kill of hers (Ledger.on_look), or a look's drop search finds drops.",
+      "steps": [
+        {
+          "module": "gamelab/behavior/ledger.py",
+          "symbol": "DropStore.on_kill",
+          "text": "A placed kill expects a pile where it died, worth its kind's expected drops (looting.expected_worth); the drops land about DROP_LANDS = 2 s later.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._look",
+          "text": "Each pass looks with loot=True (her platform's drops); once a far kill's drops have landed, a whole-screen look (_far_drops).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/localization/service.py",
+          "symbol": "ServiceClient.latest",
+          "text": "No kept state searched those drops on a late enough frame: an 'ask' goes to the service.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/localization/worldstate.py",
+          "symbol": "WorldStep._drops",
+          "text": "The asked strips (her platform's, or every platform in view) are searched whole on the next frame due (scene.find_loot, through the eyes' loot detector); a rotation searches a few other strips every so often.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/behavior/ledger.py",
+          "symbol": "DropStore.on_look",
+          "text": "The look's drop strips confirm, update or forget piles; unclaimed drops become others' piles.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._sweep",
+          "text": "Once per look and destination: the store's candidates as pick spots (_spots: worth, stand time, landing, survival, guards, allowance) within the way's terms (_sweep_terms).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/sweep.py",
+          "symbol": "Sweeper.solve",
+          "text": "The best itinerary on her way (or a round trip, or her way out), kept unless another is clearly better; a 'sweep' telemetry record when it changes.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/grind.py",
+          "symbol": "Grind._sweep_act",
+          "text": "With the planner's loot chain on, the itinerary's next piles (up to MOST_PILES = 4) become one LootChain (_loot_plan) for the navigator; otherwise the hunt loop's: guards shot first, a landing waited for, a stand, or a trip.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._go_for",
+          "text": "The spawn guard may hold a short trip until the map's next respawn pass; otherwise a 'pile' objective is pushed over the one she was on and travelled to (Hunt._travel).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/lootchain.py",
+          "symbol": "LootChain.way",
+          "text": "For a chain trip, the navigator's `through`: what is left of the way, each stretch of drops from its nearer end, with the time to stand there.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._stand",
+          "text": "By the pile: only if nothing would meet her there now; each bunch of drops walked to and stood on, a press of pick-up per drop plus one; one try of the pile counted; a 'pick' telemetry event.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/actions.py",
+          "symbol": "Actions.pick_here",
+          "text": "Waits for the lock and plays the presses, PILE_EVERY_MS = 120 ms apart, through the key player.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/looting.py",
+          "symbol": "Looter.cant_pick",
+          "text": "Drops still under her after two stands are left alone: mesos always fit, so those are someone else's; items may mean a full inventory tab.",
+          "process": "hunt"
+        }
+      ],
+      "slices": [
+        "behavior-hunter",
+        "behavior-loops",
+        "localization-feed",
+        "control-nav"
+      ]
+    },
+    {
+      "id": "key-plan-life",
+      "title": "A key plan's life through the elevated key player",
+      "summary": "MapleStory runs as administrator, so only an elevated process can press its keys. Every key any command wants pressed becomes a JSON plan file in lab/inbox; the key player claims it, presses it with SendInput and answers in lab/outbox. Cancel and splice files let a running plan be cut or taken over.",
+      "trigger": "Any command that acts calls control.client.submit (send and wait) or send.",
+      "steps": [
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "cmd_player",
+          "text": "`player --elevate` asks Windows (ShellExecute 'runas', a UAC click) to start `python -m gamelab player` as administrator.",
+          "process": "tools"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "serve",
+          "text": "Refuses to start with the alarm up; clears stale inbox files; loads config.toml's keys; starts the Lie Detector Watchdog thread; writes lab/player.json saying it can splice.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/client.py",
+          "symbol": "send",
+          "text": "Writes the plan (events [ms, key, down/up], capture, focus, end_ms, kind) to lab/inbox/<id>.tmp, then renames it to <id>.json.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "_serve",
+          "text": "Every 10 ms, and only after the watchdog's first look, takes the first *.json in name order and renames it to .running (claimed).",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "_read_plan",
+          "text": "Reads the JSON, retrying every 5 ms for up to 0.5 s while Windows refuses the file.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "validate",
+          "text": "Checks events, times and sizes: only keys config.toml can name, at most 400 events, 20 s and 900 frames.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "Player.run",
+          "text": "With the alarm up only allowed kinds go (alarm_refusal). Resizes or focuses the game if asked; refuses if the game is not in front; the key-player thread plays the events while the main thread records frames if asked.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "_press",
+          "text": "Each event becomes win32.send_key (a keyboard SendInput) or send_mouse_button; the real time of each is kept in `sent`.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/client.py",
+          "symbol": "cancel",
+          "text": "To cut a plan: one not yet taken is withdrawn (its .json deleted); a running one gets lab/inbox/<id>.cancel, which the player checks between waits, stopping and letting go of every key.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/client.py",
+          "symbol": "splice",
+          "text": "The navigator can replace the rest of a running plan: lab/inbox/<running id>.splice carries the new events, at_ms and the keys to keep held; the player switches at that time on the plan's clock.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "_answer",
+          "text": "Removes the .running file and writes the result to lab/outbox/<id>.tmp, renamed to <id>.json (frames, if recorded, in <id>.npz).",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/client.py",
+          "symbol": "wait",
+          "text": "Polls every 10 ms; withdraws a plan not taken yet if the alarm goes up; after 120 s says the player may not be running. Reads and deletes the result, removes a leftover .cancel, raises on an error.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "cmd_stop_player",
+          "text": "`stop-player` writes lab/STOP; the player's loop ends at its next check (it also ends after 24 idle hours).",
+          "process": "tools"
+        }
+      ],
+      "slices": [
+        "runtime",
+        "control-player",
+        "control-nav"
+      ]
+    },
+    {
+      "id": "lie-detector-alarm",
+      "title": "The Lie Detector alarm, from sighting to clear-alarm",
+      "summary": "The game's anti-bot test (the Lie Detector) is spotted by a watchdog thread inside the key player. Input stops within about 10 ms, an alarm file and pages go out, the hunt retreats to a safe place within 10 s using the only plans still allowed, everything is recorded, and a person answers the test and clears the alarm.",
+      "trigger": "The game shows a Lie Detector form while the player, the perception service and a hunt run.",
+      "steps": [
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "Watchdog.tick",
+          "text": "The 'lie-detector-watch' thread looks 4 times a second (interval 0.25 s). It scores the frame with the spotter; a score of 1 or more with no cycle in progress is a sighting.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/perception/lie_detector.py",
+          "symbol": "LieDetectorSpotter.near",
+          "text": "Matches each form's template near its known place (the whole frame every few looks, during a cycle, or at another size: `scores`).",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "Player.run",
+          "text": "The alarm Event is set first: the key thread, sleeping on it, returns at once, every held key is let go, and the plan is answered with the Lie Detector error.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/alarm.py",
+          "symbol": "raise_alarm",
+          "text": "Writes lab/ALARM.json (time, `at`, form, cause) first, then a screenshot, then pages the PC (beeps and a Windows toast).",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/lie_recorder.py",
+          "symbol": "Recording",
+          "text": "A recording folder lab/lie_detector/<stamp>/ starts with the first look; every later look adds a line. notify.Pusher.seen also sends a critical phone alert.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/client.py",
+          "symbol": "wait",
+          "text": "The hunt's running plan comes back with the Lie Detector error and raises LieDetectorAlarm; any new plan without a kind is refused before it is written (check_alarm).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/retreat.py",
+          "symbol": "on_alarm",
+          "text": "Catches the alarm and calls retreat(), which dates the sighting from the alarm file's `at` (client.alarm_age).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/retreat.py",
+          "symbol": "_away",
+          "text": "With RETREAT_S = 10 s and 3 tries: 'too late' if seen 10 s ago or more. Otherwise locate her, stay on a safe rope, or choose the quickest safe place and go there with a moves-only Navigator in AVOID mode.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "alarm_refusal",
+          "text": "Meanwhile the player takes only four plan kinds: pet food (3 a minute at most), the retreat's moves (for RETREAT_WINDOW_S = 12 s after the sighting), the mini-game cursor's moves and clicks, and the pass's OK.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/rolling.py",
+          "symbol": "Recorder.check_alarm",
+          "text": "In the perception service, the rolling recording sees a new alarm time: the 5 minutes its ring holds go to the cycle's before/ folder and a clip is held, written later by a partwriter process.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/control/lie_tracking.py",
+          "symbol": "LieTracking.step",
+          "text": "Seeing the alarm, the service starts the target-tracker child; on the mouse mini-game's board it sends the cursor's moves to the player as `lie_cursor` plans.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "main",
+          "text": "The re-raised alarm ends the hunting command: lab/hunt.json removed, advice printed, exit code 3 (LIE_DETECTOR_EXIT).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/lie_recorder.py",
+          "symbol": "Recording.finish",
+          "text": "The recording ends when the test has been gone a while (or at its cap); its writer thread writes summary.json.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "Watchdog._resume",
+          "text": "Off the screen 10 s with no Truth Booth seen: the player deletes the alarm file itself and takes plans again without a restart (AUTO_RESUME). A Truth Booth cycle stays locked.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "cmd_clear_alarm",
+          "text": "Otherwise a person answers the test and runs `clear-alarm`: refused (exit 3) while the recording still goes; else lab/ALARM.json is removed, and the player stops once the screen has been clear, to be started again with `player --elevate`.",
+          "process": "tools"
+        }
+      ],
+      "slices": [
+        "control-player",
+        "perception-detectors",
+        "control-nav",
+        "behavior-safety",
+        "runtime"
+      ]
+    },
+    {
+      "id": "stop-and-guard",
+      "title": "`gamelab stop`, and the guard parking her",
+      "summary": "Two ways she ends up parked on a safe place. `gamelab stop` asks the running hunt to stop through a file, cuts its keys, and the hunt parks her before it exits. Between hunts, the guard inside the pet feeder watches the service's states and starts a detached `nav --park` when she is touched or low.",
+      "trigger": "A person runs `python -m gamelab stop`; or, with no hunt running, the guard's pass sees touches, low HP or a park note.",
+      "steps": [
+        {
+          "module": "gamelab/behavior/guard.py",
+          "symbol": "stop",
+          "text": "Touches the grind loops' STOP file, finds the running hunt (lab/hunt.json), writes lab/stop_hunt.json and cuts whatever the player is playing (client.cut_running: a .cancel for every plan). With no hunt it parks her itself (nav --park), or leaves a park note if the game is not in front.",
+          "process": "tools"
+        },
+        {
+          "module": "gamelab/behavior/hunter.py",
+          "symbol": "Hunter._stop_asked",
+          "text": "At the hunt's next look or glance the request file raises StopAsked (a HuntStop that parks, exit code 9).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/retreat.py",
+          "symbol": "on_alarm",
+          "text": "Catches the HuntStop and calls away() with why_of(stop): park settings (PARK_S = 180 s, 30 tries).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/retreat.py",
+          "symbol": "park_place",
+          "text": "The safest place to park, with no time limit; Navigator.go takes her there in AVOID mode, again from wherever a knock leaves her.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/retreat.py",
+          "symbol": "told",
+          "text": "Writes lab/parked.json (where she ended up) and removes the stop request; if she is not there, lab/park_note.json is left for the guard.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/guard.py",
+          "symbol": "parked_said",
+          "text": "`stop`, waiting meanwhile (up to 300 s), reads lab/parked.json and prints how it came out.",
+          "process": "tools"
+        },
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "_guarded",
+          "text": "Between hunts the babysitter keeps `pet --every 1` running; between feeds it runs a guard pass every GUARD_S (1 s), and a pass that fails never stops the pet's care.",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/behavior/guard.py",
+          "symbol": "Pass.tick",
+          "text": "Reads lab/guard_mode.txt, turns a dead hunt's lab/hunt.json into a park note (left_behind), and reads the service's newest state: 2 touches within 30 s, HP under the stop rule on 2 passes, or a note set it off.",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/behavior/guard.py",
+          "symbol": "Guard.act",
+          "text": "Played by hand: left alone. Alert-only mode: a push. Game not in front or no player: a push, park later. Else start_park and a push, at most every 120 s and 3 times an episode.",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "_guard_pass",
+          "text": "start_park launches `nav --park --tell` detached through WMI (service._start_detached), its console appended to lab/park.log.",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "_nav_park",
+          "text": "Sends nothing if a hunt runs, the game is not in front, or no service runs; otherwise builds a hunter without throws and runs retreat.park inside on_alarm.",
+          "process": "park"
+        },
+        {
+          "module": "gamelab/behavior/retreat.py",
+          "symbol": "park",
+          "text": "away(PARK) to park_place, then told() writes lab/parked.json; with --tell the outcome goes to the phone.",
+          "process": "park"
+        }
+      ],
+      "slices": [
+        "behavior-safety",
+        "behavior-hunter",
+        "runtime"
+      ]
+    },
+    {
+      "id": "safety-stop",
+      "title": "The safety stop: low HP ends the hunt",
+      "summary": "Her HP is read exactly from the HUD's number by the perception service and watched by the hunter at every look. When it stays under her reserve, the hunt stops with SafetyStop, she retreats to a safe place, the person at the PC is paged and the command exits with code 4.",
+      "trigger": "Her HP stays under the reserve on two readings at least DEBOUNCE_S apart, or under the floor on FLOOR_LOOKS looks in a row.",
+      "steps": [
+        {
+          "module": "gamelab/localization/worldstate.py",
+          "symbol": "WorldStep._vitals",
+          "text": "When the HP box's pixels change, the HP number is read (hp_number) and an 'hp_read' event carries her HP, max HP and the HP before; a drop with no popup of hers becomes a 'touch' event too.",
+          "process": "perceive"
+        },
+        {
+          "module": "gamelab/behavior/hunter.py",
+          "symbol": "Hunter._hp_number",
+          "text": "At the next look the 'hp_read' events give her exact HP (cur, max); each drop between two reads with nothing unread between is a touch, exactly.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunter.py",
+          "symbol": "Hunter._vitals",
+          "text": "Feeds HpWatch.see with the bar's share and the exact HP; _reserve_check rebuilds the reserve when anything it is worked out from changes (the map's kinds and those seen, her level, DEF, max HP, measured touches).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/safety.py",
+          "symbol": "HpWatch.see",
+          "text": "Counts the stretch under the threshold (the reserve: touches of the map's monsters she must survive) and the looks in a row under the floor.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunter.py",
+          "symbol": "Hunter.health_check",
+          "text": "Asked at every pass of the hunt loop, trip and fight: potions and pet food first (drink_if_low), then HpWatch.due returns a SafetyStop once 2 looks under it are DEBOUNCE_S = 0.6 s apart (0.25 s when the HP number was read and her pet drinks for her), which is raised. Hunter._stop_now also raises it at any look or glance it is due at.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/retreat.py",
+          "symbol": "on_alarm",
+          "text": "Catches the HuntStop: logs 'SAFETY STOP: ...', emits a 'safety_stop' telemetry event, and calls away() with why_of(stop): STOP_S = 60 s and STOP_TRIES = 12.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/retreat.py",
+          "symbol": "choose",
+          "text": "Where to: the quickest wholly safe platform or safe rope in reach in time, else a place 'safe enough', else the safest she gets to.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator.go",
+          "text": "A moves-only navigator in AVOID mode takes her there, waiting at refuges while monsters are in the way, retried from wherever a knock leaves her.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/retreat.py",
+          "symbol": "told",
+          "text": "Writes lab/parked.json; then control.alarm.page pages the PC with the stop's title and line, after her moves.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "main",
+          "text": "The re-raised stop ends the command: it prints the stop's `after` and `advice` (check potions and the pet) and exits with SafetyStop.exit_code (EXIT = 4).",
+          "process": "hunt"
+        }
+      ],
+      "slices": [
+        "localization-feed",
+        "behavior-hunter",
+        "behavior-safety",
+        "control-nav",
+        "runtime"
+      ]
+    },
+    {
+      "id": "pet-feeder",
+      "title": "The pet feeder between hunts",
+      "summary": "Her pet drinks her potions for her, but only while it is fed. Between hunts the babysitter keeps `pet --every 1` running: it follows the pet's fullness in time, reads it off the Character Info window with OCR when it must, and taps the pet food key. The pet food plan is one of the few the key player takes even with the Lie Detector alarm up.",
+      "trigger": "The babysitter starts `python -m gamelab pet --every 1 --map <id>` because no hunting command runs.",
+      "steps": [
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "cmd_pet",
+          "text": "Waits for the game window, builds a hunter without throws (its client of the perception service; PetWait while the client is a wrong size), the guard's pass, and records telemetry as 'pet'.",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "_pet_keys",
+          "text": "Before each follow: her keys as the game's Key Bindings were last read (control.keymap), so a pet food key moved in game is followed.",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/behavior/pet.py",
+          "symbol": "PetCare.tend",
+          "text": "Follows the fullness in time (follow: HUNGRY = 1 point per TICK_S = 55 s while the game is there). Never read yet, it is read first; under FOLLOW_FEED_BELOW = 60, a food is given.",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/behavior/pet.py",
+          "symbol": "PetCare.check",
+          "text": "When a read is due (not with the alarm up: it double-clicks her): opens her Character Info, reads FULLNESS, feeds while low (FEED_BELOW = 70, up to MAX_FEEDS = 3), closes the window.",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/behavior/pet.py",
+          "symbol": "read_panel",
+          "text": "maplehelper.ocr's engine reads the middle of a capture; the FULLNESS field, LEVEL and the name column are picked out of its rows.",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/control/actions.py",
+          "symbol": "Actions.feed_pet",
+          "text": "Waits for the lock and plays one tap of the pet food key as a plan of kind PET_FOOD.",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/control/client.py",
+          "symbol": "send",
+          "text": "A plan with a kind goes out even with the Lie Detector alarm up; the player decides.",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "alarm_refusal",
+          "text": "With the alarm up, a pet_food plan must be one tap of her pet food key and nothing else, over within TAP_MAX_MS, at most PET_FOOD_PER_MIN = 3 a minute.",
+          "process": "player"
+        },
+        {
+          "module": "gamelab/behavior/pet.py",
+          "symbol": "_save",
+          "text": "The followed level, when it was fed and checked go to her pet file (lab/pet.json for the thief).",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "_guarded",
+          "text": "The `--every` minutes until the next follow are spent in guard passes, one a second.",
+          "process": "pet"
+        },
+        {
+          "module": "gamelab/behavior/hunter.py",
+          "symbol": "Hunter.feed_pet_if_due",
+          "text": "During a hunt the hunter does the same at its health checks (PetCare.tend, a read only with no monster near); the babysitter stops the pet feeder while a hunt runs.",
+          "process": "hunt"
+        }
+      ],
+      "slices": [
+        "runtime",
+        "behavior-safety",
+        "control-nav",
+        "control-player",
+        "behavior-hunter"
+      ]
+    },
+    {
+      "id": "sim-scenario",
+      "title": "A simulator scenario run, checked against its golden trace",
+      "summary": "The real stack (hunter, hunt loop, navigator, perception's world step) runs unchanged against World, a tick-by-tick simulation of the game on a real map. A fake clock, fake eyes and a fake key player stand in at gamelab's own seams; the run's trace is compared with a recorded golden trace, and the harness runs many seeded worlds the same way.",
+      "trigger": "A developer runs `python -m gamelab.sim.golden check` (or pytest's test_sim, or the harness's `ab`).",
+      "steps": [
+        {
+          "module": "gamelab/sim/golden.py",
+          "symbol": "main",
+          "text": "Refuses a non-thief character and restarts itself with PYTHONHASHSEED=0 and fixed stats, so every run orders sets the same way and uses measured stats.",
+          "process": "golden (python -m gamelab.sim.golden; offline)"
+        },
+        {
+          "module": "gamelab/sim/golden.py",
+          "symbol": "run_one",
+          "text": "Scenarios run one after another here, or with --jobs on a process pool, longest first (golden.ran). Each: scenarios.run(name), then scenarios.unmet on the trace.",
+          "process": "golden (a pool worker with --jobs)"
+        },
+        {
+          "module": "gamelab/sim/scenarios.py",
+          "symbol": "run_sim",
+          "text": "Loads the scenario's real map and opens `with Sim(model, sc)`; runs the scenario's function; an expected failure (she died, the time limit, a refused plan, a HuntStop) becomes the result.",
+          "process": "golden (a pool worker with --jobs)"
+        },
+        {
+          "module": "gamelab/sim/scenarios.py",
+          "symbol": "Sim.__init__",
+          "text": "Builds the fake Clock, the World (her keys, start, seed, monsters, noise), FakeEyes, the Trace, FakePlayer, and a SyncFeed: a WorldStep on its own FakeEyes, ticked by the clock at every game frame.",
+          "process": "golden (a pool worker with --jobs)"
+        },
+        {
+          "module": "gamelab/sim/fakes.py",
+          "symbol": "patched",
+          "text": "Inside the `with`: time is the fake clock, client.submit/send are FakePlayer's, every gamelab/lab path points at a temp folder, and anything reaching the game or writing under the real lab raises SimViolation.",
+          "process": "golden (a pool worker with --jobs)"
+        },
+        {
+          "module": "gamelab/sim/scenarios.py",
+          "symbol": "Sim.hunter",
+          "text": "Builds the Hunter as __main__._hunter would, on FakeEyes and the SyncFeed, with seeded jitter, a fake pet and every Actions.play guarded.",
+          "process": "golden (a pool worker with --jobs)"
+        },
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt.run",
+          "text": "A loop scenario runs the unchanged hunt loop (or a navigator trip, a tour, a retreat).",
+          "process": "golden (a pool worker with --jobs)"
+        },
+        {
+          "module": "gamelab/sim/fakes.py",
+          "symbol": "FakePlayer.send",
+          "text": "Every key plan: validated with the real player's rules (control.player.validate), recorded in the Trace, and scheduled to start after the plans before it.",
+          "process": "golden (a pool worker with --jobs)"
+        },
+        {
+          "module": "gamelab/sim/fakes.py",
+          "symbol": "FakePlayer._schedule",
+          "text": "Pushes each event onto the world at its time (World.key), applying the Lie Detector cutoff if the scenario set one (alarm_at).",
+          "process": "golden (a pool worker with --jobs)"
+        },
+        {
+          "module": "gamelab/sim/fakes.py",
+          "symbol": "Clock.advance_to",
+          "text": "Fake time moves only when the stack sleeps or waits; each frame time passed ticks the SyncFeed, whose WorldStep looks through FakeEyes.observe.",
+          "process": "golden (a pool worker with --jobs)"
+        },
+        {
+          "module": "gamelab/sim/world.py",
+          "symbol": "World.advance",
+          "text": "Runs the world in 5 ms ticks (TICK_MS) up to the clock: due key events handled (_handle: moves, attacks with the 730 ms lock, aiming, damage, kills and EXP), her body on the ground, in the air or climbing, and monster touches.",
+          "process": "golden (a pool worker with --jobs)"
+        },
+        {
+          "module": "gamelab/sim/fakes.py",
+          "symbol": "FakeEyes.observe",
+          "text": "Draws the screen as the world now stands (her place, monsters, drops, HUD boxes, popups) into an Observation, so the real WorldStep reads it as it would a frame.",
+          "process": "golden (a pool worker with --jobs)"
+        },
+        {
+          "module": "gamelab/sim/scenarios.py",
+          "symbol": "unmet",
+          "text": "The trace (plans, cancels, splices, log, world summary, files written) is checked against what the scenario says it shows; she must end alive and on the map unless it may die.",
+          "process": "golden (a pool worker with --jobs)"
+        },
+        {
+          "module": "gamelab/sim/golden.py",
+          "symbol": "check",
+          "text": "Each new trace, through JSON, is compared with its recorded one in gamelab/lab/golden: ok, DIFFERS with the first differing item of each part (diff), or MISSING.",
+          "process": "golden (python -m gamelab.sim.golden; offline)"
+        },
+        {
+          "module": "gamelab/sim/harness.py",
+          "symbol": "run_one",
+          "text": "The harness runs the same run_sim on seeded hunts and reads outcomes from the captured telemetry; `ab` compares a branch with master's cached baseline seed by seed (difference).",
+          "process": "harness (python -m gamelab.sim.harness; offline)"
+        }
+      ],
+      "slices": [
+        "sim-harness",
+        "sim-world",
+        "behavior-loops"
+      ]
+    },
+    {
+      "id": "web-minimap",
+      "title": "The live web mini-map: telemetry to a phone",
+      "summary": "Every process that hunts or perceives writes JSON-lines telemetry. The mini-map process only reads it: it follows the newest files, folds the records into a State, and pushes them to each open web page over Server-Sent Events; the phone draws the map itself on a canvas.",
+      "trigger": "A hunting command or the perception service emits a record while `python -m gamelab minimap` (or `web`) runs and a page is open.",
+      "steps": [
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "_record",
+          "text": "At a command's start telemetry.record_to opens lab/telemetry/<YYYYmmdd-HHMMSS>-<name>.jsonl and a 'session' record is written (the perception service opens its own '-perceive' file).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/behavior/hunter.py",
+          "symbol": "Hunter._publish",
+          "text": "After every look: a 'scene' record (her place, facing, the monsters, the frame's age and seq) and a 'drops' record; the hunt loop adds 'monsters', rules, routes and chains.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/telemetry.py",
+          "symbol": "emit",
+          "text": "Builds {t, topic, ...} and hands it to the installed Recorder; with none installed it does nothing.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/telemetry.py",
+          "symbol": "Recorder.__call__",
+          "text": "Serializes the record compactly and queues it (past QUEUE_LINES = 50,000 waiting it is dropped and counted).",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/telemetry.py",
+          "symbol": "Recorder._run",
+          "text": "The writer thread writes what is waiting every FLUSH_S (0.2 s) and flushes; past 64 MiB a new part starts.",
+          "process": "hunt"
+        },
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "cmd_minimap",
+          "text": "Builds a web.Feed on a LiveSource (or a replay) and starts the HTTP server; the tkinter window follows the same telemetry.",
+          "process": "minimap"
+        },
+        {
+          "module": "gamelab/ui/web.py",
+          "symbol": "Feed.step",
+          "text": "The Feed's thread polls its source every POLL_S (25 ms).",
+          "process": "minimap"
+        },
+        {
+          "module": "gamelab/ui/sources.py",
+          "symbol": "LiveSource.poll",
+          "text": "Reads what was appended to the newest command's file and the service's file; while the service's file is live (PERCEIVE_LIVE_S = 3 s) the screen's topics (scene, tracks, exp) come from it.",
+          "process": "minimap"
+        },
+        {
+          "module": "gamelab/ui/web.py",
+          "symbol": "Feed._apply",
+          "text": "Under the lock: each record folded into the UI State (State.apply), appended to the ring with the next seq, and every waiting stream notified.",
+          "process": "minimap"
+        },
+        {
+          "module": "gamelab/ui/state.py",
+          "symbol": "State.apply",
+          "text": "Keeps the latest record per topic, her trail and the log.",
+          "process": "minimap"
+        },
+        {
+          "module": "gamelab/ui/web.py",
+          "symbol": "Feed.updates",
+          "text": "Each stream's thread takes the records after its cursor, drops ones a later record of the same topic replaces, adds text changes at most every STATUS_EVERY_S, or sends a snapshot if it fell behind.",
+          "process": "minimap"
+        },
+        {
+          "module": "gamelab/ui/web.py",
+          "symbol": "_Handler._stream",
+          "text": "/events writes each SSE message in one write; a ping after 5 s of quiet. The page can be reached on the LAN or through the Cloudflare tunnel.",
+          "process": "minimap"
+        },
+        {
+          "module": "gamelab/ui/web.py",
+          "symbol": "update",
+          "text": "In the browser: the page sets its clock from now and rate and applies each record to its copy of the State.",
+          "process": "browser"
+        },
+        {
+          "module": "gamelab/ui/web.py",
+          "symbol": "frame",
+          "text": "On each animation frame the canvas is redrawn if anything moved, her position interpolated between her recorded positions.",
+          "process": "browser"
+        }
+      ],
+      "slices": [
+        "runtime",
+        "behavior-hunter",
+        "shared",
+        "ui"
+      ]
+    },
+    {
+      "id": "combo-hotkey",
+      "title": "The original maplehelper: a hotkey becomes a combo",
+      "summary": "maplehelper, the one-button combo helper gamelab grew from, works inside one process: a low-level keyboard hook swallows a hotkey, a runner thread plays the combo's script with SendInput, and an on-screen coach shows each step. gamelab reuses its key names, SendInput wrapper, config loader and combo engine.",
+      "trigger": "A person presses a hotkey from config.toml [hotkeys] (for example F4, jump_back_shot) with the game focused while `python -m maplehelper` runs.",
+      "steps": [
+        {
+          "module": "maplehelper/app.py",
+          "symbol": "main",
+          "text": "Loads config.toml (her keys as gamelab last read them unless --config-keys), builds the Coach, the Runner over win32.send_key, the Controller and the KeyboardHook, then runs the coach's Tk loop.",
+          "process": "maplehelper (python -m maplehelper)"
+        },
+        {
+          "module": "maplehelper/hook.py",
+          "symbol": "KeyboardHook._callback",
+          "text": "Windows calls the low-level hook on its thread. Events tagged INJECTED_TAG (the helper's own) are skipped; the rest go to Controller.on_key. Returning 1 hides the key from the game.",
+          "process": "maplehelper (python -m maplehelper)"
+        },
+        {
+          "module": "maplehelper/controller.py",
+          "symbol": "Controller.on_key",
+          "text": "Only when the focused window's title contains the game's: arrows note her facing, Esc aborts, F12 toggles slow mode, and a hotkey is swallowed (its key-up too) and its combo triggered.",
+          "process": "maplehelper (python -m maplehelper)"
+        },
+        {
+          "module": "maplehelper/engine.py",
+          "symbol": "Runner.trigger",
+          "text": "Idle: STARTED and queued for the runner thread. Busy: QUEUED if the running combo ends within the buffer window (the newest press wins), else DROPPED.",
+          "process": "maplehelper (python -m maplehelper)"
+        },
+        {
+          "module": "maplehelper/engine.py",
+          "symbol": "Runner._run",
+          "text": "On the runner thread: both arrows released, the combo's length worked out by a dry run, a Ctx built with front and back from her facing, and the script run.",
+          "process": "maplehelper (python -m maplehelper)"
+        },
+        {
+          "module": "maplehelper/combos.py",
+          "symbol": "jump_back_shot",
+          "text": "The script: hold the away arrow, jump, keep pushing through takeoff, release, hold the front arrow, throw in the air, wait. Each `say` is a step for the coach.",
+          "process": "maplehelper (python -m maplehelper)"
+        },
+        {
+          "module": "maplehelper/engine.py",
+          "symbol": "Ctx.down",
+          "text": "Each key goes through the Ctx's sender, which is win32.send_key.",
+          "process": "maplehelper (python -m maplehelper)"
+        },
+        {
+          "module": "maplehelper/win32.py",
+          "symbol": "send_key",
+          "text": "One SendInput keyboard event by scan code, tagged 0x4D484C50 ('MHLP') so the hook ignores it.",
+          "process": "maplehelper (python -m maplehelper)"
+        },
+        {
+          "module": "maplehelper/coach.py",
+          "symbol": "Coach._poll",
+          "text": "The Tk thread drains the step queue every 30 ms (POLL_MS) and shows each step; at the end the recipe lingers.",
+          "process": "maplehelper (python -m maplehelper)"
+        },
+        {
+          "module": "maplehelper/engine.py",
+          "symbol": "Runner._work",
+          "text": "When the combo ends (`finally` released every held key), a press buffered in its last moments starts next.",
+          "process": "maplehelper (python -m maplehelper)"
+        }
+      ],
+      "slices": [
+        "foundation"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,3039 @@
+{
+ "id": "localization-feed",
+ "layer": "localization",
+ "title": "Localization: the perception service, the continuous feed, tracking and memory",
+ "tagline": "One always-on process sees every frame; commands read its states and keep beliefs.",
+ "summary": "The perception service is a long-running process that looks at the game 15 times a second and turns each frame into a WorldState: her place and HUD, every monster on screen matched to a numbered track, the drops, and events such as deaths (with who killed them), EXP gains and touches. Commands attach over a named pipe and copy frames from shared memory; the simulator runs the same step in-process (SyncFeed). In each command, passive beliefs keep what one frame can't: Memory (monsters seen anywhere), Aggro (who she hurt and is chasing her) and the SpawnClock (when the server refills the map).",
+ "details_md": "This slice is the *continuous* side of localization: the game is looked at all the time, by one process, and every\ncommand reads the latest of what it saw. It answers \"what is on screen right now, and what just happened?\" and keeps a\nfew beliefs that one frame can't hold.\n\n### Two kinds of process\n\n```\n perception service: python -m gamelab perceive          each command: hunt, nav, tour, pet, watch, hunt look ...\n (one per PC, never sends a key)                         (any number, attach and detach as they start and end)\n +--------------------------------------------+          +------------------------------------------------+\n | ScreenFrames -> feed.run, 15 frames/s      |  state   | ServiceClient (a Feed) on its own thread       |\n |   WorldStep.step (worldstate.py)           | -------> |   keeps the 8 newest states, queues events     |\n |     her look  ||  whole-screen search      |  pipe    | Senses.look -> Feed.look -> to_scene -> Scene  |\n |     ExpMeter (gains.py) -> MonsterTracker  | <------- |   listeners: Memory, SpawnClock, Aggro, ...    |\n |     drops, deaths, touches                 | ask,     |                                                |\n | Ring in shared memory: 16 look frames,     | throw,   | frame_of: copy a look frame out by slot + seq  |\n |   2 full-size frames      ----------------------------> full_frame: copy a full-size one              |\n +--------------------------------------------+          +------------------------------------------------+\n```\n\nThe **perception service** (`service.py`) is a long-running process started by `python -m gamelab perceive` (or by a\nclient's `ensure`, or the babysitter). One runs per PC (a named mutex). It owns the PC's only screen capture\n(`ScreenFrames`), runs the frame loop (`feed.run`) and, once a frame, the world step (`worldstate.WorldStep.step`).\nIt never presses a key and never brings the game to the front.\n\nEach **command** talks to it through a `ServiceClient`, which is a `feed.Feed`: the interface `Senses` reads every\nlook and glance from. In the simulator it is `SyncFeed` (the same step, in-process, on the fake clock); on saved frames\nand in unit tests, `InlineFeed`.\n\n### What crosses the boundary\n\n| direction | message | what it carries |\n|---|---|---|\n| command to service | `hello` | its name, pid, whether it sends keys (`acts`), tells her throws (`throws`), hunts (`fast`), its map |\n| command to service | `ask` | an `Asks`: a frame shown at `after` or later, and the drops wanted searched on it |\n| command to service | `throw` | her throw's key time and side, optionally her attack's id and the monster it was aimed at |\n| command to service | `full`, `status`, `bye` | a full-size frame request; the service's status; leaving |\n| service to command | `welcome`, `epoch` | the run's number, map, the next map, the rings' shared-memory names and shapes |\n| service to command | `state` | one `WorldState` per frame, its picture removed (its ring `slot` set instead), pickled once |\n| service to command | `full`, `gap`, `refused`, `status` | a full frame's slot; how many states a slow reader lost; why it was refused |\n\nPictures never go down the pipe: the look frames sit in a shared-memory `Ring` (16 slots, about 1.07 s at 15 frames a\nsecond) and a command copies one out by slot and frame number.\n\n### One pass a frame\n\nSince 2026-10-30 everything is read once a frame at 15 frames a second (`localization.rate.HZ`; the user: \"I meant\neverything at 15 fps\"). A pass does her look and the whole screen's search at once on two threads, places her,\nreads her EXP, HP and touches, looks for newborns fading in at spawn points, matches every detection to a numbered\ntrack (`tracking.MonsterTracker`), reads HP bars where due, looks for deaths, and searches drops (what was asked, plus\none strip by rotation). A command's ask never gets a frame of its own; it rides on the next frame due.\n\n### Who killed what\n\nThe game never says which monster died. Her EXP number goes up 0.1-0.6 s after her attack key while the victim is\nstill drawn alive. `gains.ExpMeter` turns the number's change into kills by kind (each kind's EXP per kill is the game\ndata's), and the tracker binds each kill to the track her attack took, follows it until its death is seen or it is\ngone, and lets go if it turns up alive. A monster hidden past 3.5 s with no gain of hers on it is someone else's\nkill, or let go without a death (lost beside one of its kind, or no other player by it).\n\n### Beliefs kept across looks (in the command)\n\nThree passive listeners run after each look in the command process, fed by the look's `Scene` and events:\n`memory.Memory` (every monster seen anywhere, with a probability it's still there), `aggro.Aggro` (who she hurt and\nis chasing her for 3-4 minutes) and `spawnclock.SpawnClock` (the server's spawn pass every 7.1146 s, learned from\nnewborns). They change nothing by themselves; the hunt, the navigator, targeting and the spawn guard ask them.\n\n### Words used here\n\n- **frame**: one capture of the game window. **look**: what a command asks the feed for before it decides\n  (`Senses.look`, localization/senses.py); its answer is a **Scene**, that frame placed on the map. A **glance** waits\n  for the next state and asks for nothing.\n- **track**: one monster followed frame to frame under a number, per **run** (`epoch`): a new map or a restarted\n  service starts a run with new rings and new numbers.\n- **Shape**: her character's attack reach and timing windows (gamelab/character.py), the thief's by default.",
+ "groups": [
+  {
+   "id": "service",
+   "title": "The perception service process",
+   "summary": "The always-on process that owns the screen capture, and the client every command uses to reach it.",
+   "modules": [
+    "gamelab/localization/service.py"
+   ]
+  },
+  {
+   "id": "feed",
+   "title": "The feed: frames to looks",
+   "summary": "The frame loop, the Feed interface Senses reads, the shared-memory frame ring, and the simulator's in-process feed.",
+   "modules": [
+    "gamelab/localization/feed.py"
+   ]
+  },
+  {
+   "id": "pass",
+   "title": "One frame's pass",
+   "summary": "What the service does with each frame: the WorldState it builds, and how her EXP number's changes become kills.",
+   "modules": [
+    "gamelab/localization/worldstate.py",
+    "gamelab/localization/gains.py"
+   ]
+  },
+  {
+   "id": "tracking",
+   "title": "Tracks, deaths and kill credit",
+   "summary": "Monster ids kept frame to frame, and the decision of which monster each of her EXP gains killed.",
+   "modules": [
+    "gamelab/localization/tracking.py"
+   ]
+  },
+  {
+   "id": "beliefs",
+   "title": "Beliefs kept across looks",
+   "summary": "Passive listeners in the command process: monsters seen anywhere, monsters chasing her, and the server's spawn pass.",
+   "modules": [
+    "gamelab/localization/memory.py",
+    "gamelab/localization/aggro.py",
+    "gamelab/localization/spawnclock.py"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "path": "gamelab/localization/service.py",
+   "title": "Perception service",
+   "tagline": "The always-on process that perceives every frame and serves states to commands.",
+   "summary": "Both sides of the perception service. `Service` is the process started by `python -m gamelab perceive` (one per PC, a named mutex) that runs the frame loop on the screen and pushes each frame's WorldState to every attached command over a named pipe, its frames in shared memory. `ServiceClient` is a command's side: a `Feed` that Senses reads, which connects, reconnects and starts the service when none runs. `Publisher` and `Perf` write its telemetry and console line.",
+   "details_md": "**Why one process.** On 2026-10-25 the user asked that \"perception should just always run and the other modules just\nwork based on latest perception result\", via \"one shared perception process at all times\". Before, each command had its\nown feed child and its own screen duplication (a third DXGI duplication failed with 0x887A0022). Now `ScreenFrames` is\nmade only here (tests/test_architecture.py checks), and the service never sends a key.\n\n**Threads in the service process.** The main thread runs the frame loop (`Service.serve` calling `feed.run`).\n`perceive-accept` takes new pipe connections. Each client gets a `perceive-reader-<id>` thread (its requests) and a\n`perceive-writer-<id>` thread (`Writer`, its states). `perceive-watchdog` ends the process with exit code 3 when the\nloop hasn't gone round for `STUCK_S` (10 s; 60 s while a run is built), so a client's `ensure` or the babysitter starts\nanother. The world step adds its own `wide` search thread.\n\n**Runs (`epoch`).** `_build` makes a `feed.Runner` for the map (`screen_world`: ScreenFrames on the process's one\nDXGI duplication, Eyes with the map's monster templates and minimap picture, Senses with her Shape, a WorldStep) and two\nnew shared-memory rings, then tells every client (`epoch`). A run starts when the game is first seen or the map\nchanges. The map is *held* by commands that hunt (`Hello.fast`): a second hunting command on another map is refused,\nsaying why. A viewer or `pet` moves it only while no hunt holds it (`_hello`, and `_follow` when a client leaves).\n\n**Asks.** Clients don't get frames of their own. `_read` puts each `ask`, `throw` and `full` in the frame loop's inbox;\n`_poll` merges asks while waiting for the next frame due (mesos only if every asker wanted only mesos). A `full` ask is\nanswered from the next frame, copied into the full ring (`_answer_fulls`); while the window is a size Alt+Enter mends,\nan any-size ask gets the client's picture down the pipe (`glimpse`).\n\n**Sending without blocking.** `_emit` puts the frame in the ring, hands it to the rolling recording and the Lie\nDetector tracker by reference, pickles the state once (picture removed) and queues it to every `Writer`. A writer keeps\nat most `QUEUE_KEEP` (64, 4.3 s) states, dropping the oldest and sending a `gap` count. Measured before it was built:\na state reaches a client 0.13-0.25 ms after it goes; a frame copies out of the ring in 1-1.6 ms; a client that never\nread held the frame loop up 10.5 s with the writes in the loop, never with a writer thread per client.\n\n**No game.** With no window, a minimized one, or a client size other than 1366x768 or 1920x1080 (`window_geometry`),\n`_not_visible` sends a state every 0.25 s saying why, and keeps waiting `full` asks.\n\n**The command's side (`ServiceClient`).** A `perceive-client` thread reads the pipe address and authkey from\n`lab/perceive.json`, connects, sends `hello`, then loops on `recv` (`_take`). Silent for `SILENT_S` (10 s), it drops\nand reconnects every `RECONNECT_S` (0.5 s); while it can't, it calls `ensure`, which starts `python -m gamelab perceive`\ndetached through WMI (PowerShell `Win32_Process.Create`) at most every `ENSURE_EVERY_S` (10 s), its console in\n`lab/perceive.log`. `latest(want)` returns the newest kept state that's `feed.fresh` for the look, sending one `ask`\nand waiting up to 0.6 s if none is. States of an older run are dropped; a command that sends keys is handed states only\nonce the service looks at its map (`on_map`). `frame_of` copies the look frame out of the ring; one already\noverwritten comes back black and is counted (`lost`). `bring_forward` (commands that send keys only) brings the game\nwindow to the front at most once a second.\n\n**Telemetry.** `Publisher` writes what `watch` used to: a `scene` every 0.1 s, `tracks` every 0.5 s, an `event` for\ndeaths, gains, victims, let-gos, HP and level reads and touches, an `exp` record per gain; `Perf` times each pass for a\n`perf` record and the console line every 10 s.\n\n**Saved frames.** `perceive --frames DIR` builds its runs with `feed.saved_world` (each PNG `--hold` frames in a row,\nround and round) at its own pipe, mutex and `lab/perceive-saved.json`, with no telemetry, recording or Lie Detector\ntracking; a command reaches it only with `GAMELAB_PERCEIVE=saved`. `serve_saved` is the same as a child process's\ntarget (sim.soak, offline measurements).",
+   "lines": 1493,
+   "key_items": [
+    {
+     "name": "Service",
+     "kind": "class",
+     "line": 404,
+     "signature": "Service(make, map_id, geometry, *, address=ADDRESS, authkey=None, info=None, log=print, publish=None, hz=HZ, stuck_s=None, glimpse=None, recording=None, lie_tracking=None)",
+     "summary": "The service process: its clients, its run (Runner, rings, epoch), its inbox of asks, and the frame loop. `make(map_id, geo)` builds what it looks with: screen_world live, feed.saved_world offline.",
+     "details_md": "`clients` maps an id to `_Client` (its pipe, `Writer`, `Hello`). `_inbox` holds (client, message) pairs for the frame loop; `_fulls` the full-frame requests waiting for a frame. `counts` keeps connected, states, dropped, fulls, epochs and refused for `status`."
+    },
+    {
+     "name": "Service.serve",
+     "kind": "method",
+     "line": 587,
+     "signature": "def serve(self, until: float | None = None) -> None",
+     "summary": "The main loop: opens the pipe (`listen`), starts the watchdog, the recording and the Lie Detector tracker, then builds a run when needed and runs feed.run on it until stopped.",
+     "details_md": "When `_build` fails (no game window) it calls `_not_visible` and loops. `feed.run` returns when `_poll` says stop or a rebuild is due (a new map), and the loop builds the next run."
+    },
+    {
+     "name": "Service._hello",
+     "kind": "method",
+     "line": 495,
+     "signature": "def _hello(self, c: _Client, hello: Hello) -> None",
+     "summary": "A client's `hello`: welcomed with the run's ring names, or refused when it hunts (`fast`) on another map than the one a hunting command holds. Any client naming another map moves the service there (a new run) while no hunting command holds the current one.",
+     "details_md": "Viewers and `pet` never get refused: they move the map only while no hunting command holds it. `_follow` re-decides when a client leaves: the newest acting command's map wins."
+    },
+    {
+     "name": "Service._build",
+     "kind": "method",
+     "line": 644,
+     "signature": "def _build(self) -> bool",
+     "summary": "A new run: the map's Runner on the window's geometry, a new look Ring (RING_SLOTS) and full Ring (FULL_SLOTS), `epoch` + 1 broadcast to every client, the old run's rings unlinked.",
+     "details_md": "False while the window can't be read. If the map's minimap picture won't load, the run before goes on. Ends with `gcstats.freeze`: everything loaded so far is left alone by the garbage collector."
+    },
+    {
+     "name": "Service._poll",
+     "kind": "method",
+     "line": 725,
+     "signature": "def _poll(self, wait: float) -> tuple[Asks | None, bool]",
+     "summary": "feed.run's `poll`: drains the inbox (asks merged by `_take`, throws told to the step, full asks kept), waiting up to `wait` s; says stop when asked to or a new run is due.",
+     "details_md": "`_take` merges asks with `Asks.merge`, keeping `mesos_only` only if every asker wanted only mesos; a `throw` goes straight to `WorldStep.throw`; a `full` ask also becomes an Asks for its time."
+    },
+    {
+     "name": "Service._emit",
+     "kind": "method",
+     "line": 796,
+     "signature": "def _emit(self, st: WorldState, frame) -> None",
+     "summary": "feed.run's `emit`: the frame into the ring (its slot in the state), the frame to the recording and Lie Detector tracking by reference, the state without its picture pickled once and queued to every client, then published.",
+     "details_md": "`_send_state` does the pickling and queuing; the Publisher sees the full state (with picture)."
+    },
+    {
+     "name": "Service._answer_fulls",
+     "kind": "method",
+     "line": 767,
+     "signature": "def _answer_fulls(self, frame, st: WorldState | None) -> None",
+     "summary": "Answers waiting `full` asks: with this frame copied into the full ring, or with why there's none; an any-size ask while the window needs Alt+Enter gets the client's picture down the pipe (`glimpse`)."
+    },
+    {
+     "name": "Service._watchdog",
+     "kind": "method",
+     "line": 627,
+     "signature": "def _watchdog(self) -> None",
+     "summary": "Ends the process (os._exit(EXIT_STUCK), code 3) once the frame loop hasn't gone round for STUCK_S (BUILD_STUCK_S while building a run), flushing telemetry first, so another service is started.",
+     "details_md": "Before it, a hung loop with its pipe up was noticed by nobody: every look found nothing to act on and a hunt stood still to its end."
+    },
+    {
+     "name": "Writer",
+     "kind": "class",
+     "line": 334,
+     "signature": "Writer(conn, keep: int = QUEUE_KEEP, name: str = 'perceive-writer')",
+     "summary": "A client's pipe written by a thread of its own from a queue of at most QUEUE_KEEP states; older ones are dropped and a `gap` count is sent, so a client that doesn't read never holds anything up.",
+     "details_md": "Messages for this client alone (welcome, epoch, full answers: `put(..., keep=True)`) are never dropped and go first. A pipe's buffer is 8 KB and a write waits until it's read."
+    },
+    {
+     "name": "ServiceClient",
+     "kind": "class",
+     "line": 1147,
+     "signature": "ServiceClient(name, *, acts=False, throws=False, fast=None, map_id=None, title='', address=None, info=None, ensure=ensure, log=print, start=True)",
+     "summary": "The service from a command's side: a feed.Feed that Senses reads. A `perceive-client` thread connects, sends `hello`, takes states, events, welcomes and answers; reconnects and starts the service when needed.",
+     "details_md": "Keeps the 8 newest states (`KEEP`) and up to EVENTS_KEPT events for the next drain; counts `gaps`, `stale` (older run), `lost` (ring frame overwritten), `served`, `refused`."
+    },
+    {
+     "name": "ServiceClient.latest",
+     "kind": "method",
+     "line": 1349,
+     "signature": "def latest(self, want: Asks, timeout: float = feed.FEED_WAIT_S, ask: bool = True) -> WorldState | None",
+     "summary": "The newest kept state fresh for the look (feed.fresh); if none, sends one `ask` (feed.to_ask) and waits up to FEED_WAIT_S. Returns None at once when the newest state, shown at or after the look's time, isn't usable (the game not wholly on screen, or a failed check)."
+    },
+    {
+     "name": "ServiceClient.on_map",
+     "kind": "method",
+     "line": 1340,
+     "signature": "def on_map(self) -> bool",
+     "summary": "Whether the states handed out are of this command's map: a command that acts on a map gets only states of the service's run on it (and its events only then)."
+    },
+    {
+     "name": "ServiceClient.frame_of",
+     "kind": "method",
+     "line": 1399,
+     "signature": "def frame_of(self, st: WorldState) -> np.ndarray",
+     "summary": "The state's look frame copied out of the shared ring by slot and frame number; black (counted in `lost`) if the ring has overwritten it since."
+    },
+    {
+     "name": "ensure",
+     "kind": "function",
+     "line": 209,
+     "signature": "def ensure(map_id: int | None = None, log: Callable[[str], None] = print) -> bool",
+     "summary": "Starts `python -m gamelab perceive` (this checkout, console to lab/perceive.log) unless one runs, at most every ENSURE_EVERY_S, detached through WMI so it outlives the command that started it.",
+     "details_md": "Nothing is started for the saved-frames service (GAMELAB_PERCEIVE=saved). The command line carries the character named by the environment and OPENBLAS_NUM_THREADS=1."
+    },
+    {
+     "name": "Publisher",
+     "kind": "class",
+     "line": 1001,
+     "signature": "Publisher(band: tuple[float, float], log=print)",
+     "summary": "The service's telemetry, as `watch` published it: `session` at a run's start, `scene` every SCENE_S, `tracks` every TRACKS_S, an `event` per death/gain/victim/let-go/HP and level read/touch, an `exp` per gain, and the console line with `Perf`'s 'perf' record every STATUS_S.",
+     "details_md": "`Perf` gathers each pass's time (median, p90, p99, max), her look's and the whole screen's in it, detections and tracks a frame, newborns and exact finds a minute, the state's age as it goes out, and the process's cores."
+    }
+   ],
+   "inputs": [
+    "Game frames from perception.frames.ScreenFrames (the PC's one DXGI duplication), or saved PNGs offline",
+    "Each client's messages over the named pipe: hello, ask, throw, full, status, bye",
+    "The map to look at: `perceive --map`, then the map of the commands that hunt",
+    "The game window's geometry (window.find_game and its client size)"
+   ],
+   "outputs": [
+    "A WorldState per frame (picture removed) pickled down the pipe to every attached command",
+    "Look frames in a shared-memory Ring (16 slots) and full-size frames in another (2 slots)",
+    "Telemetry records (session, scene, tracks, event, exp, perf) into the run's lab/telemetry/<time>-perceive.jsonl",
+    "Its frames, by reference, to control.recording (the rolling recording) and to the Lie Detector tracking that `perceive` hands it (control.lie_tracking together with control.violetta_live's Violetta answers)",
+    "A console line every 10 s: frames a second, who's attached, monsters followed, deaths, EXP a minute, the pass's time"
+   ],
+   "uses": [
+    "gamelab/localization/feed.py",
+    "gamelab/localization/worldstate.py",
+    "gamelab/localization/tracking.py",
+    "gamelab/localization/senses.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/perception/eyes.py",
+    "gamelab/perception/frames.py",
+    "gamelab/perception/sprites.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/character.py",
+    "gamelab/gcstats.py",
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/window.py",
+    "gamelab/screen.py",
+    "gamelab/native.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/perceive.json",
+     "mode": "read-write",
+     "what": "written by the service (pid, pipe address, authkey in hex, start time, map, character); read by every client to connect"
+    },
+    {
+     "path": "lab/perceive-saved.json",
+     "mode": "read-write",
+     "what": "the same for the service on saved frames (`perceive --frames`)"
+    },
+    {
+     "path": "lab/perceive.log",
+     "mode": "write",
+     "what": "the console of a service started by `ensure`"
+    },
+    {
+     "path": "lab/telemetry/<time>-perceive.jsonl",
+     "mode": "write",
+     "what": "the service's telemetry (opened by `perceive` in gamelab/__main__.py, written through Publisher)"
+    }
+   ],
+   "concurrency": "A process of its own (`python -m gamelab perceive`), one per PC (named mutex `Local\\gamelab-perceive`), normal priority, OpenCV on one thread, Windows timers at 1 ms (`settle`). Threads: the frame loop (main), `perceive-accept`, a reader and a writer per client, `perceive-watchdog`, and the world step's `wide` search thread. The rolling recording and the Lie Detector tracking handed in by `perceive` run their own workers (the mini-game's tracker in a process of its own); the service only hands them frames, never waiting. Each command runs a `perceive-client` thread for its ServiceClient. `ensure` starts the service detached through WMI, not as the command's child.",
+   "tunables": [
+    {
+     "name": "HZ",
+     "value": "15.0 (feed.HZ = localization.rate.HZ)",
+     "meaning": "frames a second, whoever is attached"
+    },
+    {
+     "name": "RING_SLOTS",
+     "value": "16",
+     "meaning": "look frames kept in shared memory: about 1.07 s at 15 a second (50 MB at 1366x768)"
+    },
+    {
+     "name": "FULL_SLOTS",
+     "value": "2",
+     "meaning": "full-size frames for `full` asks"
+    },
+    {
+     "name": "QUEUE_KEEP",
+     "value": "64",
+     "meaning": "states a client's writer holds at most (4.3 s); older ones dropped and a gap said"
+    },
+    {
+     "name": "KEEP",
+     "value": "8",
+     "meaning": "states a client keeps"
+    },
+    {
+     "name": "EVENTS_KEPT",
+     "value": "10_000",
+     "meaning": "events a client keeps for its next drain at most"
+    },
+    {
+     "name": "RECONNECT_S",
+     "value": "0.5",
+     "meaning": "s between a client's tries to reach the service"
+    },
+    {
+     "name": "ENSURE_EVERY_S",
+     "value": "10.0",
+     "meaning": "s at least between two starts of the service by a client"
+    },
+    {
+     "name": "HELLO_WAIT_S",
+     "value": "3.0",
+     "meaning": "default wait for the welcome in `ready` (commands pass 20 s: __main__.PERCEPTION_WAIT_S)"
+    },
+    {
+     "name": "FULL_WAIT_S",
+     "value": "1.0",
+     "meaning": "s a `full` ask waits for its frame"
+    },
+    {
+     "name": "STUCK_S",
+     "value": "10.0",
+     "meaning": "s without the frame loop going round before the watchdog ends the process"
+    },
+    {
+     "name": "BUILD_STUCK_S",
+     "value": "60.0",
+     "meaning": "the same while a run is being built (the map's templates loaded)"
+    },
+    {
+     "name": "EXIT_STUCK",
+     "value": "3",
+     "meaning": "the exit code of a stuck service"
+    },
+    {
+     "name": "SILENT_S",
+     "value": "10.0",
+     "meaning": "s a client hears nothing before it drops the connection and reconnects"
+    },
+    {
+     "name": "SCENE_S",
+     "value": "0.1",
+     "meaning": "s between 'scene' telemetry records"
+    },
+    {
+     "name": "TRACKS_S",
+     "value": "0.5",
+     "meaning": "s between 'tracks' telemetry records"
+    },
+    {
+     "name": "STATUS_S",
+     "value": "10.0",
+     "meaning": "s between console lines (and 'perf' records)"
+    },
+    {
+     "name": "ADDRESS",
+     "value": "\\\\.\\pipe\\gamelab-perceive",
+     "meaning": "the live service's named pipe (SAVED_ADDRESS adds -saved)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-25",
+     "what": "One shared perception process looks at the game for every command; the per-command feed child, `--feed`/`--no-feed` and the sweep were removed.",
+     "why": "The user: \"perception should just always run and the other modules just work based on latest perception result\"; how: \"run one shared perception process at all times\". Each command's own duplication had failed at the third (0x887A0022)."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "One pace whoever is attached (before: 30 a second while a hunt was attached, 10 otherwise).",
+     "why": "The user: \"Run the perception at the same rate between hunt and idle. The idea is perception is running as a constant thing and hunt is only a consumer of it\". 20 a second cost 7.7% EXP a minute in the harness; 5 between hunts was set back (\"Don't reduce perception fps please\")."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "The rolling recording is kept by the service from its own frames.",
+     "why": "`gamelab recorder` had kept it with a capture of its own until then."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "RING_SLOTS from 8 to 16.",
+     "why": "At 30 a second a look's frame was overwritten 86-88 ms after the look had its state at the soonest."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "15 frames a second, everything once a frame.",
+     "why": "The user: \"I meant everything at 15 fps\" (README, Perception at 15 frames a second)."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "The Lie Detector's mini-game target tracking takes the service's frames.",
+     "why": "It replaced the player's YOLO shadow."
+    },
+    {
+     "date": "",
+     "what": "A watchdog ends a service whose frame loop hangs (STUCK_S); clients reconnect after SILENT_S.",
+     "why": "Found in review: a hung loop with its pipe up was noticed by nobody, and a hunt stood still to its end."
+    },
+    {
+     "date": "",
+     "what": "Only commands that hunt hold the service's map.",
+     "why": "The pet's babysitter held it as a command that acts, and a hunt on any other map was refused at its start."
+    },
+    {
+     "date": "",
+     "what": "`perceive --frames` has its own pipe, mutex and info file.",
+     "why": "With the live ones, a run of it kept the live service from starting, and a command acted on saved frames."
+    }
+   ],
+   "gotchas": [
+    "A client's states have no picture: copy the look frame from the ring with `frame_of` within about 1 s, or it comes back black (counted in `lost`).",
+    "Track ids restart with each run: a new map or a restarted service means new ids (Memory matches by place).",
+    "A hang that holds Python's lock stops the watchdog thread too: clients drop after SILENT_S and stand still, and nothing ends that process (README, not done).",
+    "The service perceives one character (its welcome's `character`); a command that hunts as another refuses to start (`_perceives_her` in gamelab/__main__.py).",
+    "A viewer on another map than the one a hunt holds sees that map's places (it says so).",
+    "The window at another size is a wait, never a new run: the user, or a command that acts with Alt+Enter twice, sets it right."
+   ],
+   "tests": [
+    "tests/test_service.py",
+    "tests/test_service_recorder.py",
+    "tests/test_architecture.py",
+    "tests/test_kill_credit.py",
+    "tests/test_rate.py",
+    "tests/test_window_size.py",
+    "tests/test_capture.py",
+    "tests/test_pet.py",
+    "tests/test_spawns.py",
+    "tests/test_character.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/feed.py",
+   "title": "The feed",
+   "tagline": "The frame loop and the Feed interface every look reads; SyncFeed for the simulator.",
+   "summary": "Defines what the stack asks of perception (`Feed`: latest, glance, look, drain_events, throw) and the frame loop `run` that steps the world once a frame at 15 a second, asks riding on the next frame due. Also the shared-memory `Ring` of frames, and two in-process feeds: `SyncFeed`, stepped by the simulator's fake clock, and `InlineFeed`, stepped on demand for saved frames and tests.",
+   "details_md": "**Why a separate process.** Python's global lock: a perception thread in the same process as the planner got 16 of its\n60 looks in 2 s (the research's gil.py). So live, the frame loop runs in the perception service and the stack reads\nfinished states. In the simulator that cost doesn't exist (time is fake), so `SyncFeed` runs the same step in-process.\n\n**The frame loop (`run`).** Each period (1/HZ s, 15 a second) it calls `poll(wait)` to collect asks until the next\nframe is due, merging them into `pending`. At the due time it takes `runner.frames.next(due)`.\n- Not visible: a state carrying the problem goes to `emit`, `Runner.recover` lets the eyes re-find the minimap picture\n  and her name tag (at most every `RECOVER_EVERY_S`, 0.2 s), and the loop waits `NOT_VISIBLE_S` (0.25 s).\n- `shown(frame)` sees the frame before the pass (the service answers `full` asks with it).\n- An unchanged screen nobody asked about (`frame.new` False) is skipped.\n- Otherwise `WorldStep.step` runs, given the pending asks if the frame is late enough for them, and `emit` gets the\n  state; a failed check calls `recover`.\n- The next due time stays on the grid (`due + period`), or now if the loop is behind.\n\nSince 2026-10-30 a look never gets a frame of its own: what it asks rides on the next frame due. As first built a\nframe asked for was taken at once and the grid re-phased, 15.7-15.9 frames a second in the simulator's standard grind.\n\n**Freshness (`fresh`).** A state is good for a look when it is usable (visible, no `bad` problem), shown at\n`want.after` or later (1e-9 s slack), and, if the look wants drops, searched for them on that very frame (a pile just\npicked up must not be seen again). Her place, the HUD and every monster are in every state, so `to_ask` only ever asks\nfor a time and drops. A state where she isn't placed still counts: it is what a look would have been.\n\n**What the stack asks (`Feed`).**\n- `latest(want)`: the newest fresh state, asking once and waiting up to `FEED_WAIT_S` (0.6 s); None makes Senses try\n  again (it gives up with LookLost after 3 s of nothing).\n- `glance(after)`: waits up to `GLANCE_WAIT_S` (0.25 s) for any newer state, asking nothing.\n- `look(...)`: `latest` plus `worldstate.to_scene` into the stack's `Scene`. A band look also gets the rest of the\n  screen's monsters in `Scene.swept` (which Memory takes) and the rows searched in `Scene.rows`.\n- `drain_events(upto)`: every event once, only up to the frame the look shows.\n- `newest(after)`: the newest usable state with no wait and no ask (the hunter's last look before a key).\n- `throw(...)`: her throw, for the tracker.\n\n**The Ring.** One `SharedMemory` block: first a 16-byte head per slot (frame number and time, two float64s), then\nthe slots' RGB frames. `put`\nwrites the number as -1 first, then the picture, then time and number; `get` copies and re-checks the number, so a\ncopy torn by a write returns None. Frame shape is `frame_shape(geo)`: (540, 960, 3) at 1920x1080 (half size), (768,\n1366, 3) at the game's own 1366x768.\n\n**SyncFeed (the simulator).** The simulator's clock calls `tick(t)` at every game frame (`GAME_HZ` 60). A frame is\nstepped `hz` times a second; its state becomes readable `Costs.of(state)` later and the next frame waits for that. The\ncosts are the live pass's at 1366x768: capture 2 ms, her look 8.5, the whole screen 8.4 beside it plus 1.8 for running\nboth, a bar 1.1, a death look 0.8, a strip of drops 3.8. Waiting goes through the simulator's own `time.sleep`, so\nnothing is charged to the stack's time.\n\n**InlineFeed.** Each look steps one frame on the eyes' own capture, with no drop rotation (`drops_strips=0`). Used by\n`bench-look`, saved frames and the unit tests; `Senses` makes one when it was given no feed.",
+   "lines": 567,
+   "key_items": [
+    {
+     "name": "run",
+     "kind": "function",
+     "line": 188,
+     "signature": "def run(runner: Runner, hz, poll, emit, until=None, shown=None) -> None",
+     "summary": "The frame loop: frame after frame HZ a second, `poll(wait)` gathering asks until the frame due, one WorldStep pass a frame, each state to `emit`. Ends on stop, at `until`, or when frames run out.",
+     "details_md": "A not-visible frame gets a state with its problem and a `recover`, then a 0.25 s wait. An unchanged frame nobody asked about is skipped. `hz` may be a callable, asked each frame."
+    },
+    {
+     "name": "Feed",
+     "kind": "class",
+     "line": 302,
+     "signature": "class Feed",
+     "summary": "The interface the stack reads (implemented by service.ServiceClient, SyncFeed, InlineFeed): latest, problem, bring_forward, full_frame, frame_of, wait_frame, drain_events, pending_events, newest, throw, look, glance."
+    },
+    {
+     "name": "Feed.look",
+     "kind": "method",
+     "line": 363,
+     "signature": "def look(self, senses, mobs, wide, loot, mesos_only, after=None)",
+     "summary": "A look's Scene from the feed (latest + worldstate.to_scene), or None so Senses asks again. A band look gets the rest of the screen's monsters in `Scene.swept` and the rows searched in `Scene.rows`."
+    },
+    {
+     "name": "Feed.latest",
+     "kind": "method",
+     "line": 307,
+     "signature": "def latest(self, want: Asks, timeout: float = FEED_WAIT_S, ask: bool = True) -> WorldState | None",
+     "summary": "The newest state fresh for `want`, waited for `timeout` s at most; with `ask`, a frame and its drops asked for when none has them; without (a glance), the frames as they come."
+    },
+    {
+     "name": "fresh",
+     "kind": "function",
+     "line": 271,
+     "signature": "def fresh(st: WorldState, want: Asks) -> bool",
+     "summary": "Whether a state is good for a look: usable, shown at `want.after` or later (1e-9 s slack), and with the drops it wants searched on that very frame. A state where she isn't placed counts."
+    },
+    {
+     "name": "to_ask",
+     "kind": "function",
+     "line": 259,
+     "signature": "def to_ask(want: Asks) -> Asks",
+     "summary": "What to ask of the next frame for a look: its time and the drops it wants; never her band or the whole screen, which every state has since 2026-10-30."
+    },
+    {
+     "name": "Ring",
+     "kind": "class",
+     "line": 79,
+     "signature": "Ring(name: str | None = None, slots: int = RING_SLOTS, shape: tuple = FRAME_SHAPE)",
+     "summary": "Look frames in shared memory: the service creates it (`name` None), each command opens it by name. The block holds a 16-byte head per slot (frame number, time), then the slots' RGB frames."
+    },
+    {
+     "name": "Ring.put",
+     "kind": "method",
+     "line": 94,
+     "signature": "def put(self, seq: int, t: float, frame: np.ndarray) -> int | None",
+     "summary": "Writes frame `seq` into slot seq mod slots: the number set to -1 first, then the picture, time and number; None if the frame isn't the ring's shape."
+    },
+    {
+     "name": "Ring.get",
+     "kind": "method",
+     "line": 105,
+     "signature": "def get(self, slot: int, seq: int) -> np.ndarray | None",
+     "summary": "A copy of frame `seq`, or None if it has been overwritten or is being written (the number re-checked after the copy)."
+    },
+    {
+     "name": "Runner",
+     "kind": "dataclass",
+     "line": 147,
+     "signature": "Runner(frames, eyes: Eyes, step: WorldStep, title='', recovered=-1e18)",
+     "summary": "What the frame loop looks with: a frames source (`.next(after)`), the eyes that read them, and the world step. `recover(problem)` lets the eyes recover at most every RECOVER_EVERY_S."
+    },
+    {
+     "name": "SyncFeed",
+     "kind": "class",
+     "line": 432,
+     "signature": "SyncFeed(step: WorldStep, look, costs: Costs | None = None, hz: float = HZ, guard=None)",
+     "summary": "The feed in-process for the simulator: its clock calls `tick` at every game frame; each state is readable its measured cost later, and the next frame waits for that.",
+     "details_md": "`guard` is called at every ask and raises if the simulator's fakes aren't in place."
+    },
+    {
+     "name": "SyncFeed.tick",
+     "kind": "method",
+     "line": 453,
+     "signature": "def tick(self, t: float) -> None",
+     "summary": "The game shows a frame at t: if a frame is due (HZ a second, and the last one's cost passed) the step runs on it with the pending asks, and the state is kept with its ready time."
+    },
+    {
+     "name": "Costs",
+     "kind": "dataclass",
+     "line": 395,
+     "signature": "Costs(capture=0.002, look=0.0085, wide=0.0084, beside=0.0018, bar=0.0011, death=0.0008, loot_strip=0.0038)",
+     "summary": "What each part of a pass costs (s) at the live 1366x768, for the simulator's feed; `of(state)` adds up a state's work."
+    },
+    {
+     "name": "InlineFeed",
+     "kind": "class",
+     "line": 518,
+     "signature": "InlineFeed(eyes: Eyes, model, band: tuple[float, float])",
+     "summary": "The world step run on the eyes' own frame when a look asks (saved frames, bench-look, unit tests), with no drop rotation."
+    },
+    {
+     "name": "saved_world",
+     "kind": "function",
+     "line": 168,
+     "signature": "def saved_world(files, map_id, template, band, hold=30, schedule=Schedule()) -> Runner",
+     "summary": "A Runner over saved full-size screenshots, each shown `hold` frames in a row, round and round: the service run offline (`perceive --frames`, `sim.soak feed`)."
+    }
+   ],
+   "inputs": [
+    "Frames from a frames source (`.next(after)`): ScreenFrames live, ListFrames offline",
+    "Asks from the service's clients (through `poll`) or straight from a look (SyncFeed, InlineFeed)",
+    "The simulator's clock ticks (SyncFeed.tick) and the fake eyes' observations",
+    "Her throws (`throw`), passed to the world step's tracker"
+   ],
+   "outputs": [
+    "WorldStates to `emit` (the service), or kept in memory with their ready time (SyncFeed)",
+    "Scenes for Senses.look (Feed.look), glances (Feed.glance)",
+    "Events, each drained once up to the frame a look shows"
+   ],
+   "uses": [
+    "gamelab/localization/worldstate.py",
+    "gamelab/localization/rate.py",
+    "gamelab/localization/senses.py",
+    "gamelab/localization/tracking.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/perception/eyes.py",
+    "gamelab/perception/frames.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/perception/sprites.py",
+    "gamelab/screen.py"
+   ],
+   "files_io": [
+    {
+     "path": "<saved frames folder>/*.png",
+     "mode": "read",
+     "what": "full-size game frames for saved_world (`perceive --frames`)"
+    }
+   ],
+   "concurrency": "`run` runs on its caller's thread (the service's main thread). The Ring lives in multiprocessing.shared_memory: written by the service process, read by every command process. SyncFeed and InlineFeed are single-threaded and in-process. `quiet()` puts a worker process (the harness's, soak's) at below-normal priority and OpenCV on one thread.",
+   "tunables": [
+    {
+     "name": "FEED_WAIT_S",
+     "value": "0.6",
+     "meaning": "s a look waits for a fresh state before Senses asks again"
+    },
+    {
+     "name": "GLANCE_WAIT_S",
+     "value": "0.25",
+     "meaning": "s a glance waits for a newer frame"
+    },
+    {
+     "name": "NOT_VISIBLE_S",
+     "value": "0.25",
+     "meaning": "s between checks while the game isn't wholly on screen"
+    },
+    {
+     "name": "RECOVER_EVERY_S",
+     "value": "0.2",
+     "meaning": "s at least between two of the eyes' recoveries"
+    },
+    {
+     "name": "KEEP",
+     "value": "8",
+     "meaning": "states the stack's side keeps"
+    },
+    {
+     "name": "EVENTS_KEPT",
+     "value": "10_000",
+     "meaning": "events kept for the next drain at most"
+    },
+    {
+     "name": "RING_SLOTS",
+     "value": "4",
+     "meaning": "a Ring's default slots (the service passes 16)"
+    },
+    {
+     "name": "FRAME_SHAPE",
+     "value": "(540, 960, 3)",
+     "meaning": "a look frame's shape at 1920x1080 (half size)"
+    },
+    {
+     "name": "GAME_HZ",
+     "value": "60.0",
+     "meaning": "frames a second the game shows (SyncFeed's tick rate)"
+    },
+    {
+     "name": "COSTS",
+     "value": "Costs()",
+     "meaning": "the simulator feed's pass costs at 1366x768 (COSTS_1366 is the same since 2026-10-30)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "",
+     "what": "Perception runs in a process of its own, not a thread of the stack.",
+     "why": "A perception thread in the planner's process got 16 of its 60 looks in 2 s (Python's lock)."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Frames are HZ a second whatever is asked; an ask goes into the next frame due.",
+     "why": "As first built a frame asked for was taken at once and the next re-phased: 15.7-15.9 frames a second in the simulator's standard grind, and every look that wanted drops got a pass of its own."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "`to_ask` never asks for her band or the whole screen.",
+     "why": "Every state has both since the one-pass design."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "`fresh` compares times with 1e-9 s slack.",
+     "why": "In the simulator a frame shown at 5.5 s took an ask for 5.50000001 s and wasn't fresh for it; the look waited out FEED_WAIT_S."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "COSTS are the one pass's at 1366x768.",
+     "why": "They were 1920x1080's, with a whole screen of 100 ms that would hold the simulator's feed to 9 frames a second."
+    }
+   ],
+   "gotchas": [
+    "Events are drained only up to the frame a look shows: an EXP gain of a later frame goes with the next look, whose monsters no longer show the one it killed.",
+    "`latest` returns None at once when the newest state, shown at or after the look's time, isn't usable (not visible, or `bad`): Senses says why and asks again.",
+    "SyncFeed's states aren't readable until their cost has passed on the fake clock: a simulated look waits as a live one would.",
+    "InlineFeed ignores a look's `after` (its eyes' clock may be a test's) and takes a frame per look."
+   ],
+   "tests": [
+    "tests/test_feed.py",
+    "tests/test_rate.py",
+    "tests/test_service.py",
+    "tests/test_harness.py",
+    "tests/test_window_size.py",
+    "tests/test_character.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/worldstate.py",
+   "title": "World step and WorldState",
+   "tagline": "One pass a frame: her look, every monster tracked, drops, EXP, HP and touches.",
+   "summary": "`WorldStep.step` turns one game frame into a `WorldState`: plain, picklable data about her place and HUD, every monster on screen with its track id, the drops, and the events of that frame. It runs inside the perception service (or SyncFeed/InlineFeed) and drives the detectors, the EXP meter (gains.py) and the tracker (tracking.py). `to_scene` turns a state back into the `Scene` a look of the stack would have made.",
+   "details_md": "**The pass (`step`), in order.**\n1. `_search_ahead` starts the whole-screen monster search (`MobDetector.detect_wide` over the play area above the\n   bottom bar, and the exact finder after it) on the step's own thread; meanwhile the caller's thread does her look\n   (`Eyes.look_at`: name tag, minimap dot, HP, MP, EXP pixels, ropes, other players). Both are mostly C that lets go of\n   Python's lock: 10.3 ms together against 15.95 one after the other (`HALVES`).\n2. `senses.place` puts her on the map; `_vitals` reads EXP, HP and touches into events.\n3. `_newborns`: the spawn watch looks at every spawn point in view for a monster fading in (Tree Dungeon only,\n   `spawns.MEASURED`); it found 229 of 233 newborns at their first visible frame, a median 7 frames (467 ms) before\n   the whole screen did. `_handed` adds them as detections (with their alpha) until the search finds them.\n4. `_wide` waits for the search; `_exact_added` adds the exact finder's finds where no detection lies.\n5. Each detection is placed on the map and given to `MonsterTracker.update` with the `View` (what the frame shows of\n   the map), her place, other players, a bar reader (`_reader`) and a death check (`_dying`).\n6. `_drops`: the strips a look asked for, searched whole on this frame; then one strip by rotation.\n7. All of it goes into a `WorldState`, with `work` timings (`s`, `look s`, `wide s`, ...).\n\n**HP bars (`_bar_due`).** A bar read costs 1.1 ms. A track's bar is read when it showed one within `BAR_SHOWN_S`\n(0.25 s), it was hidden or unseen for `BAR_UNSEEN_S` (0.15 s) or more, a throw of hers went its way in the star window,\nor `BAR_EVERY_S` (0.2 s, every third frame) has passed; a new track's always. Otherwise the state carries the track's\nlast bar. Read in every frame, bars were 74% of what the simulator's feed cost. With the exact finder, a bar that could\nbe an overlapping neighbour's isn't read (`hud.bar_shared`).\n\n**Deaths (`_dying`, `_died_seen`).** Tracks found weakly in the frame or lost lately are matched against the game\ndata's die1 frames where their feet are (perception.deaths, at most every `deaths.EVERY_S`). The exact finder's die1\nfinds name a death too; one animation counts once (`DIE_ONE_NEAR` 12 units, `DIE_ONE_S` 0.9 s). Seen deaths reach the\ntracker before her gains are judged.\n\n**EXP, HP, touches (`_vitals`).** When the EXP number's pixels change (`hud.exp_changed`), it is read\n(perception.exp_number) and `gains.ExpMeter` says what the change was; `_told` tells the tracker one kill per kind at its\ntime, and a share for an odd gain. An `exp_gain` event carries the reading and, since 2026-11-02, the reading `before`\nit. HP falling more than `HP_DROP` (0.004) is an `hp_drop`; a new drop with no popup told within `TOUCH_SAME_S` (1 s)\nis a touch by HP. Touches come from the touch watch's popups (MISS or damage); a MISS followed by an HP drop within\n`touches.HP_WAIT_S` is re-told as damage (`touch_fix`). A touch told off a popup that isn't damage (a MISS, or\nunread) while another player's dot is within 60 x 60 units of her is marked `crowded`: the popup may be theirs. Her HP number and level digits are read at each change (`hp_read`, `lv_read`).\n\n**Drops (`_drops`).** Asked-for strips (her platform's, or every platform's in view) are searched on the frame asked.\nThe rotation searches `DROPS_STRIPS` (1) strip every `DROPS_EVERY_S` (0.2 s), the one searched longest ago first, her\nplatform's counted twice as old (`DROPS_HER`), only on a frame placed firmly in height (`_firm`). `WorldState.drops`\nlists every strip in view with when it was last searched and what it had.\n\n**Plain data.** `WorldState` holds no map objects. The service drops its picture before pickling; the EXP pixels are\npacked with `np.packbits`. `to_scene` rebuilds the `Scene` a look would have made: her place, the monsters in her band\n(or all with `wide`), the drops asked for.",
+   "lines": 994,
+   "key_items": [
+    {
+     "name": "WorldStep",
+     "kind": "class",
+     "line": 328,
+     "signature": "WorldStep(senses: Senses, throws: bool = True, schedule: Schedule = Schedule())",
+     "summary": "Frame after frame of the game turned into WorldStates. Owns the MonsterTracker, the ExpMeter, the HP and level number followers, the touch, death and spawn watches, the exact finder and the drop strips' last searches.",
+     "details_md": "The watches and finder are made at construction (death watch 0.5 s, spawn watch 0.4 s, exact finder about 20 ms, HP and level digits 190 and 600 ms) so a hunt never pays for them mid-fight."
+    },
+    {
+     "name": "WorldStep.step",
+     "kind": "method",
+     "line": 395,
+     "signature": "def step(self, look, t: float, visible: bool = True, asks: Asks | None = None, why: str = '', bad: Problem | None = None) -> WorldState",
+     "summary": "The frame shown at t, one pass: her look and the whole-screen search, her place and vitals, newborns, detections matched to tracks with bars and deaths, then drops. Not visible: nothing read."
+    },
+    {
+     "name": "WorldStep._search_ahead",
+     "kind": "method",
+     "line": 472,
+     "signature": "def _search_ahead(self, look) -> Future | None",
+     "summary": "Starts the whole-screen search (and the exact finder) on the step's own thread before her look, where the look frame is the capture itself (the game's own 1366x768) and the detector is real."
+    },
+    {
+     "name": "WorldStep._wide",
+     "kind": "method",
+     "line": 494,
+     "signature": "def _wide(self, s: Scene, ahead: Future | None, placed: bool, work: dict) -> list[Mob]",
+     "summary": "The whole screen's monsters: the search begun beside her look waited for, or searched now; none where she isn't placed."
+    },
+    {
+     "name": "WorldStep._newborns",
+     "kind": "method",
+     "line": 515,
+     "signature": "def _newborns(self, s: Scene, t: float, placed: bool, work: dict) -> list[spawns.Sighting]",
+     "summary": "The spawn watch on every spawn point in view: monsters fading in, with their alpha. Runs only on a frame of the game as expected, her placed, the view registered on the map's art."
+    },
+    {
+     "name": "WorldStep._exact_added",
+     "kind": "method",
+     "line": 600,
+     "signature": "def _exact_added(self, mobs: list[Mob], placed: bool, work: dict) -> list[Mob]",
+     "summary": "The exact finder's finds where no detection lies, added as detections; and whether the finder can see on these frames."
+    },
+    {
+     "name": "WorldStep._reader",
+     "kind": "method",
+     "line": 651,
+     "signature": "def _reader(self, s, t, unread, work, mobs=())",
+     "summary": "The tracker's `read`: a detection with its HP bar read when that's due for its track, else unread (the track's bar as last read goes in the state)."
+    },
+    {
+     "name": "WorldStep._bar_due",
+     "kind": "method",
+     "line": 917,
+     "signature": "def _bar_due(self, tr: Track, t: float) -> bool",
+     "summary": "Whether a track's bar is read this frame: it showed one lately, it's back from hiding, a throw went its way, or BAR_EVERY_S has passed."
+    },
+    {
+     "name": "WorldStep._dying",
+     "kind": "method",
+     "line": 676,
+     "signature": "def _dying(self, s: Scene, t: float, work: dict)",
+     "summary": "The tracker's `dying`: the tracks that may be dying looked at for their die1 frames (perception.deaths) plus the exact finder's die1 finds; those seen dying."
+    },
+    {
+     "name": "WorldStep._drops",
+     "kind": "method",
+     "line": 723,
+     "signature": "def _drops(self, s: Scene, t: float, placed: bool, work: dict)",
+     "summary": "The drops: what was asked for searched whole on this frame, then DROPS_STRIPS strips by rotation every DROPS_EVERY_S, only on a frame placed firmly in height."
+    },
+    {
+     "name": "WorldStep._vitals",
+     "kind": "method",
+     "line": 776,
+     "signature": "def _vitals(self, s: Scene, t: float) -> list[Event]",
+     "summary": "Her EXP number (exp_gain, exp_read), touches (touch, touch_fix), HP drops (hp_drop), HP and level numbers (hp_read, lv_read) as events; gains go to the ExpMeter and on to the tracker."
+    },
+    {
+     "name": "WorldStep._told",
+     "kind": "method",
+     "line": 889,
+     "signature": "def _told(self, gains: list[Gain]) -> None",
+     "summary": "Her kills these gains were, told to the tracker by kind at each kill's time; an odd positive gain told as a share."
+    },
+    {
+     "name": "WorldStep._touched",
+     "kind": "method",
+     "line": 826,
+     "signature": "def _touched(self, s: Scene, t: float) -> list[Event]",
+     "summary": "Her touches the touch watch tells this frame, each a 'touch' event; one within TOUCH_SAME_S of the last told is that one."
+    },
+    {
+     "name": "to_scene",
+     "kind": "function",
+     "line": 956,
+     "signature": "def to_scene(st, model, band, mobs=True, wide=False, loot=False, mesos_only=False, frame=None) -> Scene",
+     "summary": "The Scene a look with these arguments would have given on the state's frame: her place, the monsters in her band (or all), the drops asked for."
+    },
+    {
+     "name": "HALVES",
+     "kind": "constant",
+     "line": 81,
+     "signature": "HALVES = True",
+     "summary": "Her look and the whole-screen search at once on two threads: 10.30 ms median against 15.95 one after the other, about the same CPU (300 frames of the crowd at 1366x768)."
+    }
+   ],
+   "inputs": [
+    "A look callable for the frame (Eyes.look_at via feed.Look, or the simulator's FakeEyes) and the frame's time",
+    "What was asked of the frame (Asks: the drops)",
+    "Her throws (`throw`), forwarded to the tracker",
+    "The map model, her band and her Shape through Senses"
+   ],
+   "outputs": [
+    "A WorldState per frame: her place, HUD, monsters with track ids, tracks, drops, events, `work` timings",
+    "Events: exp_gain, exp_read, hp_drop, hp_read, lv_read, touch, touch_fix, plus the tracker's",
+    "Scenes for the stack (to_scene)"
+   ],
+   "uses": [
+    "gamelab/localization/tracking.py",
+    "gamelab/localization/gains.py",
+    "gamelab/localization/senses.py",
+    "gamelab/localization/scene.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/pose.py",
+    "gamelab/localization/rate.py",
+    "gamelab/localization/camreg.py",
+    "gamelab/perception/eyes.py",
+    "gamelab/perception/mobs.py",
+    "gamelab/perception/deaths.py",
+    "gamelab/perception/exact.py",
+    "gamelab/perception/exp_number.py",
+    "gamelab/perception/gates.py",
+    "gamelab/perception/hp_number.py",
+    "gamelab/perception/lv_number.py",
+    "gamelab/perception/spawns.py",
+    "gamelab/perception/touches.py",
+    "gamelab/perception/hud.py",
+    "gamelab/perception/minimap.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/character.py",
+    "gamelab/native.py",
+    "gamelab/screen.py"
+   ],
+   "files_io": [],
+   "concurrency": "A ThreadPoolExecutor with one worker (`wide`, OpenCV on one thread) for the whole-screen search and exact finder where HALVES applies; everything else on the caller's thread (the service's frame loop, or the simulator's tick).",
+   "tunables": [
+    {
+     "name": "ROPES_EVERY",
+     "value": "1",
+     "meaning": "ropes searched every frame (placing her by a rope one frame and her dot the next stepped every monster's x)"
+    },
+    {
+     "name": "HALVES",
+     "value": "True",
+     "meaning": "her look and the whole-screen search at once"
+    },
+    {
+     "name": "HP_DROP",
+     "value": "0.004",
+     "meaning": "HP lost frame to frame that counts as a hit"
+    },
+    {
+     "name": "BAR_EVERY_S",
+     "value": "0.2",
+     "meaning": "a track's bar read at least this often (every third frame)"
+    },
+    {
+     "name": "BAR_SHOWN_S",
+     "value": "0.25",
+     "meaning": "a bar shown this recently is read every frame"
+    },
+    {
+     "name": "BAR_UNSEEN_S",
+     "value": "0.15",
+     "meaning": "a track back after this long unseen has its bar read"
+    },
+    {
+     "name": "HIT_MERGE_S",
+     "value": "0.2",
+     "meaning": "an HP drop this soon after the last is the same hit"
+    },
+    {
+     "name": "HP_GAP_S",
+     "value": "1.0",
+     "meaning": "a stretch longer than this without a read frame forgets her HP number's `before`"
+    },
+    {
+     "name": "TOUCH_SAME_S",
+     "value": "1.0",
+     "meaning": "a touch this soon after the last told is the same one"
+    },
+    {
+     "name": "HP_FLOOR",
+     "value": "0.02",
+     "meaning": "an HP drop to this or less isn't a touch by itself"
+    },
+    {
+     "name": "FIX_MISS",
+     "value": "True",
+     "meaning": "a MISS followed by an HP drop is re-told as damage"
+    },
+    {
+     "name": "CROWD_DX, CROWD_DY",
+     "value": "60.0, 60.0",
+     "meaning": "another player's dot this near makes a popup-only touch `crowded`"
+    },
+    {
+     "name": "DEATHS, SPAWNS, EXACT, TOUCHES",
+     "value": "True",
+     "meaning": "the death watch, spawn watch, exact finder and touch watch on"
+    },
+    {
+     "name": "DIE_NEAR, DIE_WALK, DIE_WALK_S",
+     "value": "25.0, 100.0, 0.4",
+     "meaning": "how far a die1 find may be from a track that walked on unseen"
+    },
+    {
+     "name": "DIE_ONE_NEAR, DIE_ONE_S",
+     "value": "12.0, 0.9",
+     "meaning": "a die1 find this near and soon after a told death is that animation"
+    },
+    {
+     "name": "DROPS_STRIPS",
+     "value": "1",
+     "meaning": "drop strips searched by rotation each turn"
+    },
+    {
+     "name": "DROPS_EVERY_S",
+     "value": "0.2",
+     "meaning": "s between the rotation's turns"
+    },
+    {
+     "name": "DROPS_HER",
+     "value": "2.0",
+     "meaning": "her platform's strips count this many times as old in the rotation"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-30",
+     "what": "One pass a frame at 15 a second, every monster from that frame's whole screen.",
+     "why": "Replaces 30 a second with re-finds and a search thread merged frames later (`late`). On the crowd's 900-frame replay the whole screen alone at 15 took 0.503 cores, against 0.683 for the old design at 15 and at least 0.752 at 30, with the tracker's outcomes about the same; in the service bench each state left 13 ms after its frame with that frame's whole screen, where master's newest whole screen was 70 ms old."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Drops by rotation: one strip every 0.2 s.",
+     "why": "Two strips every frame, as designed, took the frame loop 0.77-0.80 cores against 0.43 with none."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "The rotation only on a frame placed firmly in height (`_firm`).",
+     "why": "Review: strips placed by her offset in the air saw 15 of 49 and 15 of 53 piles as gone with their coins still there."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "The spawn watch looks at every spawn point in view on every frame.",
+     "why": "The user: \"Should probably always check instead of only checking when it's due\"; of a looser search anywhere: \"I'd like to avoid that\" (false positives). It found 229 of 233 newborns at their first visible frame."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "Her HP number and level digits read at each change ('hp_read', 'lv_read'); a MISS that took HP re-told as damage (FIX_MISS, after that day's review).",
+     "why": "One MISS of 269 touches on the hunting frames of 2026-10-24..28 had a drop so; before, her knock was never waited out."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "'exp_gain' events carry `before`, the reading before the change.",
+     "why": "A hunt attaching after the service read it starts from it (behavior.hunter)."
+    },
+    {
+     "date": "",
+     "what": "Bars read by schedule, not every frame (BAR_EVERY_S).",
+     "why": "Read in every frame, the bars were 74% of what the simulator's feed cost."
+    }
+   ],
+   "gotchas": [
+    "HALVES, the spawn watch and the exact finder run only at the game's own 1366x768 with the real detector; at 1920x1080 and in the simulator the search runs after her look and neither exists.",
+    "The spawn watch runs only on maps in perception.spawns.MEASURED (Tree Dungeon) with its C built.",
+    "A frame that fails its checks (`bad`) has its EXP and HP ignored and her HP number forgotten: the next good frame is compared instead.",
+    "A state's `loot` is only what was asked on that frame; `drops` is every strip in view as last searched.",
+    "`band`, `wide`, `band_at`, `wide_at` and `late` are kept only for older clients: every state has her band and the whole screen.",
+    "A track's bar carried over from an older read can sit on an unhurt monster: at the simulator's -80 rope arrivals, 97 of the 118 bars on unhurt monsters were kept from older reads (README, Her aggro belief). The aggro belief reads a bar only fresh; the perception's own bar is unchanged."
+   ],
+   "tests": [
+    "tests/test_worldstate.py",
+    "tests/test_feed.py",
+    "tests/test_service.py",
+    "tests/test_deaths.py",
+    "tests/test_exact.py",
+    "tests/test_spawns.py",
+    "tests/test_touches.py",
+    "tests/test_hp_number.py",
+    "tests/test_lv_number.py",
+    "tests/test_locate.py",
+    "tests/test_chatbox.py",
+    "tests/test_framecheck.py",
+    "tests/test_ledger.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/gains.py",
+   "title": "EXP gains",
+   "tagline": "Turns her EXP number's changes into kills by kind, and EXP a minute.",
+   "summary": "`ExpMeter` follows her EXP number as it's read (perception.exp_number) and says what each change was: how many kills, of which kinds (each kind's EXP per kill is the game data's), or not a kill at all. Two run: the world step's, whose kills go to the tracker for kill credit, and the hunter's, for its kill counts and EXP a minute.",
+   "details_md": "**Sizes name kinds.** Each kind's EXP per kill is the game data's (`MapModel.mob_exp`; on Thicket Around the Beach II\na snail 2, a slime 12, a pig 13, an Orange Mushroom 15) times `EXP_RATE` (1.0). A change of 13 there is one pig.\n`split` looks for the fewest kills (up to `SPLIT_KILLS`, 4) whose EXP adds up to the change; when only one set of kinds\nof that count does, the kinds are named, else each is None (39 is three pigs, or two slimes and an Orange Mushroom:\nthree kills of kinds not known). A change no kills add up to is `odd` (a party share, a quest): not a kill. The world\nstep tells the tracker an odd positive gain as a *share*.\n\n**Suspicious changes wait.** A change worth more than `JUMP_KILLS` (4) of the map's best kill (at least `JUMP_LEAST`,\n30 EXP), a fall (a death costs EXP) or a level that doesn't follow is `held` until a second reading agrees; one that\ndoesn't is dropped as a misreading. Across a level-up (`_since`) a gain is what was left of the old level (from the EXP\ntable, `maplehelper/ocr/exp_table.py`) plus what's into the new one.\n\n**Changes it couldn't read.** The cursor or a window over the number changes its pixels with no readable value. Such\nchanges are grouped into bursts (`ALONE_S`, 0.5 s apart); the first burst is the cover coming. The next good reading\nsays how much EXP came, and `_end_run` places that many kills at the latest bursts' times. A lone burst still\nunexplained after `UNREAD_WAIT_S` (1.5 s) becomes one kill of a kind not known (`due`). So a cursor passing over the\nnumber is no kill (before, it counted two).\n\n**Reading pace.** While the number has no value, `wants_reading` asks for a reading `RETRY_S` (0.5 s) after the last\ntry, doubling to `RETRY_MAX_S` (8 s): retrying every 0.5 s had cost 17-20 ms a second.\n\n**The rate check (`_check`).** Of the last `RATE_GAINS` (8) gains from one change each, fewer than `RATE_OFF` (4)\nbeing one kill turns the sizes off (an EXP event or coupon): each change is then one kill of a kind not known, and a\nnote says which rate of 0.5-3 the gains fit. `RATE_ON` (6) turns them back on. Until 6 of the first 8 have been one kill\neach, a gain is named when it's one kill but never split (at rate 2 every kill would read as two). Without the check, at rate 1.5 six kills had counted 12-14.\n\n**EXP a minute.** `per_minute` is the EXP gained since the first reading over the time since (None in the first 10 s).",
+   "lines": 333,
+   "key_items": [
+    {
+     "name": "ExpMeter",
+     "kind": "dataclass",
+     "line": 98,
+     "signature": "ExpMeter(exp_per_kill: dict[str, int])",
+     "summary": "Her EXP as the readings go: the last reading (level, EXP), the total since the first, a held jump, the bursts of unread changes, the retry pace and the rate check."
+    },
+    {
+     "name": "ExpMeter.update",
+     "kind": "method",
+     "line": 145,
+     "signature": "def update(self, t: float, reading: ExpReading | None, changed: bool) -> list[Gain]",
+     "summary": "A look that read the number or saw it change: no gain, or one (one kill, several, or none). Unreadable changes join a burst; jumps, falls and odd levels are held for a second reading."
+    },
+    {
+     "name": "ExpMeter.split",
+     "kind": "method",
+     "line": 204,
+     "signature": "def split(self, size: int, expect: int = 1, most: int = SPLIT_KILLS) -> tuple[str | None, ...]",
+     "summary": "The kills a gain of `size` was: the count nearest `expect` whose EXP adds up to it, by kind when only one set of kinds does; () if none does."
+    },
+    {
+     "name": "ExpMeter.due",
+     "kind": "method",
+     "line": 189,
+     "signature": "def due(self, t: float) -> list[Gain]",
+     "summary": "At every look: lone unread bursts no reading has explained UNREAD_WAIT_S later, each one kill of a kind not known (never the first burst: the cover coming)."
+    },
+    {
+     "name": "ExpMeter._take",
+     "kind": "method",
+     "line": 272,
+     "signature": "def _take(self, t, size, exp, level, changed) -> list[Gain]",
+     "summary": "A change confirmed: a gain split into kinds (or unnamed while the sizes are off), a fall or a level that doesn't follow as an odd gain; ends any run of unread changes."
+    },
+    {
+     "name": "ExpMeter._check",
+     "kind": "method",
+     "line": 312,
+     "signature": "def _check(self, size: int) -> None",
+     "summary": "The rate check on single-change gains: sizes off under RATE_OFF one-kill gains of the last RATE_GAINS, back on at RATE_ON, with a note naming the rate they fit."
+    },
+    {
+     "name": "ExpMeter.wants_reading",
+     "kind": "method",
+     "line": 130,
+     "signature": "def wants_reading(self, t: float) -> bool",
+     "summary": "Whether an unchanged number should be read anyway (nothing read yet, unread changes, or a jump held), `retry` apart: 0.5 s doubling to 8 s."
+    },
+    {
+     "name": "ExpMeter._since",
+     "kind": "method",
+     "line": 241,
+     "signature": "def _since(self, level: int | None, exp: int) -> int | None",
+     "summary": "EXP gained since the last reading, across one level-up by the EXP table; negative for a fall; None when levels don't follow."
+    },
+    {
+     "name": "ExpMeter._end_run",
+     "kind": "method",
+     "line": 256,
+     "signature": "def _end_run(self, t, kills=None, changed=True) -> list[float]",
+     "summary": "Ends a run of unread changes at a reading: the times of the kills not yet counted, at the latest bursts but the first."
+    },
+    {
+     "name": "ExpMeter.per_minute",
+     "kind": "method",
+     "line": 139,
+     "signature": "def per_minute(self, now: float) -> float | None",
+     "summary": "EXP a minute since the first reading, from the number itself; None in the first 10 s."
+    },
+    {
+     "name": "Gain",
+     "kind": "dataclass",
+     "line": 73,
+     "signature": "Gain(t: float, exp: int | None, kinds: tuple[str | None, ...], times: tuple[float, ...] = ())",
+     "summary": "One change of her EXP number: its size, the kills it was by kind, and when each was. `odd` when it's no kill (a share, a quest, a fall)."
+    }
+   ],
+   "inputs": [
+    "Each frame's or look's EXP reading (perception.exp_number.ExpReading: EXP, percent, the levels it fits) and whether the number's pixels changed",
+    "The map's EXP per kill by monster name (MapModel.mob_exp)",
+    "The EXP table (maplehelper.ocr.exp_table.EXP_TO_NEXT) for level-ups"
+   ],
+   "outputs": [
+    "Gains: size, kills by kind, the kills' times (to the world step's tracker, or the hunter)",
+    "Her EXP total and EXP a minute (the service's 'exp' records and console line)",
+    "Notes for the log when the rate check changes its mind"
+   ],
+   "uses": [
+    "gamelab/perception/exp_number.py",
+    "gamelab/perception/kinds.py",
+    "maplehelper/ocr/exp_table.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "JUMP_KILLS",
+     "value": "4",
+     "meaning": "a gain worth more than this many of the map's best kills waits for a second reading"
+    },
+    {
+     "name": "JUMP_LEAST",
+     "value": "30",
+     "meaning": "EXP: the least a jump is, whatever the map's monsters give"
+    },
+    {
+     "name": "SPLIT_KILLS",
+     "value": "4",
+     "meaning": "a gain is split into this many kills at most"
+    },
+    {
+     "name": "RUN_KILLS",
+     "value": "12",
+     "meaning": "... a run of unread changes into this many at most"
+    },
+    {
+     "name": "RETRY_S",
+     "value": "0.5",
+     "meaning": "s between readings while the number has no value, doubled after each failure ..."
+    },
+    {
+     "name": "RETRY_MAX_S",
+     "value": "8.0",
+     "meaning": "... up to this"
+    },
+    {
+     "name": "ALONE_S",
+     "value": "0.5",
+     "meaning": "s between two unread changes for them to be two bursts"
+    },
+    {
+     "name": "UNREAD_WAIT_S",
+     "value": "1.5",
+     "meaning": "s a lone unread burst waits before it is one kill of a kind not known"
+    },
+    {
+     "name": "EXP_RATE",
+     "value": "1.0",
+     "meaning": "the server's EXP rate: each kind's EXP is the game data's times this"
+    },
+    {
+     "name": "RATE_GAINS, RATE_OFF, RATE_ON",
+     "value": "8, 4, 6",
+     "meaning": "the rate check's window and its off and on thresholds"
+    },
+    {
+     "name": "RATES",
+     "value": "(0.5, 1.5, 2.0, 2.5, 3.0)",
+     "meaning": "rates the note checks the gains against"
+    },
+    {
+     "name": "NAME_KINDS",
+     "value": "True",
+     "meaning": "whether a gain's size names kinds at all"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "",
+     "what": "Readings retried with a doubling pace (RETRY_S to RETRY_MAX_S).",
+     "why": "Retrying every 0.5 s cost 17-20 ms a second, in the hunter and in the feed alike."
+    },
+    {
+     "date": "",
+     "what": "Unread changes grouped into bursts, the reading after them deciding the kills.",
+     "why": "The cursor over the number changes its pixels as it comes and as it goes: a pass of the mouse had counted two kills."
+    },
+    {
+     "date": "",
+     "what": "The rate check.",
+     "why": "Under another EXP rate every size names another kind: at 1.5 six kills had counted 12-14."
+    }
+   ],
+   "gotchas": [
+    "Before the first reading every change is one kill of a kind not known.",
+    "A kill counted from an unread burst that the later reading doesn't explain can't be taken back (counted as `over`).",
+    "The EXP table is Classic World's from meowdb.com (the game data hasn't it); a level whose requirement it has wrong is never read.",
+    "A shared kill gives a share of its EXP: 2, 4, 6 or 8 is taken for snails on Thicket Around the Beach II (README, to check in game)."
+   ],
+   "tests": [
+    "tests/test_gains.py",
+    "tests/test_choice.py",
+    "tests/test_records.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/tracking.py",
+   "title": "Monster tracker",
+   "tagline": "Gives every monster an id frame to frame, and decides who killed it.",
+   "summary": "`MonsterTracker` matches each frame's whole-screen detections to numbered tracks, predicts where unseen ones walk, and turns what happens into events (entered, spawned, back, left, bar_hit, died, victim, let_go). Its hardest job is kill credit: the game never says which monster died, so each EXP gain is bound to the monster her attack took and followed until its death is confirmed or it is let go.",
+   "details_md": "**Matching (`_match`).** Each frame's detections (the whole screen's) are paired with tracks of the same kind on the\nsame platform within a gate of `MATCH_BASE` + `MATCH_SPEED` x speed x time since + `MATCH_KNOCKBACK` (10 + 1.3 x speed x\ndt + 25 units: 43.7 a frame on at 15 a second) of where the track should be (`predicted`). Pairs are taken greedily,\nnearest first. A walking track met by a detection facing the other way, away from its platform's ends, costs\n`FACING_COST` (8 units) more: two of a kind passing keep their ids. Special gates: a dying track with no gain on it\ntakes a detection only within `FADE_MOVE` (10 units); a bound victim lost after her star landed refuses far sightings\n(`_stray`); a sighting fading in only matches a track first seen after its fade began.\n\n**Motion from game data.** A track's place is its last detection's feet. Its velocity is not measured: it is its\nkind's walk speed from the game data in the way its pose faces (a move frame walks, a stand or hit1 frame stands:\n`monsters.walk_vx`). `predicted` walks it on for at most `EXTRAPOLATE_S` (0.5 s), folding back at its platform's walk\nedges.\n\n**New tracks (`_new`).** `spawned` if found fading in; else `entered` if within `EDGE_PX` (24 half-size px) of the\nscreen's edge (the camera moved, or it walked in); else `spawned` if within `SPAWN_NEAR` (60 units) of a spawn point of\nits kind on its platform; else `appeared`.\n\n**Tracks not seen (`_unseen`).** Off screen: `offscreen` (event `left`), remembered `OFFSCREEN_S` (10 s) to recognise\nit coming `back`. On screen and unseen `MISSING_S` (0.3 s): `hidden` (a hit monster flinches under its damage numbers\nfor 1-3 s). Seen in fewer than 3 frames (`MIN_SEEN_S` 0.2 s) and gone: a flicker, dropped with no death (never a newborn seen\nfading in). Hidden longer than `HIDE_S` (3.5 s from its last sighting, or from `HIT_AFTER_S`, 1.2 s, after her last\nthrow its way if that's later): dead, cause \"other\" (`died`), naming the other player by\nit, unless it vanished beside one of its kind (\"lost in a crowd\") or no other player's minimap dot was by it\n(`OTHERS_BY_PLAYER`: \"nobody by it\"); both are let go without a death.\n\n**Her kills (`_resolve`, `_bind`, `_picks`).** Worldstate tells `gain(t, kind)` for each kill her EXP gain names. A\ngain within `BIND_S` (0.3 s) and 0.1-0.6 s after a throw's key (`GAIN_AFTER_KEY`) is bound to the first of `_picks`:\nthe tracks of that kind ahead of where she was `PICK_S` (65 ms) after the key, from `VICTIM_BEHIND` (20) behind to her\nreach ahead (`THROW_REACH`, 474), `VICTIM_UP` (110) above her feet to `VICTIM_DOWN` (75) below, those seen in the last\n`FRESH_S` (0.2 s) first, nearest first. For the magician (her Shape's `kill`) `_band_picks` ranks by Magic Claw's own\nsearch bands, oldest track first, as the client picks. `_victim` makes it `dying` with the gain on it and a `victim`\nevent; it may walk on until her star lands (`STAR_LANDS_S` 0.75 s after the key plus distance / `STAR_FLIGHT` 1490).\n\n**Confirming (`_judge`, `_deaths_seen`).** A bound track is `dead` (cause \"hers\") when its death is seen, or once\nunseen `MISSING_S` from `CONFIRM_S` (1.5 s) after the gain. Seen alive `REBIND_S` (1.2 s) after the gain, it was the\nwrong one: `let_go`, and the gain moves to the next pick now out of sight. A death seen on another of the gain's picks\ntakes the gain from the bound one; a death seen with a gain waiting takes that gain (only `DEATH_AFTER_GAIN_S`, 0.3 s,\nor more after it); otherwise it is someone else's kill. A gain with no throw known (`watch`) waits `FADE_S +\nMISSING_S` for the likeliest candidate (`_likely`) to vanish. A throw told again the other way re-binds (`_retold`).\n\nOn 85 kills labelled by eye on the recordings of 2026-10-25/26 the binding found the truth's track 76 times (89%); the\nhunt's older ledger had 52 right.\n\n**Bounded.** Dead tracks go `DEAD_KEEP_S` (2 s) after death, offscreen ones after 10 s; throws, picks and gains after\ntheir windows.",
+   "lines": 1057,
+   "key_items": [
+    {
+     "name": "MonsterTracker",
+     "kind": "class",
+     "line": 377,
+     "signature": "MonsterTracker(model: MapModel | None = None, throws: bool = True, shape: Shape = THIEF_SHAPE)",
+     "summary": "Tracks of the monsters on screen, kept up frame by frame, and what happened to them. `throws`: whether her throws are told (`throw`); `shape`: her attacks' reach and windows (the thief's are the constants here).",
+     "details_md": "Holds `tracks` by id, waiting `gains` and `shares`, recent `throws`, `picked` (each bound gain's ranked picks), `keyed` (its throw's key and her x), her path (5 s), `matched` and `counts`."
+    },
+    {
+     "name": "MonsterTracker.update",
+     "kind": "method",
+     "line": 477,
+     "signature": "def update(self, t, found, view, her, players=None, read=None, dying=None, exact=False) -> list[Event]",
+     "summary": "One frame: each detection matched to a track or made new, the unseen judged, deaths seen told, gains and shares resolved; returns the frame's events. `view` None (she isn't placed): nothing judged."
+    },
+    {
+     "name": "MonsterTracker._match",
+     "kind": "method",
+     "line": 565,
+     "signature": "def _match(self, t: float, found: list[Monster]) -> list[tuple[Monster, Track | None]]",
+     "summary": "Each detection and the track it is: same kind and platform, within the gate of the track's prediction, nearest pairs first, one each; a turn mid-platform costs FACING_COST."
+    },
+    {
+     "name": "MonsterTracker.predicted",
+     "kind": "method",
+     "line": 530,
+     "signature": "def predicted(self, tr: Track, t: float) -> float",
+     "summary": "Where a track should be at t: walking its heading at its kind's speed for EXTRAPOLATE_S at most, turning back at its platform's walk edges."
+    },
+    {
+     "name": "MonsterTracker._new",
+     "kind": "method",
+     "line": 626,
+     "signature": "def _new(self, t: float, m: Monster, view: View) -> Track",
+     "summary": "A detection no track explains: a new track, how it came (spawned, entered, appeared); a hidden one of its kind nearby is marked crowded (likely lost to a mix-up)."
+    },
+    {
+     "name": "MonsterTracker._unseen",
+     "kind": "method",
+     "line": 693,
+     "signature": "def _unseen(self, tr: Track, t: float, view: View, events: list[Event]) -> None",
+     "summary": "A track not seen this frame: offscreen (remembered OFFSCREEN_S), hidden after MISSING_S, dropped as a flicker, let go in a crowd or with nobody by it, or dead (cause other) once hidden past HIDE_S from its last sighting or her last throw its way."
+    },
+    {
+     "name": "MonsterTracker._resolve",
+     "kind": "method",
+     "line": 731,
+     "signature": "def _resolve(self, t: float, events: list[Event]) -> None",
+     "summary": "Her gains put on the monsters they were: bound at once to what her attack took, else waiting for the likeliest to go (marked dying or owed meanwhile); then shares and seen deaths."
+    },
+    {
+     "name": "MonsterTracker._bind",
+     "kind": "method",
+     "line": 771,
+     "signature": "def _bind(self, g: float, kind: str | None, t: float, events: list[Event]) -> bool",
+     "summary": "Gain `g` bound to the first pick of the throw keyed GAIN_AFTER_KEY before it; for the magician, her aim is counted against the binding ('aim bound', 'aim elsewhere'), not used."
+    },
+    {
+     "name": "MonsterTracker._picks",
+     "kind": "method",
+     "line": 820,
+     "signature": "def _picks(self, th: _Throw, kind: str | None, g: float, dead: bool = False) -> list[Track]",
+     "summary": "The monsters a throw's attack can have taken, likeliest first: ahead of where she was PICK_S after the key, VICTIM_UP above to VICTIM_DOWN below her feet, seen within FRESH_S first, nearest first."
+    },
+    {
+     "name": "MonsterTracker._band_picks",
+     "kind": "method",
+     "line": 854,
+     "signature": "def _band_picks(self, th, tracks, her, sign, kind, g, dead)",
+     "summary": "`_picks` where her attack picks by the client's own search (the magician's Magic Claw): the first band its windows reach, oldest track first, as the client takes them."
+    },
+    {
+     "name": "MonsterTracker._judge",
+     "kind": "method",
+     "line": 935,
+     "signature": "def _judge(self, t: float, events: list[Event]) -> None",
+     "summary": "Bound tracks: dead once their death is seen or once unseen MISSING_S from CONFIRM_S after the gain; let go if seen alive REBIND_S after it."
+    },
+    {
+     "name": "MonsterTracker._deaths_seen",
+     "kind": "method",
+     "line": 974,
+     "signature": "def _deaths_seen(self, t: float, events: list[Event]) -> None",
+     "summary": "Deaths seen on unbound tracks: one of a gain's picks takes it from the bound one, or takes a waiting gain, else it's someone else's kill."
+    },
+    {
+     "name": "MonsterTracker._stray",
+     "kind": "method",
+     "line": 614,
+     "signature": "def _stray(self, tr: Track, m: Monster, t: float) -> bool",
+     "summary": "Whether a sighting taken for a bound victim is another monster: farther than it can have walked until her star landed (and a little), or than FADE_MOVE + knockback once lost from sight."
+    },
+    {
+     "name": "MonsterTracker.throw",
+     "kind": "method",
+     "line": 433,
+     "signature": "def throw(self, t: float, side: str, attack: str | None = None, aim: tuple | None = None) -> None",
+     "summary": "She threw toward `side` at t: the tracks its star could meet from where she was. Told again at its key the other way, it's that throw put right and its kill bound again."
+    },
+    {
+     "name": "MonsterTracker._dies",
+     "kind": "method",
+     "line": 1027,
+     "signature": "def _dies(self, tr, when, cause, events, t) -> None",
+     "summary": "A track dead: its 'died' event with kind, cause (hers or other), x, platform, whether hurt, the other player by it, and whether its death was seen."
+    }
+   ],
+   "inputs": [
+    "Each frame's detections placed on the map, with the View, her place and the other players (from WorldStep.step)",
+    "Her EXP gains by kind and shares (`gain`, `share`: worldstate._told)",
+    "Her throws: key time, side, attack id, aim (`throw`, from the commands through the service)",
+    "Deaths seen (`seen_dying`, the world step's `dying` callback); a bar reader (`read`)"
+   ],
+   "outputs": [
+    "Tracks (copied into every WorldState) and each detection's track id (`matched`, Monster.track)",
+    "Events: entered, spawned, appeared, back, left, bar_hit, died, victim, let_go",
+    "Counts for the service's line: tracks, flickers, died hers/other, lost in a crowd, nobody by it, kills bound, let go"
+   ],
+   "uses": [
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/players.py",
+    "gamelab/localization/rate.py",
+    "gamelab/character.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/perception/mobs.py",
+    "gamelab/perception/spawns.py",
+    "maplehelper/engine.py"
+   ],
+   "files_io": [],
+   "concurrency": "None of its own: called once a frame from the world step.",
+   "tunables": [
+    {
+     "name": "MISSING_S",
+     "value": "0.3",
+     "meaning": "s unseen on screen before a track is hidden"
+    },
+    {
+     "name": "HIDE_S",
+     "value": "3.5",
+     "meaning": "s a monster may stay out of sight on screen and still be the same one (from its last sighting, or HIT_AFTER_S after her last throw its way if later)"
+    },
+    {
+     "name": "FADE_S",
+     "value": "1.5",
+     "meaning": "s a killed monster may still be seen fading where it died"
+    },
+    {
+     "name": "EXTRAPOLATE_S",
+     "value": "0.5",
+     "meaning": "s an unseen monster is taken to walk on"
+    },
+    {
+     "name": "MIN_SEEN_S",
+     "value": "0.2",
+     "meaning": "a track seen in fewer frames than this makes (3 at 15/s) is a flicker"
+    },
+    {
+     "name": "OFFSCREEN_S",
+     "value": "10.0",
+     "meaning": "s an offscreen track is remembered"
+    },
+    {
+     "name": "DEAD_KEEP_S",
+     "value": "2.0",
+     "meaning": "s a dead track is kept"
+    },
+    {
+     "name": "MATCH_BASE, MATCH_SPEED, MATCH_KNOCKBACK",
+     "value": "10.0, 1.3, 25.0",
+     "meaning": "the match gate: 10 + 1.3 x speed x dt + 25 units"
+    },
+    {
+     "name": "FACING_COST, FACING_END",
+     "value": "8.0, 40.0",
+     "meaning": "extra cost of a mid-platform turn; how far from an end counts as mid-platform"
+    },
+    {
+     "name": "EDGE_PX",
+     "value": "24",
+     "meaning": "half-size px from the screen's side: a new monster came in from off screen"
+    },
+    {
+     "name": "SPAWN_NEAR",
+     "value": "60.0",
+     "meaning": "units from a spawn point of its kind: spawned there"
+    },
+    {
+     "name": "STAR_WINDOW, HIT_AFTER_S",
+     "value": "2.5, 1.2",
+     "meaning": "s after a throw's key a kill or hit can be its star's; its star hits by then"
+    },
+    {
+     "name": "THROW_REACH, THROW_DY",
+     "value": "474.0, 70.0",
+     "meaning": "how far ahead and up or down a star can pick"
+    },
+    {
+     "name": "PICK_S",
+     "value": "0.065",
+     "meaning": "s after the key her attack picks its monster"
+    },
+    {
+     "name": "VICTIM_BEHIND, VICTIM_UP, VICTIM_DOWN",
+     "value": "20.0, 110.0, 75.0",
+     "meaning": "the box her kill's monster is looked for in"
+    },
+    {
+     "name": "FRESH_S",
+     "value": "0.2",
+     "meaning": "tracks seen this recently come first among picks"
+    },
+    {
+     "name": "BIND_S",
+     "value": "0.3",
+     "meaning": "s after a gain its monster may still be bound"
+    },
+    {
+     "name": "STAR_LANDS_S, STAR_FLIGHT",
+     "value": "0.75, 1490.0",
+     "meaning": "her star lands 0.75 s after the key plus distance over 1490 units a second"
+    },
+    {
+     "name": "DEATH_AFTER_GAIN_S",
+     "value": "0.3",
+     "meaning": "a death seen sooner after a gain isn't that gain's"
+    },
+    {
+     "name": "REBIND_S, CONFIRM_S",
+     "value": "1.2, 1.5",
+     "meaning": "seen alive this long after its gain: let go; unseen from this on: dead"
+    },
+    {
+     "name": "FADE_MOVE",
+     "value": "10.0",
+     "meaning": "units a dying monster may seem to move"
+    },
+    {
+     "name": "BAR_STEP",
+     "value": "0.03",
+     "meaning": "a bar this much lower than before is a hit"
+    },
+    {
+     "name": "SHARES",
+     "value": "False",
+     "meaning": "shares of kills not bound to monsters"
+    },
+    {
+     "name": "OTHERS_BY_PLAYER, PLAYERS_LAST",
+     "value": "True, True",
+     "meaning": "a death is someone else's only with a player by it; such monsters come last for her gains"
+    },
+    {
+     "name": "AIM_DX",
+     "value": "60.0",
+     "meaning": "units: a throw's aim told by place is the track of its kind nearest there"
+    },
+    {
+     "name": "POSE_GATE_S",
+     "value": "None",
+     "meaning": "A/B switch: the pose alone decides walking (off)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-30",
+     "what": "One list of whole-screen detections a frame; a track's velocity is its kind's speed from the game data the way it faces; the re-finds and the alpha-beta filter are gone.",
+     "why": "The user: \"Perception should only give mob heading, speed should come from data-mined game files\". Monsters start, stop and turn at once and the filter lagged 0.5 s behind one setting off; the pose alone predicted best at every horizon on the user's own play."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "MIN_SEEN_S in time (0.2 s, 3 frames at 15/s).",
+     "why": "It was 5 frames at 30 a second."
+    },
+    {
+     "date": "2026-10-31",
+     "what": "Platform ends from monsters.walk_edges.",
+     "why": "Until then its half width inside them."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "A sighting fading in matches only a track first seen since its fade began.",
+     "why": "Review: 4 times on the clips the next newborn at a point took the last one's hidden track."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "Her kill bound at the gain to the monster her attack took, followed by its track until its death is seen.",
+     "why": "The user, told a kill was credited to the wrong monster: \"I'm surprised that's even wrong, wtf\". On 85 labelled kills the truth's track 76 times (89%); master's ledger had 52 right."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "A bound victim is re-found only within where her star stopped it (`_stray`).",
+     "why": "On the recordings' replays 8 of 165 bound tracks were re-found 45-97 units from their last sighting, 7 let go so."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "The magician's kills ranked by Magic Claw's own search bands; her aim counted, not used.",
+     "why": "16% of her kills were first put on the wrong monster with the thief's box (R1-R3 recordings)."
+    },
+    {
+     "date": "",
+     "what": "SHARES off.",
+     "why": "Emulated on the grinds' telemetry it took 42 more throws at monsters alive, 4 fewer at the dead."
+    },
+    {
+     "date": "",
+     "what": "OTHERS_BY_PLAYER: a death is someone else's only with another player by it.",
+     "why": "Over seven runs, deaths judged someone else's 14 to 4, the right ones 4 to 4."
+    },
+    {
+     "date": "",
+     "what": "THROW_REACH 434 + 40 (was 460 + 80).",
+     "why": "A kill could be put on a monster 500-540 units off."
+    }
+   ],
+   "gotchas": [
+    "A bound victim stays `dying` and is drawn alive for up to about 1.2 s after the gain: use `Track.killed`, not `state == 'dead'`, to skip it.",
+    "With her throws unknown (`watch`, played by hand) every gain is hers and goes on a monster within a star's reach.",
+    "Track ids are per service run: they restart at 1 with a new run.",
+    "A hit monster under its damage numbers is `hidden`, not dead, for up to HIDE_S after her last throw its way.",
+    "The constants are the thief's; her Shape (gamelab.character) supplies the window, reach and hide time actually used."
+   ],
+   "tests": [
+    "tests/test_tracking.py",
+    "tests/test_kill_credit.py",
+    "tests/test_feed.py",
+    "tests/test_worldstate.py",
+    "tests/test_deaths.py",
+    "tests/test_exact.py",
+    "tests/test_spawns.py",
+    "tests/test_unseen.py",
+    "tests/test_ledger.py",
+    "tests/test_aggro.py",
+    "tests/test_touches.py",
+    "tests/test_presence.py",
+    "tests/test_records.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/memory.py",
+   "title": "Memory of monsters",
+   "tagline": "Every monster seen anywhere, kept across looks with how sure it's still there.",
+   "summary": "`Memory` is a passive Senses listener in the command process that remembers every monster any look has seen, by kind, platform and x. Each entry's chance of still being there falls with age and with looks that covered its place without seeing it; her kills and the tracker's dead tracks end entries. The hunt, grinding, the navigator, localization.unseen and patrol.Belief ask it which monsters are likely where she can't see.",
+   "details_md": "**Why.** In the live hunts of 2026-10-24 on Tree Dungeon, 90% of her looks searched only the band around her, and\nmonsters on other platforms were seen only on whole-screen looks a median 4.9 s apart (up to 22.8 s). The user,\nwatching: \"Right now during the hunt she has tunnelled vision\". Since the service, every look carries the whole\nscreen's monsters (`Scene.swept`), but what isn't on screen still has to be remembered.\n\n**Matching (`update`).** A sighting is a remembered monster when it's the same kind on the same platform within\n`MATCH_SLACK` (40 units) plus `MATCH_SPEED` (1.3) x what it can have walked since (at most `MATCH_WALK_S`, 30 s) of\nwhere it was seen; nearest first. A sighting where a monster killed in the last `FADE_S` (1.5 s) can be fading (or\nwithin `FADE_DX`, 30 units, of where its kill was placed) is that corpse, not a new monster.\n\n**Coverage (`Cover.holds`, `_holds`).** A look *covers* a body when the whole of it (as tall as it walks, plus\n`BODY_SLACK` 4 units) lay inside one stretch of rows the look searched, `EDGE` (30 units) inside the screen's sides\nand not under the minimap: the detector finds only whole bodies, so a cut body is not a miss. An entry counts a miss\nwhen a covering look searched at least `COVER_SHARE` (half) of where it can have walked since, judged at\n`COVER_POINTS` (9) places. Looks while she isn't standing don't count (every monster's y is off by her height). Misses\ndon't count while a throw of hers went its way in the last `HIDE_S` and it was seen since: it may be hiding under her\ndamage numbers.\n\n**How sure (`Remembered.p`).** p = exp(-age / `STAY_S`) x exp(-d / `MISS_S`), with `STAY_S` 45 s and `MISS_S` 3 s,\nd the time from its last sighting to the latest covered miss. Measured on 8,750 whole-screen looks of `watch` on\n2026-10-24: monsters missing with their place covered were seen again 0.84 of the time after 0.3 s, 0.51 after 2 s,\n0.20 after 5 s, where exp(-d/3) gives 0.90, 0.51, 0.19. An entry is forgotten under `P_FORGET` (0.15, about 5.7 s of\ncovered misses) or `MEMORY_S` (60 s) after it was seen. `there()` returns those at least `SURE` (0.5) likely.\n\n**Kills (`_take_kills`, `_take_moves`).** The ledger's new kills mark entries killed: by track id when known, else the\nnearest of its kind on its platform within `KILL_DX` (150). The feed's dead tracks end their entries too: another\nplayer's kill as `taken`, not `killed`. When the tracker moves a kill to another monster (the magician's kills), the\nfirst entry comes back alive and the new one is killed, as one `moved` event. Unplaced kills (no kind or platform) go on\nthe likeliest monster she threw at.\n\n**Who reads it.** The hunt (`memory.there`), grinding, the navigator and localization.unseen (`memory.alive`), `patrol.Belief` (its events)\nand the mini-map (its 'memory' telemetry records, every `RECORD_EVERY_S` 0.5 s). `update` takes plain data, so\n`replay` runs the same memory over a recorded run's 'scene' records.",
+   "lines": 545,
+   "key_items": [
+    {
+     "name": "Memory",
+     "kind": "class",
+     "line": 174,
+     "signature": "Memory(model, kills=None, dead=None, theirs=None, moved=None, shape=THIEF_SHAPE)",
+     "summary": "The monsters she has seen, kept across looks. `kills`, `dead`, `theirs`, `moved` are callables onto the ledger (behavior.ledger): her kills, the feed's dead tracks, other players' kills, moved kills.",
+     "details_md": "Keeps `entries`, the last 400 `events` (new, killed, taken, gone, aged, moved), the last 256 `covers` and when each platform was last covered whole (`covered`)."
+    },
+    {
+     "name": "Memory.update",
+     "kind": "method",
+     "line": 257,
+     "signature": "def update(self, t, sightings, cover, players=None) -> None",
+     "summary": "One look: kills taken, sightings matched (nearest first) or new, covered misses counted, rivals noted, the unlikely and old forgotten. Plain data, so it also runs on recorded runs."
+    },
+    {
+     "name": "Memory.on_look",
+     "kind": "method",
+     "line": 236,
+     "signature": "def on_look(self, s: Scene) -> None",
+     "summary": "A Senses listener: the look's monsters and swept monsters into the memory with what it covered, and a 'memory' telemetry record every RECORD_EVERY_S at most."
+    },
+    {
+     "name": "Memory.there",
+     "kind": "method",
+     "line": 217,
+     "signature": "def there(self, t, platform=None, kinds=None, min_p=SURE) -> list[Monster]",
+     "summary": "The monsters remembered at time t at least `min_p` sure, on a platform and of kinds if given (their last sightings, as placed)."
+    },
+    {
+     "name": "Remembered.p",
+     "kind": "method",
+     "line": 121,
+     "signature": "def p(self, t: float) -> float",
+     "summary": "How sure it's still there: exp(-age / STAY_S) x exp(-d / MISS_S), d from its last sighting to the latest covered miss; 0 once ended."
+    },
+    {
+     "name": "Cover.holds",
+     "kind": "method",
+     "line": 151,
+     "signature": "def holds(self, x: float, feet: float, half: float, top: float) -> bool",
+     "summary": "Whether a body at (x, feet), `half` wide either side and `top` tall, was wholly searched: inside one stretch of rows, EDGE inside the screen's sides, not under the minimap."
+    },
+    {
+     "name": "cover_of",
+     "kind": "function",
+     "line": 162,
+     "signature": "def cover_of(s: Scene) -> Cover | None",
+     "summary": "What a look searched for monsters (Scene.rows), in map units; None if it searched none or didn't place her standing."
+    },
+    {
+     "name": "Memory._take_kills",
+     "kind": "method",
+     "line": 325,
+     "signature": "def _take_kills(self, t: float) -> list",
+     "summary": "Her new kills mark entries killed (by track, else nearest within KILL_DX); dead tracks end theirs, another player's as 'taken'; returns kills no throw placed."
+    },
+    {
+     "name": "Memory._take_moves",
+     "kind": "method",
+     "line": 369,
+     "signature": "def _take_moves(self, t: float, dead) -> None",
+     "summary": "Kills the tracker moved to another monster: the first one alive again, the new one killed, one 'moved' event."
+    },
+    {
+     "name": "Memory._holds",
+     "kind": "method",
+     "line": 422,
+     "signature": "def _holds(self, cover: Cover, e: Remembered, t: float) -> bool",
+     "summary": "Whether a cover searched COVER_SHARE of where a remembered monster can have walked since, judged at COVER_POINTS places."
+    },
+    {
+     "name": "Memory._thrown_at",
+     "kind": "method",
+     "line": 440,
+     "signature": "def _thrown_at(self, e: Remembered, t: float) -> bool",
+     "summary": "Whether a throw of hers went its way in the last HIDE_S and it was seen since: it may be hiding under her damage numbers, so misses don't count."
+    },
+    {
+     "name": "Memory._covers_platform",
+     "kind": "method",
+     "line": 429,
+     "signature": "def _covers_platform(self, cover: Cover, pid: int) -> bool",
+     "summary": "Whether a cover searched all of a platform for its tallest body (every one of COVER_POINTS places)."
+    },
+    {
+     "name": "replay",
+     "kind": "function",
+     "line": 477,
+     "signature": "def replay(records, model, band, every=RECORD_EVERY_S, memory=None) -> list[dict]",
+     "summary": "The memory run again on a recorded run's 'scene' records and 'kill' events, with 'memory' records added as live."
+    }
+   ],
+   "inputs": [
+    "Every look's Scene (`on_look`): its monsters and swept monsters, the rows it searched, her place, the other players",
+    "Her throws (`on_throw`, an Actions throw listener)",
+    "The ledger's kills, dead tracks, other players' kills and moved kills (callables)"
+   ],
+   "outputs": [
+    "Remembered monsters with how sure each is (`alive`, `there`)",
+    "When each platform was last covered whole (`covered_at`) and the latest covers (behavior.patrol's points)",
+    "Events new / killed / taken / gone / aged / moved for patrol.Belief",
+    "'memory' telemetry records (the mini-map)"
+   ],
+   "uses": [
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/players.py",
+    "gamelab/localization/scene.py",
+    "gamelab/localization/tracking.py",
+    "gamelab/character.py",
+    "gamelab/telemetry.py",
+    "gamelab/perception/mobs.py",
+    "gamelab/perception/minimap.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/screen.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "MATCH_SLACK",
+     "value": "40.0",
+     "meaning": "units a monster seen again may be from where it was ..."
+    },
+    {
+     "name": "MATCH_SPEED, MATCH_WALK_S",
+     "value": "1.3, 30.0",
+     "meaning": "... plus this times its walk since, over 30 s at most"
+    },
+    {
+     "name": "EDGE",
+     "value": "30.0",
+     "meaning": "units inside the screen's sides a body must be to count as in view"
+    },
+    {
+     "name": "COVER_SHARE, COVER_POINTS",
+     "value": "0.5, 9",
+     "meaning": "share of where it can be a look must search, judged at 9 places"
+    },
+    {
+     "name": "BODY_SLACK, DEFAULT_TOP",
+     "value": "4.0, 60.0",
+     "meaning": "units above a body's top the rows must reach; a kind with no body known is this tall"
+    },
+    {
+     "name": "MISS_S",
+     "value": "3.0",
+     "meaning": "s: by evidence, p = exp(-d / 3)"
+    },
+    {
+     "name": "STAY_S",
+     "value": "45.0",
+     "meaning": "s: by age, p = exp(-a / 45)"
+    },
+    {
+     "name": "P_FORGET",
+     "value": "0.15",
+     "meaning": "forgotten under this (about 5.7 s of covered misses)"
+    },
+    {
+     "name": "MEMORY_S",
+     "value": "60.0",
+     "meaning": "... or this long after it was seen"
+    },
+    {
+     "name": "FADE_S, FADE_DX",
+     "value": "1.5, 30.0",
+     "meaning": "a killed monster may be seen fading this long, this near its kill"
+    },
+    {
+     "name": "KILL_DX",
+     "value": "150.0",
+     "meaning": "a kill marks the nearest remembered on its platform this close"
+    },
+    {
+     "name": "ENDED_KEEP_S",
+     "value": "2.0",
+     "meaning": "s an ended entry is kept for the mini-map"
+    },
+    {
+     "name": "RECORD_EVERY_S",
+     "value": "0.5",
+     "meaning": "s between 'memory' records"
+    },
+    {
+     "name": "EVENTS, COVERS",
+     "value": "400, 256",
+     "meaning": "events and covers kept"
+    },
+    {
+     "name": "SURE",
+     "value": "0.5",
+     "meaning": "p at which a remembered monster counts as there"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "A map-wide memory of the monsters she has seen, MISS_S and STAY_S measured on live telemetry.",
+     "why": "90% of her looks in that day's hunts searched only her band; the user: \"Right now during the hunt she has tunnelled vision\"."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "Another player's kills counted as 'taken', apart from hers.",
+     "why": "Counted as dead alone, patrol.Belief learnt another player takes Green Mushrooms at the prior 0.5 instead of master's 0.8."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "Kills the tracker moves to another monster are followed (`_take_moves`).",
+     "why": "On that night's recordings the tracker first put 28 of her 149 labelled kills on another monster: the real one stayed remembered alive."
+    },
+    {
+     "date": "",
+     "what": "Her throws its way hold off covered misses for HIDE_S, if it was seen since.",
+     "why": "A monster hides under her damage numbers 1-3 s; one not seen since does count (loop_shoots_21_from_22)."
+    },
+    {
+     "date": "",
+     "what": "A corpse matches only within FADE_DX of where its kill was placed (or its reach).",
+     "why": "A body seen fading 77 units from there was taken for a new monster in loop_shoots_21_from_22."
+    }
+   ],
+   "gotchas": [
+    "A body is covered only when its whole height was searched: platform 19 on Tree Dungeon, 60 units under the view's top from where she hunts, was never covered, so its entries only age out.",
+    "Looks while she isn't standing cover nothing (every monster's y is off by her height).",
+    "Sightings are matched by kind, platform and place, never by track id; only kills and the feed's dead tracks use the track id (Monster.track), and track ids restart with each service run.",
+    "Kills with no kind or platform go on the likeliest monster she threw at, preferring one this look didn't see."
+   ],
+   "tests": [
+    "tests/test_memory.py",
+    "tests/test_census.py",
+    "tests/test_grind.py",
+    "tests/test_kill_credit.py",
+    "tests/test_stranger_take.py",
+    "tests/test_feed.py",
+    "tests/test_character.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/aggro.py",
+   "title": "Aggro belief",
+   "tagline": "Who she hurt and is chasing her, kept for the 3-4 minute chase.",
+   "summary": "`Aggro` keeps every monster she has hurt as a `Chaser` for as long as its chase lasts (180-240 s after each hit), across looks that don't see it and the tracker's changes of id, and predicts where it is. It also names the monster that likeliest touched her at each touch. Passive, in the command process, fed every look and throw by the hunter. Today behavior.targeting reads which tracks are chasers; the planner's questions (`chasers_at`, `near`, `Guess.track`, `toucher`) have no caller yet.",
+   "details_md": "**The rule it models** (the user's, 2026-10-31; the v83 client's `Mob::chase` as HeavenClient has it; the simulator's\n`sim.world.AGGRO_S`): an unhurt monster wanders; a hit of hers draws a chase of `CHASE_S` (180-240 s), renewed by each\nhit. Chasing, it decides every `THINK_S` (0.945 s) which way to walk: at her, or on its way while she's within\n`CHASE_PASS` (100 units) across, so it walks past her and back. It walks at its kind's speed along its own platform,\nfolding at its walk edges, and after a hit it stands its flinch out first (`monsters.FLINCH_S`).\n\n**Why** (the arrival diagnosis of 2026-11-03): arriving onto Tree Dungeon's platform 10 by the -80 rope, the look held\nnone of the monsters within 60 of her in about 30% of cases, and nothing kept who she had hurt for the minutes they\nchase her (the navigator's trip memory forgets after 2 s; the hunt's wounds after 3 s out of sight).\n\n**Making a chaser (`_bar_hit`).** A `bar_hit` event the tracker says is \"hers\", or any `bar_hit` up to `LATE_S` (4 s)\nafter a throw whose path held that track (a hit hidden 1-3 s under damage numbers, past the tracker's window). A hit on\na new track near a lost chaser of its kind (within its reach plus `REJOIN_SLACK`) is that chaser found again under a new\nid (`_lost_near`).\n\n**Keeping identity (`_associate`, `_pairs`).** Each look, every chaser goes to one track, nearest its prediction first:\nits own track (`OWN_BONUS`, 30 units nearer) while that shows a bar read within `BAR_FRESH_S` (0.5 s) of its sighting;\nnever another chaser's track; another track only if it was first seen after the chaser was last seen. A track with no\nbar read for `BAR_GONE_S` (1.5 s) leaves its chaser doubted (`DOUBT_P` 0.3), dropped as a 'phantom' after `DOUBT_S`\n(8 s): a bar misread off a neighbour made it.\n\n**Ending (`_died`, `_follow`, `_end`).** Its death, its track becoming a kill's, `CHASE_S[1]` (240 s) after her last\nhit, or `FORGET_S` (120 s) unseen. A death the tracker called another's with nobody by it keeps the chaser, lost, at\n`OTHER_DEATH_P` (0.5): the tracker calls any hurt monster hidden past 3.5 s dead.\n\n**Where it is (`_guess`, `_chase_x`).** From its last sighting the chase is played forward decision by decision against\nher path for `DET_S` (1 s) unseen, or until it could have reached her, with a reach of `SPREAD_0` (15 units) plus\n`SPREAD_RATE` (0.35) of its walk a second unseen either side. Past that it is \"about her\": her x, `CHASE_PASS` plus a\ndecision's walk either side, within its walk edges. `p` = the chase still on (1 until 180 s, falling to 0 at 240) x\nbeing about (1 while seen within `SEEN_S` 10 s, then exp(-(unseen - 10) / 60)) x the doubt factors; 0 while dying.\n\n**Touches (`_touched`, `_knocks`).** For each 'touch' event, the candidates are the chasers' guesses and other tracks\nwalked on (0.5 s at most) at her place at the popup's onset; the one whose reach covers her likeliest is named with its\nside. A damage touch's knock (her place moving `KNOCK_DX`, 15 units, or more) puts the side right.\n\n**Measured in the simulator** at the -80 arrivals over 48 seeds: by identity the belief's recall and precision were\n82.2% / 75.0% for her (the magician) and 78.2% / 70.7% for him (the thief), against 52.9% / 64.3% and 39.8% / 53.4%\nfor the look alone (its monsters with a bar). It costs a median 0.035-0.055 ms a look.\n\n**Who asks.** It was built as the per-step planner's prerequisite (README, Her aggro belief), so its questions are\nthe planner's: `chasers_at`, `near`, `Guess.track` (a `localization.monsters.MonsterTrack` the move planner takes)\nand `toucher`. In the code today only behavior.targeting reads it (`aggro.chasers`: which tracks chase her, for a\nfoe's walk), and the hunter writes its 'aggro' telemetry record every `AGGRO_RECORD_S` (30 s) and at each touch.",
+   "lines": 758,
+   "key_items": [
+    {
+     "name": "Aggro",
+     "kind": "class",
+     "line": 194,
+     "signature": "Aggro(model: MapModel | None = None, reach: tuple[float, float, float, float] | None = None)",
+     "summary": "The monsters she has hurt that chase her. `reach` is her Shape's (near, ahead, up, down), the thief's (-10, 474, 70, 70) by default.",
+     "details_md": "Keeps `chasers` by its own key, the last 64 ended ones, the last 64 touches, her path (30-60 s) and her throws of the last LATE_S."
+    },
+    {
+     "name": "Aggro.update",
+     "kind": "method",
+     "line": 237,
+     "signature": "def update(self, t, her, tracks, events) -> None",
+     "summary": "A look at t: her place into her path, the events since the last look (bar_hit, died, touch), each chaser followed and associated to a track, the ended dropped, touches named, knocks judged."
+    },
+    {
+     "name": "Aggro.on_look",
+     "kind": "method",
+     "line": 217,
+     "signature": "def on_look(self, s) -> None",
+     "summary": "A Senses listener: the look's time, her place, its tracks and events into `update`; a made-up look (Scene.what_if) is ignored."
+    },
+    {
+     "name": "Aggro.throw",
+     "kind": "method",
+     "line": 228,
+     "signature": "def throw(self, when: float, side: str, aim: int | None = None) -> None",
+     "summary": "A throw of hers: the last look's tracks its star could meet (and the aimed track), for a bar seen down on one up to LATE_S later."
+    },
+    {
+     "name": "Aggro._bar_hit",
+     "kind": "method",
+     "line": 266,
+     "signature": "def _bar_hit(self, e, by_id: dict) -> None",
+     "summary": "A bar down: her hit when the tracker says so or a throw had it in its path within LATE_S; makes a chaser, or finds a lost one again (`_lost_near`), and renews its chase."
+    },
+    {
+     "name": "Aggro._lost_near",
+     "kind": "method",
+     "line": 300,
+     "signature": "def _lost_near(self, tr, t: float) -> Chaser | None",
+     "summary": "A chaser of the track's kind and platform not seen lately whose reach holds it: the tracker found it again under a new id."
+    },
+    {
+     "name": "Aggro._associate",
+     "kind": "method",
+     "line": 360,
+     "signature": "def _associate(self, t: float, by_id: dict) -> None",
+     "summary": "Every chaser to the track that's it this look, one each, nearest pairs first; doubted when its track shows no bar for BAR_GONE_S, lost when its track went to another."
+    },
+    {
+     "name": "Aggro._pairs",
+     "kind": "method",
+     "line": 403,
+     "signature": "def _pairs(self, t, chasers, by_id, taken) -> list[tuple[float, int, int]]",
+     "summary": "The (cost, chaser, track) pairs a look can make: same kind and platform, within reach, its own track OWN_BONUS nearer, an unhurt track UNHURT_COST farther, another chaser's never."
+    },
+    {
+     "name": "Aggro._end",
+     "kind": "method",
+     "line": 450,
+     "signature": "def _end(self, t: float) -> None",
+     "summary": "Drops chasers whose chase is over (CHASE_S[1] after her last hit), unseen FORGET_S, or doubted DOUBT_S ('phantom')."
+    },
+    {
+     "name": "Aggro._chase_x",
+     "kind": "method",
+     "line": 517,
+     "signature": "def _chase_x(self, c: Chaser, t: float) -> tuple[float, int]",
+     "summary": "Where a chaser likeliest is at t: its flinch stood out, then a decision every THINK_S against her path's x, walked at its kind's speed, folding at its walk edges."
+    },
+    {
+     "name": "Aggro._guess",
+     "kind": "method",
+     "line": 541,
+     "signature": "def _guess(self, c: Chaser, t: float) -> Guess",
+     "summary": "The chaser at t: its chase walked on while that's a prediction (DET_S), with a growing reach; past that, about her within CHASE_PASS and a decision's walk."
+    },
+    {
+     "name": "Aggro.p",
+     "kind": "method",
+     "line": 564,
+     "signature": "def p(self, c: Chaser, t: float) -> float",
+     "summary": "How likely the chaser is about and chasing her: chase on x seen lately x doubt factors; 0 while dying."
+    },
+    {
+     "name": "Aggro.chasers_at",
+     "kind": "method",
+     "line": 574,
+     "signature": "def chasers_at(self, t, platform=None, min_p=0.0) -> list[Guess]",
+     "summary": "The chasers at t (on a platform if given) where each likeliest is, likeliest first. `near(t, x, within)` filters them by reach."
+    },
+    {
+     "name": "Aggro._touched",
+     "kind": "method",
+     "line": 600,
+     "signature": "def _touched(self, e, t: float, by_id: dict) -> None",
+     "summary": "A 'touch' event: of the chasers' guesses and the other tracks walked on, the one whose reach puts it on her likeliest, with its side."
+    },
+    {
+     "name": "replay",
+     "kind": "function",
+     "line": 702,
+     "signature": "def replay(records, model=None, reach=None, aggro=None)",
+     "summary": "The belief run on recorded telemetry: 'scene' for her path, the hunt's 'attack' for throws, 'tracks' as looks, 'died' and 'touch' events; yields (t, belief) after each look."
+    }
+   ],
+   "inputs": [
+    "Every look's Scene: her place, the feed's tracks and the events drained with it (`on_look`)",
+    "Her throws: key time, side, aimed track (`throw`, an Actions throw listener)"
+   ],
+   "outputs": [
+    "Chasers and their Guess (`chasers_at`, `near`), each convertible to a motion MonsterTrack (`Guess.track`)",
+    "The likeliest toucher of each touch (`toucher`, `touches`)",
+    "'aggro' telemetry records via `record` (the hunter's, every 30 s and at touches)"
+   ],
+   "uses": [
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/tracking.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "CHASE_S",
+     "value": "(180.0, 240.0)",
+     "meaning": "s a hit draws its chase (v83's, drawn uniformly in between)"
+    },
+    {
+     "name": "CHASE_PASS",
+     "value": "100.0",
+     "meaning": "units: within this of her across, a chaser keeps its way"
+    },
+    {
+     "name": "THINK_S",
+     "value": "0.945",
+     "meaning": "s between a chaser's decisions"
+    },
+    {
+     "name": "LATE_S",
+     "value": "4.0",
+     "meaning": "s after a throw that a bar seen down in its path is her hit"
+    },
+    {
+     "name": "PATH_SLACK",
+     "value": "20.0",
+     "meaning": "units past her reach a track may be and still be in a throw's path"
+    },
+    {
+     "name": "SEEN_S, LOST_S",
+     "value": "10.0, 60.0",
+     "meaning": "s unseen before doubt, then exp(-(unseen - 10) / 60)"
+    },
+    {
+     "name": "FORGET_S",
+     "value": "120.0",
+     "meaning": "s unseen after which it's dropped"
+    },
+    {
+     "name": "OTHER_DEATH_P",
+     "value": "0.5",
+     "meaning": "a chaser the tracker called another's kill with nobody by it: kept this likely"
+    },
+    {
+     "name": "REJOIN_SLACK",
+     "value": "40.0",
+     "meaning": "units past its reach a new track may be and still be a lost chaser"
+    },
+    {
+     "name": "BAR_GONE_S, BAR_FRESH_S",
+     "value": "1.5, 0.5",
+     "meaning": "s with no bar read before a track isn't its chaser; a bar read this fresh shows"
+    },
+    {
+     "name": "STALE_S",
+     "value": "0.3",
+     "meaning": "s unseen before a chaser's own track may be another's new sighting"
+    },
+    {
+     "name": "OWN_BONUS, UNHURT_COST",
+     "value": "30.0, 40.0",
+     "meaning": "units nearer for its own track; farther for a track with no bar"
+    },
+    {
+     "name": "DOUBT_P, DOUBT_S",
+     "value": "0.3, 8.0",
+     "meaning": "a doubted chaser's likelihood, and how long before it's dropped"
+    },
+    {
+     "name": "DET_S",
+     "value": "1.0",
+     "meaning": "s unseen its chase is walked on as last seen"
+    },
+    {
+     "name": "SPREAD_0, SPREAD_RATE",
+     "value": "15.0, 0.35",
+     "meaning": "its reach either side: 15 units plus 0.35 of its walk a second unseen"
+    },
+    {
+     "name": "PATH_S",
+     "value": "30.0",
+     "meaning": "s of her path kept"
+    },
+    {
+     "name": "TOUCH_REACH, HER_HALF, HER_AT_S",
+     "value": "22.0, 20.0, 0.5",
+     "meaning": "touch reach past both half widths; her half width; her path's look before a touch"
+    },
+    {
+     "name": "KNOCK_DX",
+     "value": "15.0",
+     "meaning": "units her place moved after a damage touch: knocked that way"
+    },
+    {
+     "name": "TOUCH_KEEP",
+     "value": "64",
+     "meaning": "touches kept"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-31",
+     "what": "The chase rule: a hit draws a 3-4 minute chase, a decision every ~0.95 s, at her or past her.",
+     "why": "The user's rule, as the v83 client's Mob::chase has it (HeavenClient) and sim.world models it."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "Built as the per-step planner's prerequisite: a persistent per-monster aggro belief.",
+     "why": "The arrival diagnosis: at the -80 rope's arrivals onto platform 10 the look held none of the monsters within 60 of her in about 30% of cases."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "A bar counts only when read fresh (`_shows_bar`).",
+     "why": "97 of the 118 wrong bars at the arrivals were a track's bar kept from an older read."
+    }
+   ],
+   "gotchas": [
+    "The service's telemetry has no bar_hit 'by': `replay` counts a track's hits going up as hers only by her throws' paths.",
+    "Chasers of one kind with the same bar can't be told apart: most misses are a chaser on the other monster.",
+    "Past DET_S an unseen chaser is a band about her (about +/-195-218 units), not a point: use `lo`-`hi` (Guess.track's `unsure`).",
+    "Monsters never tracked, or newborns not tracked yet, can't be known; it may then name a nearby track as the toucher.",
+    "`_touched` takes a touch as damage unless its kind is 'miss' in lower case, but the touch watch says 'MISS' (perception.touches.MISS); so live every MISS is counted as damage here (and gets a knock judged). tests/test_aggro.py uses 'miss'."
+   ],
+   "tests": [
+    "tests/test_aggro.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/spawnclock.py",
+   "title": "Spawn clock",
+   "tagline": "Learns the server's 7.1146 s respawn pass from newborns fading in.",
+   "summary": "`SpawnClock` learns when the server's next spawn pass will refill free spawn points, from the births perception sees ('spawned' events with their fade-in alpha). The hunt's spawn guard asks it whether the clock is sure, when the next pass is, and how likely a stretch of time meets one.",
+   "details_md": "**The server's pass.** The server fills the map's free spawn points at a pass every `PERIOD_S` (7.1146 s), not\nmonster by monster. Measured on both live hours of 2026-11-02 (3,204 and 1,418 fading sightings over 504 and 379\nperiods): the same period in every 10 minutes of each; on one hour 95% of newborns' starts lay within 0.1 s of the\nfitted passes.\n\n**Births (`see`, `birth`).** For each 'spawned' event (the tracker's, localization.tracking), a monster found fading in\ngives its birth time: the event's time less its alpha over `FADE_PER_S` (perception.spawns: 1.224 alpha a second, 0.817\ns from nothing to solid). One found already solid by a spawn point counts `SOLID_WEIGHT` (0.3) of one. Births within\n`SAME_PASS_S` (0.4 s) are one pass; passes of the last `MEMORY_S` (600 s) are kept.\n\n**The fit (`_fit`).** Each kept pass is a candidate phase; the one with the most age-weighted passes (exp(-age /\n`AGE_S`), 300 s) within `INLIER_S` (0.35 s) of its grid wins. Its inliers are then fitted to the grid by weighted least\nsquares; once they span `PERIOD_SPAN_S` (120 s) and 3 distinct passes, the period is fitted too, held within\n`PERIOD_SLACK` (0.05 s) of the default. The residuals' spread (at least `SIGMA_MIN`, 0.03 s) over the square root of\nthe weight is the phase's standard error. The clock is `sure` once the weight reaches `SURE_N` (1.5: two fading\nbirths agreeing). Fits run lazily when asked (`_dirty`).\n\n**A phase that moves (`_astray_check`, `forget`).** A server restart or a channel change shifts the phase. `ASTRAY_N`\n(3) passes in a row with fading births more than `INLIER_S` off a sure clock's grid drop the passes before them, so the\nclock follows at once. Before this (the review of 2026-11-03) an hour of the old phase outvoted the new for 24 passes\n(171 s). The hunt also calls `forget` after its looks were lost for more than 21 s.\n\n**Answers.** `next_pass(t)`: the first pass after t. `chance(t0, t1, lo, hi)`: how likely the interval [t0, t1]\noverlaps [T + lo, T + hi] for some pass T, each pass's time normal about the grid with the fit's standard error;\nwith no phase yet, the window's share of a period. Replayed on the live hours' newborns it is sure 14 s in and puts\nbirths within 0.055 s of its passes at p95. The simulator's pass (`sim.world.TICK_S`, 7.115 s) is 0.0004 s off, so it\nwas left as it is.",
+   "lines": 245,
+   "key_items": [
+    {
+     "name": "SpawnClock",
+     "kind": "class",
+     "line": 66,
+     "signature": "SpawnClock(period: float = PERIOD_S)",
+     "summary": "The map's spawn pass as learned from births: its phase, period, standard error and weight, the passes seen, and how often its phase was reset."
+    },
+    {
+     "name": "SpawnClock.see",
+     "kind": "method",
+     "line": 83,
+     "signature": "def see(self, events) -> int",
+     "summary": "A look's events: each 'spawned' one a birth, at its time less its alpha over FADE_PER_S (weight 1), or at its time with SOLID_WEIGHT if found solid."
+    },
+    {
+     "name": "SpawnClock.birth",
+     "kind": "method",
+     "line": 98,
+     "signature": "def birth(self, t: float, w: float = 1.0) -> None",
+     "summary": "A birth at t: joins a pass within SAME_PASS_S (weighted mean), or starts a new one; passes older than MEMORY_S drop out. A fading birth is checked against the grid first."
+    },
+    {
+     "name": "SpawnClock._fit",
+     "kind": "method",
+     "line": 142,
+     "signature": "def _fit(self) -> None",
+     "summary": "The phase from the passes kept: the densest age-weighted candidate within INLIER_S, then weighted least squares (and the period, once PERIOD_SPAN_S is spanned), and the standard error."
+    },
+    {
+     "name": "SpawnClock._astray_check",
+     "kind": "method",
+     "line": 118,
+     "signature": "def _astray_check(self, t: float) -> None",
+     "summary": "A fading birth off a sure clock's grid: ASTRAY_N passes in a row drop the passes before them, so the clock follows a moved phase at once."
+    },
+    {
+     "name": "SpawnClock.chance",
+     "kind": "method",
+     "line": 198,
+     "signature": "def chance(self, t0: float, t1: float, lo: float, hi: float) -> float",
+     "summary": "How likely [t0, t1] overlaps [T + lo, T + hi] for some pass T, each pass normal about the grid with the fit's se; with no phase, the window's share of a period."
+    },
+    {
+     "name": "SpawnClock.next_pass",
+     "kind": "method",
+     "line": 191,
+     "signature": "def next_pass(self, t: float) -> float | None",
+     "summary": "The time of the first pass after t (None with no phase)."
+    },
+    {
+     "name": "SpawnClock.sure",
+     "kind": "method",
+     "line": 186,
+     "signature": "def sure(self) -> bool",
+     "summary": "A property: whether the passes seen agree enough (weight SURE_N) to time the next ones."
+    },
+    {
+     "name": "SpawnClock.forget",
+     "kind": "method",
+     "line": 135,
+     "signature": "def forget(self) -> None",
+     "summary": "Drops every pass (the hunt calls it after its looks were lost over 21 s: another server or channel)."
+    },
+    {
+     "name": "SpawnClock.record",
+     "kind": "method",
+     "line": 220,
+     "signature": "def record(self) -> dict",
+     "summary": "As telemetry data (the hunter's 'spawn_clock' record once a minute): fitted on a copy, so recording doesn't change the fit's cadence."
+    },
+    {
+     "name": "PERIOD_S",
+     "kind": "constant",
+     "line": 46,
+     "signature": "PERIOD_S = 7.1146",
+     "summary": "s between the server's passes as measured live on 2026-11-02: the default, and the centre a fitted period is held to."
+    }
+   ],
+   "inputs": [
+    "Each look's events (`see`: 'spawned' events with their 'fading' alpha), through the hunter's `_births`"
+   ],
+   "outputs": [
+    "`sure` and `next_pass` for the hunt's spawn guard (behavior.hunt `_respawn_guard`, which holds a trip whose stand would meet the pass), and `chance` for its wait places (`_respawn_wait`, priced with attack.danger.respawn_risk)",
+    "'spawn_clock' telemetry records (`record`)"
+   ],
+   "uses": [
+    "gamelab/perception/spawns.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "PERIOD_S",
+     "value": "7.1146",
+     "meaning": "s between the server's passes (the default)"
+    },
+    {
+     "name": "PERIOD_SLACK",
+     "value": "0.05",
+     "meaning": "s a fitted period may be off PERIOD_S"
+    },
+    {
+     "name": "PERIOD_SPAN_S",
+     "value": "120.0",
+     "meaning": "s the inliers must span for the period to be fitted"
+    },
+    {
+     "name": "SAME_PASS_S",
+     "value": "0.4",
+     "meaning": "s: births this close are one pass's"
+    },
+    {
+     "name": "INLIER_S",
+     "value": "0.35",
+     "meaning": "s off the grid at most for a pass to count in the fit"
+    },
+    {
+     "name": "MEMORY_S",
+     "value": "600.0",
+     "meaning": "s of passes kept"
+    },
+    {
+     "name": "AGE_S",
+     "value": "300.0",
+     "meaning": "s: a pass's weight falls by exp(-age / 300)"
+    },
+    {
+     "name": "SOLID_WEIGHT",
+     "value": "0.3",
+     "meaning": "a birth found solid counts this much"
+    },
+    {
+     "name": "SIGMA_MIN",
+     "value": "0.03",
+     "meaning": "s: the least residual spread (half a 1/15 s frame)"
+    },
+    {
+     "name": "SURE_N",
+     "value": "1.5",
+     "meaning": "weight for the clock to be sure: two fading births"
+    },
+    {
+     "name": "ASTRAY_N",
+     "value": "3",
+     "meaning": "passes in a row off a sure grid: its phase moved"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-02",
+     "what": "PERIOD_S 7.1146 s, measured on both live hours.",
+     "why": "The cornered report's 7.110 s was a count on a 0.005 s grid where every period from 7.110 to about 7.12 counts all; the least was reported."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "A phase that moves resets the clock (ASTRAY_N).",
+     "why": "Review: by weight alone an hour of the old phase outvoted the new for 24 passes (171 s), the clock sure of the old meanwhile."
+    },
+    {
+     "date": "",
+     "what": "The simulator's TICK_S (7.115 s) left as it is.",
+     "why": "0.0004 s apart: 0.02 s over a 5-minute run."
+    }
+   ],
+   "gotchas": [
+    "Births are only as good as the spawn watch, which runs on Tree Dungeon at 1366x768 only; elsewhere a newborn is 'spawned' only when the whole screen first finds it near a spawn point (a median 467 ms after it showed), timed at that sighting and weighing 0.3.",
+    "Times are the looks' and events' clock (time.monotonic), not wall time.",
+    "Fits are lazy: the answers change only when asked after new births."
+   ],
+   "tests": [
+    "tests/test_spawnclock.py"
+   ]
+  }
+ ],
+ "data_types": [
+  {
+   "name": "WorldState",
+   "module": "gamelab/localization/worldstate.py",
+   "line": 245,
+   "summary": "What one frame showed, placed on the map, with its tracks and events. Made by WorldStep.step in the service; sent down the pipe (picture removed) to every command; turned into a Scene by to_scene.",
+   "fields": [
+    {
+     "name": "seq",
+     "type": "int",
+     "meaning": "the step's frame number (numbered from 1 per run)"
+    },
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "when the screen showed it (time.monotonic)"
+    },
+    {
+     "name": "visible",
+     "type": "bool",
+     "meaning": "False: the game wasn't wholly on screen, nothing was read"
+    },
+    {
+     "name": "bad",
+     "type": "Problem | None",
+     "meaning": "why nothing may be acted on (a failed check); None: the game as expected"
+    },
+    {
+     "name": "hp, mp",
+     "type": "float",
+     "meaning": "her HP and MP bars"
+    },
+    {
+     "name": "where",
+     "type": "tuple | None",
+     "meaning": "her map position: x, y, platform id, dot"
+    },
+    {
+     "name": "feet, view, view_sure, mode, confidence",
+     "type": "",
+     "meaning": "her place by the scene (localization.locate)"
+    },
+    {
+     "name": "players",
+     "type": "list[Player]",
+     "meaning": "the other players by their minimap dots"
+    },
+    {
+     "name": "monsters",
+     "type": "list[Monster]",
+     "meaning": "every monster the whole screen found this frame, placed, each with its track id"
+    },
+    {
+     "name": "tracks",
+     "type": "list[Track]",
+     "meaning": "copies of the tracker's tracks: alive (seen or not) or just dead"
+    },
+    {
+     "name": "events",
+     "type": "list[Event]",
+     "meaning": "what happened as of this frame"
+    },
+    {
+     "name": "loot, looked, loot_wide",
+     "type": "",
+     "meaning": "the drops asked for, if this frame was searched for them"
+    },
+    {
+     "name": "drops",
+     "type": "list[DropStrip]",
+     "meaning": "every strip of drops in view as last searched"
+    },
+    {
+     "name": "exp, exp_shape",
+     "type": "bytes, tuple",
+     "meaning": "her EXP number's pixels, packed"
+    },
+    {
+     "name": "hp_of, level_of, touch",
+     "type": "",
+     "meaning": "her HP number and level as last read; her newest touch"
+    },
+    {
+     "name": "work",
+     "type": "dict",
+     "meaning": "what the pass did and took: 's', 'look s', 'wide s', detections, bars, strips ..."
+    },
+    {
+     "name": "frame, slot",
+     "type": "ndarray | None, int | None",
+     "meaning": "the look frame in-process; in the service, its ring slot instead"
+    },
+    {
+     "name": "epoch",
+     "type": "int",
+     "meaning": "the service's run it's of"
+    }
+   ]
+  },
+  {
+   "name": "Asks",
+   "module": "gamelab/localization/worldstate.py",
+   "line": 210,
+   "summary": "What a consumer asks of the next frame shown at `after` or later. Sent up the pipe in an `ask`; merged by the service; owed by the step until a late enough frame.",
+   "fields": [
+    {
+     "name": "after",
+     "type": "float",
+     "meaning": "the earliest frame time that will do"
+    },
+    {
+     "name": "band, wide",
+     "type": "bool",
+     "meaning": "kept for old clients: every state has her band and the whole screen"
+    },
+    {
+     "name": "loot",
+     "type": "bool",
+     "meaning": "the drops on her platform"
+    },
+    {
+     "name": "loot_wide",
+     "type": "bool",
+     "meaning": "the drops on every platform in view"
+    },
+    {
+     "name": "mesos_only",
+     "type": "bool",
+     "meaning": "only mesos (her inventory is full)"
+    }
+   ]
+  },
+  {
+   "name": "DropStrip",
+   "module": "gamelab/localization/worldstate.py",
+   "line": 230,
+   "summary": "A strip of drops in view as last searched, in every WorldState's `drops` (the rotation's and asked-for searches).",
+   "fields": [
+    {
+     "name": "platform",
+     "type": "int",
+     "meaning": "the platform it's over"
+    },
+    {
+     "name": "x0, x1",
+     "type": "float",
+     "meaning": "how much of it (map x)"
+    },
+    {
+     "name": "at",
+     "type": "float | None",
+     "meaning": "when it was searched (None: not yet)"
+    },
+    {
+     "name": "mesos_only",
+     "type": "bool",
+     "meaning": "searched for mesos alone"
+    },
+    {
+     "name": "loot",
+     "type": "tuple[Loot, ...]",
+     "meaning": "what it had"
+    },
+    {
+     "name": "sure",
+     "type": "bool",
+     "meaning": "its finding nothing says its drops are gone (strip whole, frame placed firmly in height)"
+    }
+   ]
+  },
+  {
+   "name": "Schedule",
+   "module": "gamelab/localization/worldstate.py",
+   "line": 199,
+   "summary": "What the pass does without being asked; the service sets SCHEDULE or HUNTING (the same since 2026-10-30).",
+   "fields": [
+    {
+     "name": "ropes_every",
+     "type": "int",
+     "meaning": "frames between rope searches (1)"
+    },
+    {
+     "name": "drops_strips",
+     "type": "int",
+     "meaning": "strips of drops searched by rotation (0: none)"
+    },
+    {
+     "name": "drops_every_s",
+     "type": "float",
+     "meaning": "at most this often"
+    }
+   ]
+  },
+  {
+   "name": "Event",
+   "module": "gamelab/localization/tracking.py",
+   "line": 258,
+   "summary": "Something that happened on screen, at the frame that showed it. Made by the tracker and the world step; carried in WorldState.events; drained once per look into Scene.events, where the hunter's listeners read them (the ledger, the SpawnClock's births, Aggro); published as telemetry by the service.",
+   "fields": [
+    {
+     "name": "kind",
+     "type": "str",
+     "meaning": "entered, spawned, appeared, back, left, died, bar_hit, victim, let_go; exp_gain, exp_read, hp_drop, hp_read, lv_read, touch, touch_fix"
+    },
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "the frame's time"
+    },
+    {
+     "name": "track",
+     "type": "int | None",
+     "meaning": "the track it's about"
+    },
+    {
+     "name": "data",
+     "type": "dict",
+     "meaning": "details: kind, x, platform, cause, by, gain, fading alpha, bar, the EXP reading ..."
+    }
+   ]
+  },
+  {
+   "name": "Track",
+   "module": "gamelab/localization/tracking.py",
+   "line": 271,
+   "summary": "One monster followed from frame to frame by the tracker; copies go in every WorldState and are read by Aggro, the ledger and targeting.",
+   "fields": [
+    {
+     "name": "id",
+     "type": "int",
+     "meaning": "its id within the service's run"
+    },
+    {
+     "name": "kind, platform",
+     "type": "str, int | None",
+     "meaning": "its kind and the platform it walks on"
+    },
+    {
+     "name": "x, y",
+     "type": "float",
+     "meaning": "map units, its last detection's feet"
+    },
+    {
+     "name": "vx, facing, pose",
+     "type": "float, int, str",
+     "meaning": "its kind's game-data speed the way it heads; which way it faces; its last pose"
+    },
+    {
+     "name": "first_seen, last_seen, seen",
+     "type": "float, float, int",
+     "meaning": "when first and last seen; frames seen in"
+    },
+    {
+     "name": "state",
+     "type": "str",
+     "meaning": "live, hidden, offscreen, dying or dead"
+    },
+    {
+     "name": "bar, bar_at, hits",
+     "type": "",
+     "meaning": "its HP bar as last read and when; times it went down"
+    },
+    {
+     "name": "gain, share, lands",
+     "type": "",
+     "meaning": "the gain of hers it is the kill of; a share; when her star lands on it"
+    },
+    {
+     "name": "died_at, cause, died_seen",
+     "type": "",
+     "meaning": "when it died, hers or other, when its death was seen"
+    },
+    {
+     "name": "fading, solid_at",
+     "type": "",
+     "meaning": "its alpha fading in at a spawn point, and when it turns solid"
+    },
+    {
+     "name": "crowded, owed, blind",
+     "type": "",
+     "meaning": "lost beside its kind; likely dead (a waiting gain's); frames the exact finder missed it"
+    }
+   ]
+  },
+  {
+   "name": "View",
+   "module": "gamelab/localization/tracking.py",
+   "line": 339,
+   "summary": "What a frame shows of the map (map units) and its size on screen, to tell a monster out of sight on screen from one off it. Made by WorldStep._view each frame.",
+   "fields": [
+    {
+     "name": "left, right, top, bottom",
+     "type": "float",
+     "meaning": "the play area in map units"
+    },
+    {
+     "name": "width, height",
+     "type": "int",
+     "meaning": "look-frame px"
+    },
+    {
+     "name": "covered",
+     "type": "tuple | None",
+     "meaning": "the box the minimap covers"
+    },
+    {
+     "name": "edge",
+     "type": "float",
+     "meaning": "EDGE_PX in the look's geometry"
+    }
+   ]
+  },
+  {
+   "name": "Hello",
+   "module": "gamelab/localization/service.py",
+   "line": 323,
+   "summary": "What a command says of itself in its `hello` (ServiceClient makes it; Service keeps it per client).",
+   "fields": [
+    {
+     "name": "name, pid",
+     "type": "str, int",
+     "meaning": "who it is"
+    },
+    {
+     "name": "acts",
+     "type": "bool",
+     "meaning": "it sends keys (the game brought forward for it; its map followed)"
+    },
+    {
+     "name": "throws",
+     "type": "bool",
+     "meaning": "it tells her throws (kills are hers only after one her way)"
+    },
+    {
+     "name": "fast",
+     "type": "bool",
+     "meaning": "it hunts: it holds the map looked at"
+    },
+    {
+     "name": "map",
+     "type": "int | None",
+     "meaning": "its map"
+    }
+   ]
+  },
+  {
+   "name": "Service._welcome",
+   "module": "gamelab/localization/service.py",
+   "line": 549,
+   "summary": "The dict sent in `welcome` and `epoch` messages: what a client needs to read the current run's frames.",
+   "fields": [
+    {
+     "name": "epoch, pid",
+     "type": "int",
+     "meaning": "the run's number and the service's process id"
+    },
+    {
+     "name": "map, next",
+     "type": "int",
+     "meaning": "the map looked at, and the map a due rebuild will look at"
+    },
+    {
+     "name": "character",
+     "type": "str",
+     "meaning": "who the service perceives"
+    },
+    {
+     "name": "ring, slots, shape",
+     "type": "str, int, list",
+     "meaning": "the look ring's shared-memory name, slot count and frame shape"
+    },
+    {
+     "name": "full, full_slots, full_shape",
+     "type": "str, int, list",
+     "meaning": "the same for the full-size ring"
+    }
+   ]
+  },
+  {
+   "name": "Gain",
+   "module": "gamelab/localization/gains.py",
+   "line": 73,
+   "summary": "One change of her EXP number and the kills it was; from ExpMeter to WorldStep._told (and the hunter).",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "when the change was seen"
+    },
+    {
+     "name": "exp",
+     "type": "int | None",
+     "meaning": "its size (None: unread, or levels that don't follow)"
+    },
+    {
+     "name": "kinds",
+     "type": "tuple[str | None, ...]",
+     "meaning": "the kills by kind (None: kind not known; empty: not a kill)"
+    },
+    {
+     "name": "times",
+     "type": "tuple[float, ...]",
+     "meaning": "when each kill was (empty: all at t)"
+    }
+   ]
+  },
+  {
+   "name": "Remembered",
+   "module": "gamelab/localization/memory.py",
+   "line": 96,
+   "summary": "A monster as Memory keeps it; read by the hunt, grinding, the navigator and patrol.Belief.",
+   "fields": [
+    {
+     "name": "id, kind, platform",
+     "type": "int, str, int",
+     "meaning": "its memory id, kind and platform"
+    },
+    {
+     "name": "x, y, seen, first",
+     "type": "float",
+     "meaning": "where and when last seen; when first seen"
+    },
+    {
+     "name": "monster",
+     "type": "Monster",
+     "meaning": "its last sighting as placed"
+    },
+    {
+     "name": "sightings, misses, missed, covered",
+     "type": "",
+     "meaning": "times seen; covered looks without it since; the latest such look; the latest covering look"
+    },
+    {
+     "name": "rival",
+     "type": "bool",
+     "meaning": "another player is by it"
+    },
+    {
+     "name": "state, ended, died_x, moved_from",
+     "type": "",
+     "meaning": "seen, killed or gone; when ended; where the kill was placed; a kill moved onto it"
+    }
+   ]
+  },
+  {
+   "name": "Cover",
+   "module": "gamelab/localization/memory.py",
+   "line": 142,
+   "summary": "What one look searched for monsters, in map units (cover_of from a Scene, cover_of_record from telemetry).",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "the look's time"
+    },
+    {
+     "name": "rows",
+     "type": "tuple[tuple[float, float], ...]",
+     "meaning": "stretches of rows searched (y from, to)"
+    },
+    {
+     "name": "x0, x1",
+     "type": "float",
+     "meaning": "the screen across"
+    },
+    {
+     "name": "minimap",
+     "type": "tuple | None",
+     "meaning": "the minimap's box (what's under it doesn't show)"
+    }
+   ]
+  },
+  {
+   "name": "Chaser",
+   "module": "gamelab/localization/aggro.py",
+   "line": 100,
+   "summary": "A monster she has hurt, as the aggro belief keeps it across the tracker's ids.",
+   "fields": [
+    {
+     "name": "key",
+     "type": "int",
+     "meaning": "the belief's own id"
+    },
+    {
+     "name": "kind, platform, x, y, seen, heading",
+     "type": "",
+     "meaning": "its last sighting and the way it walked"
+    },
+    {
+     "name": "track, tracks",
+     "type": "int | None, list[int]",
+     "meaning": "the track it is now (None: lost), and every track it has been"
+    },
+    {
+     "name": "bar, first, hit, hits, how",
+     "type": "",
+     "meaning": "its HP left; her first and last hit; how it became a chaser"
+    },
+    {
+     "name": "lost, dying, other, doubt",
+     "type": "",
+     "meaning": "when its track was let go; a kill's; another's kill with nobody by it; when its bar left its track"
+    }
+   ]
+  },
+  {
+   "name": "Guess",
+   "module": "gamelab/localization/aggro.py",
+   "line": 131,
+   "summary": "A chaser where the belief has it at a moment; `track(speed)` turns it into a localization.monsters.MonsterTrack, the move planner's form of a monster.",
+   "fields": [
+    {
+     "name": "chaser",
+     "type": "Chaser",
+     "meaning": "which one"
+    },
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "the moment"
+    },
+    {
+     "name": "x, lo, hi",
+     "type": "float",
+     "meaning": "its likeliest x and where it can be"
+    },
+    {
+     "name": "way",
+     "type": "int",
+     "meaning": "the way its chase walks then (+1, -1, 0)"
+    },
+    {
+     "name": "p",
+     "type": "float",
+     "meaning": "how likely it's there chasing her"
+    }
+   ]
+  },
+  {
+   "name": "Touched",
+   "module": "gamelab/localization/aggro.py",
+   "line": 166,
+   "summary": "A touch of hers and the monster that likeliest made it (Aggro.touches, toucher).",
+   "fields": [
+    {
+     "name": "t, told",
+     "type": "float",
+     "meaning": "the popup's onset; the look that told it"
+    },
+    {
+     "name": "damage",
+     "type": "bool",
+     "meaning": "it took HP (a MISS knocks her nowhere); as coded, true unless the kind is 'miss' in lower case, so a live 'MISS' counts as damage"
+    },
+    {
+     "name": "her, x, dx",
+     "type": "float | None",
+     "meaning": "her x, the monster's, and the distance"
+    },
+    {
+     "name": "kind, track, key",
+     "type": "",
+     "meaning": "the monster's kind, track and chaser key"
+    },
+    {
+     "name": "side, knock",
+     "type": "int",
+     "meaning": "the side it was on; the way her next look had her moved"
+    },
+    {
+     "name": "by",
+     "type": "str",
+     "meaning": "chaser, track or none"
+    }
+   ]
+  },
+  {
+   "name": "Pass",
+   "module": "gamelab/localization/spawnclock.py",
+   "line": 60,
+   "summary": "A spawn pass the SpawnClock has seen.",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "when (the births' weighted mean)"
+    },
+    {
+     "name": "w",
+     "type": "float",
+     "meaning": "how much it counts (its births' best weight)"
+    }
+   ]
+  }
+ ],
+ "flows": [
+  {
+   "id": "frame-to-command",
+   "title": "A frame, from the screen to every command",
+   "summary": "How one game frame becomes a WorldState in the perception service and crosses into each attached command.",
+   "trigger": "The frame loop's next due time in the perception service (every 1/15 s).",
+   "steps": [
+    {
+     "module": "gamelab/localization/service.py",
+     "symbol": "Service.serve",
+     "text": "The main thread builds a run when needed (`_build`: the map's Runner, new rings, an `epoch` to every client), tunes the step for who's attached (`_tune`) and runs feed.run.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/feed.py",
+     "symbol": "run",
+     "text": "Waits for asks until the frame is due (`Service._poll` drains the inbox and merges every client's asks), then takes `ScreenFrames.next(due)`. A frame not visible gets a state with its problem, a recovery, and a 0.25 s wait.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/service.py",
+     "symbol": "Service._shown",
+     "text": "`full` asks waiting for this frame are answered: the frame is copied into the full-size ring and its slot sent to the asker.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/worldstate.py",
+     "symbol": "WorldStep.step",
+     "text": "Her look and the whole-screen search at once (two threads), her place, EXP, HP and touches, newborns at spawn points, detections placed on the map.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/tracking.py",
+     "symbol": "MonsterTracker.update",
+     "text": "Detections matched to tracks, the unseen judged, bars read where due, deaths seen, her gains bound to victims; the frame's events returned.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/service.py",
+     "symbol": "Service._emit",
+     "text": "The frame goes into the look Ring (slot = seq mod 16); the rolling recording and Lie Detector tracking get it by reference; the state, picture removed, is pickled once and queued to every client; Publisher writes telemetry.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/service.py",
+     "symbol": "Writer._run",
+     "text": "Each client's writer thread sends its queue down the pipe; a slow reader loses the oldest states (64 kept) and is told a `gap`.",
+     "process": "perception service (writer thread per client)"
+    },
+    {
+     "module": "gamelab/localization/service.py",
+     "symbol": "ServiceClient._take",
+     "text": "In the command, the client's thread keeps the state (8 newest), drops one of an older run, and queues its events for the next drain (only once the run is on its map).",
+     "process": "command (hunt, pet, viewer)"
+    },
+    {
+     "module": "gamelab/localization/feed.py",
+     "symbol": "Feed.look",
+     "text": "When Senses looks, the newest fresh state becomes a Scene (`worldstate.to_scene`); the look frame is copied out of the shared ring by slot and frame number (`ServiceClient.frame_of`).",
+     "process": "command (hunt, pet, viewer)"
+    }
+   ]
+  },
+  {
+   "id": "look-asks-drops",
+   "title": "A look that needs drops searched, and the beliefs after it",
+   "summary": "What happens when a command's look needs something not in every state (the drops on her platform), and how the look's events reach the beliefs kept across looks.",
+   "trigger": "Senses.look in a command (a hunt deciding its next move, with `loot=True`).",
+   "steps": [
+    {
+     "module": "gamelab/localization/senses.py",
+     "symbol": "Senses.look",
+     "text": "Works out the earliest acceptable frame time (after the last look's frame, 68 ms after her last key, and at most 0.1 s before now) and calls the feed's look.",
+     "process": "command (hunt, pet, viewer)"
+    },
+    {
+     "module": "gamelab/localization/feed.py",
+     "symbol": "wanted",
+     "text": "The look's arguments become an Asks: `after`, `loot`, `loot_wide`, `mesos_only`.",
+     "process": "command (hunt, pet, viewer)"
+    },
+    {
+     "module": "gamelab/localization/service.py",
+     "symbol": "ServiceClient.latest",
+     "text": "No kept state was searched for those drops on a late enough frame: `to_ask` sends one `ask` up the pipe, and it waits up to 0.6 s.",
+     "process": "command (hunt, pet, viewer)"
+    },
+    {
+     "module": "gamelab/localization/service.py",
+     "symbol": "Service._read",
+     "text": "The client's reader thread puts the ask in the frame loop's inbox and wakes the loop.",
+     "process": "perception service (reader thread)"
+    },
+    {
+     "module": "gamelab/localization/service.py",
+     "symbol": "Service._take",
+     "text": "The frame loop merges it with other clients' asks (mesos only if every asker wanted only mesos).",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/feed.py",
+     "symbol": "run",
+     "text": "The ask rides on the next frame due shown at its time or later: no frame of its own.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/worldstate.py",
+     "symbol": "WorldStep._drops",
+     "text": "The asked strips are searched whole on that frame, before the rotation's strip, and the state's `loot` is set.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/feed.py",
+     "symbol": "fresh",
+     "text": "Back in the command, the new state is fresh: shown after `after`, drops searched on it. `to_scene` builds the Scene.",
+     "process": "command (hunt, pet, viewer)"
+    },
+    {
+     "module": "gamelab/localization/senses.py",
+     "symbol": "Senses.look",
+     "text": "Events up to that frame are drained (each once) into `Scene.events`; then the listeners run: Memory.on_look, the hunter's `_births` (SpawnClock.see) and `_aggro` (Aggro.on_look), among others.",
+     "process": "command (hunt, pet, viewer)"
+    },
+    {
+     "module": "gamelab/localization/memory.py",
+     "symbol": "Memory.update",
+     "text": "Sightings matched to remembered monsters or new, covered misses counted, kills taken, the unlikely forgotten.",
+     "process": "command (hunt, pet, viewer)"
+    },
+    {
+     "module": "gamelab/localization/aggro.py",
+     "symbol": "Aggro.update",
+     "text": "bar_hit events make or renew chasers, each chaser is matched to its track, touches get their likeliest monster.",
+     "process": "command (hunt, pet, viewer)"
+    }
+   ]
+  },
+  {
+   "id": "gain-to-victim",
+   "title": "An EXP gain becomes a dead, named monster",
+   "summary": "The game never says which monster died. This is how a change of her EXP number becomes a `died` event naming a track, cause 'hers'.",
+   "trigger": "Her EXP number's pixels change in a frame (a kill's EXP shows 0.1-0.6 s after her attack key).",
+   "steps": [
+    {
+     "module": "gamelab/localization/tracking.py",
+     "symbol": "MonsterTracker.throw",
+     "text": "Earlier, the hunt told the service her throw (key time, side, attack, aim) through the pipe; the tracker noted which tracks its star could meet from where she was.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/worldstate.py",
+     "symbol": "WorldStep._vitals",
+     "text": "`hud.exp_changed` sees the number change; perception.exp_number reads it; an `exp_gain` event goes out.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/gains.py",
+     "symbol": "ExpMeter.update",
+     "text": "The change's size is split into kills by kind (13 on Thicket Around the Beach II is a pig), held for a second reading if suspicious, or flagged odd.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/worldstate.py",
+     "symbol": "WorldStep._told",
+     "text": "Each kill is told to the tracker at its time: `MonsterTracker.gain(t, kind)`.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/tracking.py",
+     "symbol": "MonsterTracker._bind",
+     "text": "In the same frame's update, the gain is matched to the throw keyed 0.1-0.6 s before it; `_picks` (or `_band_picks` for the magician) ranks the tracks that attack could have taken.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/tracking.py",
+     "symbol": "MonsterTracker._victim",
+     "text": "The first pick becomes `dying` with the gain on it; a `victim` event carries its id; it may walk on until her star lands.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/tracking.py",
+     "symbol": "MonsterTracker._judge",
+     "text": "Each frame after: its death seen, dead; seen alive 1.2 s after the gain, let go and the gain moves on; unseen 0.3 s from 1.5 s on, dead.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/tracking.py",
+     "symbol": "MonsterTracker._dies",
+     "text": "A `died` event: kind, cause 'hers', x, platform, whether its death was seen.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/aggro.py",
+     "symbol": "Aggro._died",
+     "text": "In the command, after the look that drains the event, the chaser on that track is dropped; Memory marks it killed through the ledger's dead tracks.",
+     "process": "command (hunt, pet, viewer)"
+    }
+   ]
+  },
+  {
+   "id": "births-to-clock",
+   "title": "Newborns fading in teach the spawn clock",
+   "summary": "How a monster fading in at a spawn point becomes a timed pass in the SpawnClock, which the hunt's spawn guard and wait places ask.",
+   "trigger": "The server's spawn pass puts a monster on a free spawn point in view.",
+   "steps": [
+    {
+     "module": "gamelab/localization/worldstate.py",
+     "symbol": "WorldStep._newborns",
+     "text": "The spawn watch looks at every spawn point in view (Tree Dungeon, 1366x768) and finds the newborn with its alpha, while the whole-screen search runs.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/worldstate.py",
+     "symbol": "WorldStep._handed",
+     "text": "Newborns become detections (Mob.fading set) beside the whole screen's until the search finds them.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/tracking.py",
+     "symbol": "MonsterTracker._new",
+     "text": "No track explains it: a new track, how 'spawned', and a `spawned` event carrying its `fading` alpha.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/feed.py",
+     "symbol": "Feed.drain_events",
+     "text": "The event reaches the command with the look of its frame.",
+     "process": "command (hunt, pet, viewer)"
+    },
+    {
+     "module": "gamelab/localization/spawnclock.py",
+     "symbol": "SpawnClock.see",
+     "text": "Through the hunter's `_births`: the birth is the event's time less alpha / 1.224; one found solid weighs 0.3.",
+     "process": "command (hunt, pet, viewer)"
+    },
+    {
+     "module": "gamelab/localization/spawnclock.py",
+     "symbol": "SpawnClock.birth",
+     "text": "Joins a pass within 0.4 s or starts a new one; fading births off a sure grid three passes running reset the clock.",
+     "process": "command (hunt, pet, viewer)"
+    },
+    {
+     "module": "gamelab/localization/spawnclock.py",
+     "symbol": "SpawnClock._fit",
+     "text": "When next asked: the densest phase, least squares on its inliers, the standard error.",
+     "process": "command (hunt, pet, viewer)"
+    },
+    {
+     "module": "gamelab/localization/spawnclock.py",
+     "symbol": "SpawnClock.next_pass",
+     "text": "The hunt's spawn guard (behavior.hunt `_respawn_guard`), once the clock is `sure`, takes the next pass and holds a trip to a pile whose stand would meet that pass's window by free spawn points, when going costs more than waiting.",
+     "process": "command (hunt, pet, viewer)"
+    },
+    {
+     "module": "gamelab/localization/spawnclock.py",
+     "symbol": "SpawnClock.chance",
+     "text": "Rule 9's wait places (`_respawn_wait`) are priced with the chance that the next second (`WAIT_AHEAD_S`, 1.0) meets a pass's window, through attack.danger.respawn_risk.",
+     "process": "command (hunt, pet, viewer)"
+    }
+   ]
+  }
+ ],
+ "not_done": [
+  "The service doesn't restart itself: a crash or its watchdog's exit stops perception until a client's `ensure` (10 s) or the babysitter starts another (README, The perception service: Not done).",
+  "A hang that holds Python's lock stops the watchdog thread too: clients drop after SILENT_S and stand still, and nothing ends that process. Not seen; the hangs tested offline let go of the lock.",
+  "The window's size is fixed at the service's first sight; the game restarted at another size waits for the user (or a service restart).",
+  "A monster the whole screen misses beside her (3.5% of the old re-finds' sightings, 6.4% within 50 units) is bridged by hidden tracks; the design's fallback (a masked match at a missed track's predicted box) was not built. The exact finder (worldstate.EXACT) now adds finds near her.",
+  "The simulator's monster walks and poses aren't calibrated to the user's clip yet (README, Perception at 15 frames a second: Not done).",
+  "The spawn watch, the exact finder and the halves run only at the game's own 1366x768; the spawn watch only on maps in perception.spawns.MEASURED (Tree Dungeon).",
+  "Aggro: the perception's bars kept from older reads put most wrong bars on unhurt monsters (97 of 118 at the arrivals); showing a bar only while fresh would change what fights see, and is to be measured.",
+  "Aggro and the spawn clock are not tried live: their numbers are the simulator's and replays of live hours.",
+  "The magician's aim is counted against her kill binding ('aim bound', 'aim elsewhere'), not measured with the service's own tracks yet.",
+  "SHARES (binding another player's kill of a monster she hurt) is off; POSE_GATE_S is an A/B switch left off.",
+  "Gains: a level-up during a hunt (the next level's requirement from the table) and an EXP event's rate check are to be checked in game.",
+  "Aggro's touches: a touch is damage unless its kind is 'miss' in lower case, while the touch watch says 'MISS', so a live MISS is taken for damage there (tests/test_aggro.py uses 'miss')."
+ ]
+}

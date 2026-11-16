@@ -1,0 +1,1354 @@
+{
+ "id": "components",
+ "summary_md": "Two processes: **the pet feeder** (`python -m gamelab pet --every 1 --map 10002073`), one Python process that keeps her pet fed and runs **the guard** that parks her when she's in trouble between hunts, and **the babysitter** (`D:/MapleHelper-scratch/live/babysit3.ps1`, a PowerShell loop outside the repo) that starts the pet feeder whenever no hunt runs and kills it within 5 s of one starting. Almost everything in the pet feeder runs one step after another on its main thread (the feeding, the guard, the potion and death alerts). A few helper threads carry the pipe to the perception service, the telemetry file, a once-a-minute garbage-collection report and the phone pushes (and four name-tag search threads during a Character Info read). The park and a missing perception service are started through a short `powershell.exe` child that asks WMI to start them, so they are not the pet feeder's children and outlive it.",
+ "processes": [
+  {
+   "process": "pet",
+   "is_os_process": true,
+   "plain_md": "**The pet feeder** is a standalone Windows process: its own `python.exe`, **not** elevated, with no window. The babysitter starts it hidden and appends its console to `D:/MapleHelper-scratch/live/pet.log`.\n\n**You are not expected to start it.** The babysitter starts `python -m gamelab pet --every 1 --map 10002073` within 5 s whenever no hunting command runs (a `nav --park` counts as one), and again within 5 s whenever it ends by itself. It kills it (a hard kill: nothing in it runs at its end) within 5 s of a hunt starting, because a hunt feeds the pet itself. Nothing in gamelab keeps it to one copy; the babysitter's process list does.\n\n**What it does.** Once a minute it brings the pet's fullness up to date (one point lost every 55 s while the game window is up) and, under 60, asks the elevated key player to tap the pet food key: about one food every 27.5 minutes. Only when the number isn't known does it double-click her to read it off her Character Info. For the next 60 s **the guard** runs, a pass a second: from the perception service's newest state it watches for touches, low HP, potions running out and death, pushes to your phone, and starts a separate `nav --park --tell` process that walks her to a safe place. It never captures the screen (it asks the perception service for frames) and presses keys only through the player; it keeps feeding through a Lie Detector.\n\n**How it ends.** It runs until it is killed (by the babysitter, or Ctrl+C if you ran it in a terminal). It ends by itself with exit 0 when the game's client switches to another calibrated size (so the babysitter starts one with eyes for that size), or with exit 1 when an error escapes its loop, such as a frame the service can't give in the middle of a Character Info read.\n\n`pet` without `--every` (one follow, then it ends) and `pet --read` (read the fullness now) are one-off runs for you or Claude in a terminal. The hunt's checks (key bindings, stat window, chat box) and its attack model (`behavior/presence.py`) never run in it.",
+   "expected_start": "the babysitter, automatically: it starts `pet --every 1 --map 10002073` within 5 s whenever no hunting command (nor a park) runs, so again after every hunt or park, and again after it ends by itself; you or Claude by hand only for a one-off `pet` or `pet --read` in a terminal",
+   "started_by": [
+    "babysitter",
+    "user",
+    "claude"
+   ],
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1366,
+     "symbol": "cmd_pet"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 3279,
+     "symbol": "pet"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 64,
+     "symbol": "FOLLOW_CHOICE"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 46,
+     "symbol": "GAME_COMMANDS"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 17,
+     "symbol": "Guard"
+    },
+    {
+     "path": "gamelab/README.md",
+     "line": 2603,
+     "symbol": "kills the pet's process when a hunt starts"
+    },
+    {
+     "path": "gamelab/behavior/hunter.py",
+     "line": 1267,
+     "symbol": "feed_pet_if_due"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 3561,
+     "symbol": "RuntimeError"
+    },
+    {
+     "path": "gamelab/perception/framecheck.py",
+     "line": 133,
+     "symbol": "BadLook"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 329,
+     "symbol": "_close"
+    }
+   ],
+   "components": [
+    {
+     "id": "startup",
+     "name": "Start-up: waiting until it can work",
+     "runs_as": "main thread",
+     "started_by": "`cmd_pet`, as the process starts",
+     "lives": "seconds normally; as long as the game is closed, minimized or the wrong size",
+     "does": "Before it feeds anything it waits, sending nothing and running no guard: for the game's window (a look every 5 s, `waiting for the game` said once), for the perception service's welcome (20 s at most, then it goes on and its looks wait; its client starts the service if none runs), for a client of a size its eyes are calibrated for (PetWait, a look every 5 s), and for a minimized game to be restored by whoever is at the PC (a look every 0.5 s: it never restores it itself). If the game is minimized and the guard wanted a park, it pushes \"She can't park yet\" first. Then it loads her eyes for the map (calibration, name tag, the minimap picture: if that picture won't load it stops with an error, exit 1), builds a Hunter that sends keys but never attacks, writes her moves' and pet food keys for the player (`gamelab/lab/alarm_keys.json`), and opens its telemetry file. Time the game was closed isn't counted against the pet (`PetCare.away`).",
+     "rate": "the game window every 5 s; a minimized game every 0.5 s; the service's welcome 20 s at most",
+     "talks_to": [
+      {
+       "to": "perceive-client",
+       "via": "ServiceClient.ready (waits on its threading.Condition)",
+       "what": "the service's welcome: its pid, run, map and character"
+      },
+      {
+       "to": "player",
+       "via": "file gamelab/lab/alarm_keys.json",
+       "what": "her moves' and pet food keys, which the player allows during a Lie Detector"
+      },
+      {
+       "to": "phone-push",
+       "via": "notify.phone",
+       "what": "a park wanted while the game is minimized"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1381,
+       "symbol": "_wait_for_game"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1566,
+       "symbol": "_wait_for_game"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1391,
+       "symbol": "_said_minimized"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1392,
+       "symbol": "_hunter"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1010,
+       "symbol": "ready"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 101,
+       "symbol": "MINIMIZED_POLL_S"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1083,
+       "symbol": "keymap.publish"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1395,
+       "symbol": "away"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1399,
+       "symbol": "_record"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 996,
+       "symbol": "PERCEPTION_WAIT_S"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 989,
+       "symbol": "RuntimeError"
+      }
+     ]
+    },
+    {
+     "id": "follow-loop",
+     "name": "The follow loop",
+     "runs_as": "main thread",
+     "started_by": "`cmd_pet`, once start-up is done",
+     "lives": "until the process is killed; it returns by itself when the client changes to another calibrated size (exit 0) or after one follow without `--every`; an error it doesn't catch ends the process (exit 1)",
+     "does": "Each round: if the client is now windowed at another calibrated size than its eyes', it says so and ends (exit 0) for the babysitter to start a fresh one; if PetWait says the client is unfit, it sleeps 5 s and asks again (no food and no guard meanwhile); otherwise it notes whether the game window is there and not minimized (time away isn't counted against the pet), takes up any change in her remembered key bindings, and calls `PetCare.tend`, printing the fullness. A food the player refuses (the Lie Detector alarm's limits) or never answers (no player running: it waits 120 s for an answer first) is logged and tried again next round. Then come `--every` minutes (60 s under the babysitter) of guard passes, one a second; a pass that fails is logged once per kind of error and never stops the feeding.",
+     "rate": "a round every 60 s plus the time its tend takes (`--every 1`); a guard pass about every 1 s in between",
+     "talks_to": [
+      {
+       "to": "pet-care",
+       "via": "direct call PetCare.tend",
+       "what": "follow the fullness, feed if low, read if unknown"
+      },
+      {
+       "to": "pet-wait",
+       "via": "direct call PetWait()",
+       "what": "whether to wait now"
+      },
+      {
+       "to": "guard",
+       "via": "direct call Pass.tick, every GUARD_S inside `_guarded`",
+       "what": "one guard pass"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1408,
+       "symbol": "_pet_resized"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1413,
+       "symbol": "WAIT_POLL_S"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1416,
+       "symbol": "minimized"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1419,
+       "symbol": "_pet_keys"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1421,
+       "symbol": "tend"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1422,
+       "symbol": "PlayerError"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1429,
+       "symbol": "_guarded"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1473,
+       "symbol": "_guarded"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1536,
+       "symbol": "_pet_resized"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 380,
+       "symbol": "PlayerError"
+      }
+     ]
+    },
+    {
+     "id": "pet-care",
+     "name": "PetCare: the pet's fullness and its food",
+     "runs_as": "library code on the caller's thread (the follow loop's, the main thread)",
+     "started_by": "built inside the Hunter (`Hunter.pet`) at start-up; called by the follow loop",
+     "lives": "as long as the process; what it knows is kept in her `gamelab/lab/pet.json` (another character's under `gamelab/lab/characters/<her>/`), so it survives the babysitter's kills, and a hunt's own feeding (`Hunter.feed_pet_if_due`) carries on from the same file",
+     "does": "Keeps the pet's fullness as a number that falls 1 point every 55 s while the game window is there and gives a Pet Food (+30) whenever it is under 60, which comes to about one food every 27.5 minutes. When the number isn't known (never read, or nothing followed it for 30 minutes), or a food is due on a pet food key it doesn't trust (neither config.toml's nor one read off the game this run), it reads it: a look for her name tag, a double-click on her body, the Character Info's FULLNESS read by OCR, foods until 80 if it reads under 70 (3 at most), then Esc (only with the window seen open; Esc on nothing opens the game menu). With the Lie Detector alarm up it never reads (the read uses the mouse) and feeds by the number alone. Two foods in a row that don't raise the read fullness put the key in doubt: no taps on it for 30 minutes, beeps and a Windows notification, and her remembered key binding marked doubted.",
+     "rate": "a tend every follow (once a minute); a food about every 27.5 minutes; a read only when the fullness isn't known (90 s between failed tries)",
+     "talks_to": [
+      {
+       "to": "key-plans",
+       "via": "Actions.feed_pet and Actions.play",
+       "what": "the food tap; the double-click, the SHOW PET INFO click and Esc of a read"
+      },
+      {
+       "to": "eyes-ocr",
+       "via": "Eyes.look, Eyes._capture, the OCR engine",
+       "what": "where she stands; the Character Info panel's text"
+      },
+      {
+       "to": "pc-alert",
+       "via": "control.alarm.page",
+       "what": "her pet food took no effect twice"
+      },
+      {
+       "to": "telemetry-writer",
+       "via": "telemetry.emit (event kind 'pet')",
+       "what": "each food, read and wait"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 191,
+       "symbol": "PetCare"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 223,
+       "symbol": "tend"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 279,
+       "symbol": "check"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 87,
+       "symbol": "TICK_S"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 91,
+       "symbol": "FOLLOW_FEED_BELOW"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 109,
+       "symbol": "UNWATCHED_S"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 373,
+       "symbol": "_food_doubt"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 329,
+       "symbol": "PetCare"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 973,
+       "symbol": "_pet_doubted"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 965,
+       "symbol": "_pet_key_trusted"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 94,
+       "symbol": "FEED_TO"
+      }
+     ]
+    },
+    {
+     "id": "pet-wait",
+     "name": "PetWait: waiting out a wrong-sized client (and its one Alt+Enter try)",
+     "runs_as": "library code on the caller's thread (the main thread)",
+     "started_by": "`cmd_pet`'s `fit`, at start-up and then before every follow",
+     "lives": "as long as the process",
+     "does": "Decides whether the game's client is fit to read, from the window's size and the perception service's newest state (no capture of its own): full screen, another size than her eyes', not calibrated, the game drawing its picture off the client, or another process's Alt+Enter try in progress. While it isn't, nothing is sent (the game may be at its login screen, where a key types into a field), said once. One bounded exception so the pet can't starve: once the pet is due a food, the fault has stood 5 s, no alarm is up, the service's picture of the client shows the game in play, and there was no try in the last 30 minutes (nor 4 in the hour by any process), it tries `window_size.refit`: holding the named mutex `Local\\gamelab-window-fix` so no other process tries at the same time, the pet feeder brings the game to the front itself, looks for the Lie Detector on the service's picture (and raises the alarm if it is there, sending nothing), then has the player press Alt+Enter twice.",
+     "rate": "a look every 5 s while the client is unfit; one Alt+Enter-twice try every 30 minutes at most",
+     "talks_to": [
+      {
+       "to": "perceive-client",
+       "via": "ServiceClient.problem and full_frame(any_size=True)",
+       "what": "whether the game draws off the client; the client's picture to look for the HUD and the Lie Detector on"
+      },
+      {
+       "to": "player",
+       "via": "gamelab/lab/inbox plans",
+       "what": "Alt+Enter twice"
+      },
+      {
+       "to": "other gamelab processes",
+       "via": "named mutex Local\\gamelab-window-fix; file gamelab/lab/window_tries.json",
+       "what": "one try at a time, 4 an hour at most"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 463,
+       "symbol": "PetWait"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 482,
+       "symbol": "__call__"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 501,
+       "symbol": "_try"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 536,
+       "symbol": "window_size.refit"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 123,
+       "symbol": "TRY_EVERY_S"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1384,
+       "symbol": "PetWait"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1508,
+       "symbol": "_pet_unfit"
+      },
+      {
+       "path": "gamelab/control/window_size.py",
+       "line": 100,
+       "symbol": "LOCK"
+      },
+      {
+       "path": "gamelab/control/window_size.py",
+       "line": 209,
+       "symbol": "refit"
+      },
+      {
+       "path": "gamelab/control/window_size.py",
+       "line": 312,
+       "symbol": "bring_to_front"
+      },
+      {
+       "path": "gamelab/control/window_size.py",
+       "line": 163,
+       "symbol": "_alarm"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1121,
+       "symbol": "_lie_detector_look"
+      }
+     ]
+    },
+    {
+     "id": "key-plans",
+     "name": "Key plans to the elevated player",
+     "runs_as": "library code on the caller's thread (the main thread)",
+     "started_by": "the Hunter's Actions, built at start-up",
+     "lives": "as long as the process",
+     "does": "Every key and click the pet feeder sends is a small JSON plan written into `gamelab/lab/inbox` and played by the elevated key player (`python -m gamelab player`), the only process whose input reaches the game; it waits for the answer in `gamelab/lab/outbox` (looked for every 10 ms, 120 s at most). A food is one tap of the pet food key with kind `pet_food`, which the player takes even with the Lie Detector alarm up (a few a minute). The plans ask for focus, so the player brings the game to the front first if another window is in front (never while the alarm is up). Before each follow it rereads her remembered key bindings (`gamelab/lab/keybindings-<her>.json`), follows any change and rewrites `gamelab/lab/alarm_keys.json` for the player. With no player running, the plan waits its 120 s unanswered, is withdrawn, and the food is tried again next round (no guard passes during that wait).",
+     "rate": "one food plan about every 27.5 minutes; a read is 1 to 7 plans",
+     "talks_to": [
+      {
+       "to": "player",
+       "via": "files gamelab/lab/inbox/<id>.json and gamelab/lab/outbox",
+       "what": "the plan; the player's answer (played, refused, Lie Detector)"
+      },
+      {
+       "to": "player",
+       "via": "file gamelab/lab/alarm_keys.json",
+       "what": "her pet food and move keys as followed"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/actions.py",
+       "line": 620,
+       "symbol": "feed_pet"
+      },
+      {
+       "path": "gamelab/control/actions.py",
+       "line": 266,
+       "symbol": "play"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 71,
+       "symbol": "send"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 366,
+       "symbol": "wait"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 379,
+       "symbol": "unlink"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 409,
+       "symbol": "play"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 773,
+       "symbol": "bring_to_front"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1491,
+       "symbol": "_pet_keys"
+      },
+      {
+       "path": "gamelab/control/keymap.py",
+       "line": 322,
+       "symbol": "publish"
+      }
+     ]
+    },
+    {
+     "id": "guard",
+     "name": "The guard",
+     "runs_as": "library code on the caller's thread (the main thread, inside `_guarded` between follows)",
+     "started_by": "`_guard_pass`, built at start-up (only with `--every`)",
+     "lives": "as long as the process; its episode state is kept in `gamelab/lab/guard.json` across restarts",
+     "does": "Once a second (`Pass.tick`): reads its switch (`gamelab/lab/guard_mode.txt`, set by `gamelab guard off|alert|on`; on when there's no file), turns a hunt that died without parking (`gamelab/lab/hunt.json` whose process is gone) into a note (`gamelab/lab/park_note.json`), and takes the perception service's newest state if it is under 3 s old (no waiting, no asking for a frame). Two touches on her within 30 s, her HP under the stop rule on two passes in a row (unless she's known parked), or a note set it off. Then, in order: a hunt running, nothing (the babysitter is about to kill this process); dead, nothing; Lie Detector alarm up, no moves; someone playing by hand (Windows' last input later than the player's last key, with the game in front), left alone; switch on `alert`, one \"She needs you\" push and no moves; the game in front and the player running, it starts a park (at most every 2 minutes, 3 times an episode) and pushes \"Parking her\"; otherwise one push saying why not, and she parks once the game is back. It never brings the game forward or starts the player. After 5 minutes with no usable state (the game behind another window or minimized, or her on another map than `--map`), one \"The guard can't see her\" push unless she's known parked. The README marks the guard as not yet tried live, and on 2026-11-16 `guard_mode.txt` said `alert`: pushes, no parks.",
+     "rate": "1 pass a second (GUARD_S)",
+     "talks_to": [
+      {
+       "to": "perceive-client",
+       "via": "ServiceClient.latest(timeout=0, ask=False) under its threading.Condition",
+       "what": "the newest state: HP, MP, her HP number, touches"
+      },
+      {
+       "to": "vitals",
+       "via": "Vitals.see each pass; Vitals.zero",
+       "what": "her bars; whether she's dead"
+      },
+      {
+       "to": "park-start",
+       "via": "Guard.start_park",
+       "what": "start `nav --park --tell`"
+      },
+      {
+       "to": "phone-push",
+       "via": "Guard.say -> notify.phone",
+       "what": "Parking her, She can't park yet, She needs you, HP low, The guard can't see her"
+      },
+      {
+       "to": "Windows and other processes",
+       "via": "foreground window, last input age; files gamelab/lab/player.log, player.json, ALARM.json, parked.json",
+       "what": "is the game in front, is someone playing, is the player up, is the alarm up, is she parked"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 130,
+       "symbol": "Guard"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 167,
+       "symbol": "act"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 220,
+       "symbol": "Pass"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 269,
+       "symbol": "tick"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 65,
+       "symbol": "GUARD_S"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 66,
+       "symbol": "STATE_AGE_S"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 353,
+       "symbol": "left_behind"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 236,
+       "symbol": "_hands"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1446,
+       "symbol": "_guard_pass"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1456,
+       "symbol": "latest"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1488,
+       "symbol": "GUARD_S"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 88,
+       "symbol": "read_mode"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 296,
+       "symbol": "running_hunt"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 199,
+       "symbol": "ALERT"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 258,
+       "symbol": "_blind"
+      },
+      {
+       "path": "gamelab/README.md",
+       "line": 192,
+       "symbol": "Not tried live"
+      }
+     ]
+    },
+    {
+     "id": "vitals",
+     "name": "Vitals: her potions running out, her death",
+     "runs_as": "library code on the caller's thread (the guard's pass, on the main thread)",
+     "started_by": "`_guard_pass` (`Vitals(push)`) at start-up",
+     "lives": "as long as the process; what the phone was told is kept in `gamelab/lab/vitals.json`, so a restart doesn't repeat it",
+     "does": "Fed her HP and MP bars (and her HP number) by every guard pass that has a state (not with the switch off). Pushes once: \"HP potions not working\" (two touches' drops under 60% of her bar with no potion's jump between), \"MP potions not working\" (MP under 5% for 60 s), \"She died\" (HP 0 for 3 s, a critical push). A potion push comes again only after her potions have been seen working in between and at least 30 minutes after the last; the death push only after she's been seen alive. From the first pass that reads HP 0 the guard stands down.",
+     "rate": "every guard pass (1 a second)",
+     "talks_to": [
+      {
+       "to": "guard",
+       "via": "property Vitals.zero",
+       "what": "she's dead"
+      },
+      {
+       "to": "phone-push",
+       "via": "notify.phone",
+       "what": "the potion and death pushes"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/behavior/vitals.py",
+       "line": 52,
+       "symbol": "Vitals"
+      },
+      {
+       "path": "gamelab/behavior/vitals.py",
+       "line": 101,
+       "symbol": "see"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 282,
+       "symbol": "vitals.see"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1470,
+       "symbol": "Vitals"
+      },
+      {
+       "path": "gamelab/behavior/vitals.py",
+       "line": 97,
+       "symbol": "_may_tell"
+      },
+      {
+       "path": "gamelab/behavior/vitals.py",
+       "line": 39,
+       "symbol": "AGAIN_S"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 294,
+       "symbol": "zero"
+      }
+     ]
+    },
+    {
+     "id": "perceive-client",
+     "name": "The perception service's client (`perceive-client` thread)",
+     "runs_as": "thread",
+     "started_by": "`_perception` at start-up (ServiceClient.start)",
+     "lives": "as long as the process (a daemon thread)",
+     "does": "Connects to the perception service's named pipe `\\\\.\\pipe\\gamelab-perceive` (its key read from `gamelab/lab/perceive.json`) and says hello as `pet`: a command that sends keys but doesn't hunt. So the service never refuses it and never lets it hold the map: with no hunt attached it has the service look at the pet's `--map`, and a hunt on another map takes the service over. From then on it receives every state the service makes (the service runs at one pace, 15 frames a second, whoever is attached) and the answers to whole-frame asks, whose pixels come through shared memory; it keeps the last 8 states. It reconnects every 0.5 s if the pipe closes or says nothing for 10 s, and while it can't reach a service it starts one.",
+     "rate": "about 15 states a second from the service",
+     "talks_to": [
+      {
+       "to": "perceive",
+       "via": "named pipe \\\\.\\pipe\\gamelab-perceive + shared memory rings",
+       "what": "hello, frame asks, bye; states, welcomes, frames"
+      },
+      {
+       "to": "the main thread (guard, PetWait, eyes)",
+       "via": "deque of states under threading.Condition `_cond`; sends under `_send_lock`",
+       "what": "latest(), problem() and full_frame() wait on the condition the thread notifies"
+      },
+      {
+       "to": "service-start",
+       "via": "service.ensure",
+       "what": "start the service if none runs"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1147,
+       "symbol": "ServiceClient"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1193,
+       "symbol": "perceive-client"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1198,
+       "symbol": "_run"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1183,
+       "symbol": "_cond"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 71,
+       "symbol": "ADDRESS"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1349,
+       "symbol": "latest"
+      },
+      {
+       "path": "gamelab/localization/feed.py",
+       "line": 79,
+       "symbol": "Ring"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1007,
+       "symbol": "ServiceClient"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 495,
+       "symbol": "_hello"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 329,
+       "symbol": "fast"
+      },
+      {
+       "path": "gamelab/localization/rate.py",
+       "line": 20,
+       "symbol": "HZ"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 815,
+       "symbol": "targets"
+      }
+     ]
+    },
+    {
+     "id": "eyes-ocr",
+     "name": "Her eyes and the OCR (reading the Character Info)",
+     "runs_as": "library code on the caller's thread (the main thread)",
+     "started_by": "`_eyes` at start-up; the OCR engine at the first panel read",
+     "lives": "as long as the process",
+     "does": "The pet feeder never captures the screen: its eyes ask the perception service for the whole client picture shown after now (1 s at most) and read it: her name tag, to know where to double-click, then the Character Info panel's text through maplehelper's shared RapidOCR engine (one ONNX Runtime thread, about 0.25 s a read, loaded on first use). If the service answers that the game isn't in front, the pet feeder brings the game to the front itself (not through the player) and asks once more. Only a read uses them; a food by the followed number needs no pixels.",
+     "rate": "only during a read (a few frames)",
+     "talks_to": [
+      {
+       "to": "perceive-client",
+       "via": "ServiceClient.full_frame (Eyes.full_frames)",
+       "what": "the client's picture, full size"
+      },
+      {
+       "to": "tag-bands",
+       "via": "the name-tag search",
+       "what": "the template match split into bands"
+      },
+      {
+       "to": "windows",
+       "via": "window.bring_to_front (ServiceClient.bring_forward)",
+       "what": "the game made the foreground window when a frame was refused because it wasn't"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 951,
+       "symbol": "_eyes"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 967,
+       "symbol": "full_frames"
+      },
+      {
+       "path": "gamelab/perception/eyes.py",
+       "line": 397,
+       "symbol": "_capture"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 401,
+       "symbol": "look"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 203,
+       "symbol": "ocr"
+      },
+      {
+       "path": "maplehelper/ocr/engine.py",
+       "line": 176,
+       "symbol": "shared"
+      },
+      {
+       "path": "maplehelper/ocr/engine.py",
+       "line": 32,
+       "symbol": "threads"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1410,
+       "symbol": "full_frame"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1423,
+       "symbol": "bring_forward"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1395,
+       "symbol": "bring_to_front"
+      }
+     ]
+    },
+    {
+     "id": "tag-bands",
+     "name": "Name-tag search threads (`tag-bands`)",
+     "runs_as": "thread pool",
+     "started_by": "the first whole-picture search for her name tag (a Character Info read's look)",
+     "lives": "from then until the process ends, idle between reads",
+     "does": "Four threads that split the template match for her name tag into row bands; OpenCV lets go of Python's lock, so they run side by side. Only a read uses them.",
+     "rate": "only during a read",
+     "talks_to": [
+      {
+       "to": "eyes-ocr",
+       "via": "ThreadPoolExecutor.map",
+       "what": "match results, joined by the caller"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/perception/nametag.py",
+       "line": 191,
+       "symbol": "tag-bands"
+      },
+      {
+       "path": "gamelab/perception/nametag.py",
+       "line": 56,
+       "symbol": "BANDS"
+      }
+     ]
+    },
+    {
+     "id": "telemetry-writer",
+     "name": "The telemetry writer (`telemetry-writer` thread)",
+     "runs_as": "thread",
+     "started_by": "`_record(\"pet\")` -> telemetry.record_to, at the end of start-up",
+     "lives": "as long as the process (a daemon thread)",
+     "does": "Writes the run's records (its log lines, pet and guard events, the gc reports) to `gamelab/lab/telemetry/<time>-pet.jsonl` every 0.2 s, for the mini-map to follow live and for later replay. The other components only add a line to its queue.",
+     "rate": "every 0.2 s",
+     "talks_to": [
+      {
+       "to": "every component",
+       "via": "telemetry.emit: a deque under a threading.Condition",
+       "what": "records to write"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1608,
+       "symbol": "record_to"
+      },
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 218,
+       "symbol": "telemetry-writer"
+      },
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 136,
+       "symbol": "FLUSH_S"
+      }
+     ]
+    },
+    {
+     "id": "gc-report",
+     "name": "The garbage-collection report (`gc-report` thread)",
+     "runs_as": "thread",
+     "started_by": "`_record` -> gcstats.report_every, at the end of start-up",
+     "lives": "as long as the process (a daemon thread)",
+     "does": "Once a minute puts a `gc` record (Python's garbage collections since the last) into the telemetry.",
+     "rate": "every 60 s",
+     "talks_to": [
+      {
+       "to": "telemetry-writer",
+       "via": "telemetry.emit",
+       "what": "the gc record"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1613,
+       "symbol": "report_every"
+      },
+      {
+       "path": "gamelab/gcstats.py",
+       "line": 131,
+       "symbol": "gc-report"
+      }
+     ]
+    },
+    {
+     "id": "phone-push",
+     "name": "Phone pushes (`bark-push` threads)",
+     "runs_as": "thread",
+     "started_by": "notify.phone, called by the guard, Vitals and start-up's minimized-game note: one short-lived thread per push",
+     "lives": "one HTTPS request to Bark, then it ends",
+     "does": "Sends the push to your iPhone through Bark (`gamelab/lab/bark.json`, read at each push; nothing if the file is missing): critical for most of the guard's alerts and for her death, regular for potions, a stop's note and \"The guard can't see her\". On a thread of its own so a slow network never holds up a guard pass; a failure is only logged.",
+     "rate": "only when something is told",
+     "talks_to": [
+      {
+       "to": "phone",
+       "via": "HTTPS to the Bark server",
+       "what": "title and text of the push"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 203,
+       "symbol": "bark-push"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 208,
+       "symbol": "phone"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1469,
+       "symbol": "notify.phone"
+      }
+     ]
+    },
+    {
+     "id": "park-start",
+     "name": "Starting the park (`nav --park --tell`)",
+     "runs_as": "child process",
+     "started_by": "the guard (`start_park`), when it decides to park her",
+     "lives": "the `powershell.exe` child about a second (waited for on the main thread, 60 s at most); the park it creates is not the pet feeder's child and runs on its own",
+     "does": "Runs a hidden `powershell.exe` that asks WMI (`Win32_Process.Create`, window hidden) to start `cmd.exe /c ... python -u -X utf8 -m gamelab nav --park --tell >> gamelab/lab/park.log` in D:/MapleHelper. Because that command line contains `gamelab nav`, the babysitter takes it for a hunt and kills this pet feeder within 5 s; the park writes how it went to `gamelab/lab/parked.json` (or a note to `gamelab/lab/park_note.json`), which the next pet feeder's guard reads, and the babysitter starts a new pet feeder once the park has ended. The guard's park count lives in `gamelab/lab/guard.json`, so the 2-minute and 3-park limits hold across those restarts. (`gamelab stop` starts `nav --park` differently, as a plain child it waits for: `guard._park_now`, in the `tools` process, not in the pet feeder.)",
+     "rate": "at most every 2 minutes, 3 times an episode",
+     "talks_to": [
+      {
+       "to": "park",
+       "via": "WMI Win32_Process.Create (through powershell.exe)",
+       "what": "start `nav --park --tell`"
+      },
+      {
+       "to": "babysitter",
+       "via": "the process list",
+       "what": "a `gamelab nav` process: the pet feeder is killed while it runs"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1463,
+       "symbol": "start_park"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1465,
+       "symbol": "_start_detached"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 241,
+       "symbol": "_start_detached"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 216,
+       "symbol": "start_park"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 32,
+       "symbol": "the babysitter stops the pet feeder"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 427,
+       "symbol": "_park_now"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 213,
+       "symbol": "park_at"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 246,
+       "symbol": "subprocess.run"
+      }
+     ]
+    },
+    {
+     "id": "service-start",
+     "name": "Starting the perception service if none runs",
+     "runs_as": "child process",
+     "started_by": "the `perceive-client` thread (`service.ensure`), while it can't connect",
+     "lives": "the `powershell.exe` child about a second; the service it creates is detached and outlives the pet feeder",
+     "does": "If no process holds the service's mutex `Local\\gamelab-perceive`, at most every 10 s, it starts `python -u -X utf8 -m gamelab perceive --map <the pet's map>` the same hidden powershell + WMI way, its console appended to `gamelab/lab/perceive.log`. Normally the babysitter has one running already, so this is a fallback.",
+     "rate": "at most every 10 s, only while no service runs",
+     "talks_to": [
+      {
+       "to": "perceive",
+       "via": "WMI Win32_Process.Create (through powershell.exe)",
+       "what": "start the service"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 209,
+       "symbol": "ensure"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 72,
+       "symbol": "MUTEX"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 225,
+       "symbol": "_start_detached"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1204,
+       "symbol": "_ensure"
+      }
+     ]
+    },
+    {
+     "id": "pc-alert",
+     "name": "Beeps and a Windows notification when the pet food doesn't take",
+     "runs_as": "child process",
+     "started_by": "PetCare's food doubt (two foods in a row that didn't raise the fullness)",
+     "lives": "the beeps hold the main thread about a second; the hidden `powershell.exe` that shows the notification isn't waited for",
+     "does": "Beeps 3 times at the PC and starts a hidden `powershell.exe` that shows a Windows notification \"MapleStory: her pet food\", saying to check her Pet Food and the game's key bindings.",
+     "rate": "once per 30 minutes per key at most",
+     "talks_to": [
+      {
+       "to": "user",
+       "via": "Windows notification and sound",
+       "what": "her pet food took no effect"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 386,
+       "symbol": "alarm.page"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 232,
+       "symbol": "page"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 254,
+       "symbol": "Popen"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "process": "babysitter",
+   "is_os_process": true,
+   "plain_md": "**The babysitter** is not in the repo. It is the PowerShell script `D:/MapleHelper-scratch/live/babysit3.ps1`, running as its own `powershell.exe`, not elevated (nothing in it asks for administrator rights). The same folder keeps `babysit.ps1` and `babysit2.ps1` for rollback; the project's notes say babysit3 has been the live one since 2026-10-26. The README still names `babysit.ps1` in places, and `D:/MapleHelper-scratch/pconst/finish/babysit3.ps1`, a folder that no longer exists.\n\n**What it does.** Every 5 s it lists the python processes and keeps things running: one `gamelab perceive --map 10002073` always, the rolling recording handed over to it, and the pet feeder (`gamelab pet --every 1 --map 10002073`) exactly while no `gamelab tour|hunt|nav|probe|combo|act|do` process runs. It also drops simulator and test pythons to Idle priority. It starts everything through WMI (hidden, in D:/MapleHelper, with `C:/Users/Admin/.conda/envs/maplehelper/python.exe`, a junction to `D:/conda-envs/maplehelper314`), so what it starts is not its child and outlives it. It stops things with a hard kill.\n\n**Who starts it: you or Claude, by hand, once.** Its header and the README say to start it detached through WMI (`Invoke-CimMethod Win32_Process Create ... powershell.exe -File D:/MapleHelper-scratch/live/babysit3.ps1`) so it outlives the Claude Code session. Nothing that starts it again was found: no scheduled-task file, startup script or Claude loop in D:/MapleHelper-scratch or C:/Users/Admin/.claude names it (Windows' own scheduled-task list wasn't read). The notes only say to check it is alive after restarts.\n\n**How long it lives.** Until its powershell is killed or the PC restarts; an error in one round is logged and the loop goes on. It doesn't look like it has run lately: its logs (`babysit.log`, `pet.log`, `perceive.log`) are not in `D:/MapleHelper-scratch/live/`, and `gamelab/lab/pet.json`, which a running pet feeder rewrites every minute, was last written on 2026-11-07.",
+   "expected_start": "you or Claude, by hand, once per PC session: detached through WMI (`Invoke-CimMethod -ClassName Win32_Process -MethodName Create`, `powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:/MapleHelper-scratch/live/babysit3.ps1`, folder D:/MapleHelper); nothing found restarts it automatically",
+   "started_by": [
+    "user",
+    "claude"
+   ],
+   "evidence": [
+    {
+     "path": "gamelab/README.md",
+     "line": 10065,
+     "symbol": "babysit3.ps1"
+    },
+    {
+     "path": "gamelab/README.md",
+     "line": 6110,
+     "symbol": "babysit.ps1"
+    },
+    {
+     "path": ".analysis/claude-memory/pet-babysitting.md",
+     "line": 18,
+     "symbol": "babysit3.ps1"
+    },
+    {
+     "path": ".analysis/claude-memory/pet-babysitting.md",
+     "line": 21,
+     "symbol": "Check it's alive"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 211,
+     "symbol": "as the babysitter starts its programs"
+    },
+    {
+     "path": ".analysis/claude-memory/conda-env-py314.md",
+     "line": 13,
+     "symbol": "junction"
+    },
+    {
+     "path": ".analysis/claude-memory/long-running-detached.md",
+     "line": 15,
+     "symbol": "Invoke-CimMethod"
+    }
+   ],
+   "components": [
+    {
+     "id": "loop",
+     "name": "The 5-second loop",
+     "runs_as": "main thread",
+     "started_by": "the script, as its powershell.exe starts",
+     "lives": "as long as its powershell.exe (an error in one round is logged and the loop goes on)",
+     "does": "Each round: lists the python processes, applies the rules below (recorder, perception service, old `watch`, pet feeder, idle guard), logs what it did to `D:/MapleHelper-scratch/live/babysit.log`, and sleeps 5 s. A process it started that dies is started again within about 5 s.",
+     "rate": "every 5 s",
+     "talks_to": [
+      {
+       "to": "process-list",
+       "via": "function call",
+       "what": "the python processes, classified"
+      },
+      {
+       "to": "wmi-start",
+       "via": "Start-Detached / Stop-One",
+       "what": "start or stop a program"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/README.md",
+       "line": 10585,
+       "symbol": "within its 5 s loop"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1568,
+       "symbol": "the babysitter started it again every 5 s"
+      }
+     ]
+    },
+    {
+     "id": "process-list",
+     "name": "The process list",
+     "runs_as": "library code on the caller's thread (the loop's)",
+     "started_by": "the loop, each round (a small C# helper compiled into the powershell at start)",
+     "lives": "as long as the babysitter",
+     "does": "One Windows call a round (NtQuerySystemInformation) lists every python.exe with its parent and start time; each new one's command line is read once and matched against fixed patterns: `gamelab perceive` (not `--frames`), `gamelab recorder`, `gamelab watch --hz`, hunting `gamelab (tour|hunt|nav|probe|combo|act|do) `, `gamelab pet`, simulators and tests. That command-line match is why every gamelab subcommand also takes `--character` after its name, and why the guard's park is a separate `nav` process. If the helper won't load it falls back to one WMI query a round.",
+     "rate": "every 5 s",
+     "talks_to": [
+      {
+       "to": "windows",
+       "via": "NtQuerySystemInformation, NtQueryInformationProcess",
+       "what": "processes and their command lines"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/README.md",
+       "line": 1654,
+       "symbol": "process match"
+      },
+      {
+       "path": "gamelab/README.md",
+       "line": 157,
+       "symbol": "regex"
+      }
+     ]
+    },
+    {
+     "id": "pet-rule",
+     "name": "The pet feeder rule",
+     "runs_as": "library code on the caller's thread (the loop's)",
+     "started_by": "the loop, each round",
+     "lives": "as long as the babysitter",
+     "does": "If any hunting process runs (a `nav --park` counts), every `gamelab pet` process is killed (Stop-Process -Force), a `pet` or `pet --read` run by hand included; if none runs and no `gamelab pet` process runs, it starts `cmd.exe /c set PYTHONUNBUFFERED=1&& set OPENBLAS_NUM_THREADS=1&& python -u -m gamelab pet --every 1 --map 10002073 >> D:/MapleHelper-scratch/live/pet.log 2>&1`. The map is fixed in the script, so the guard sees her only on that map (Tree Dungeon). A hunt feeds the pet itself while the feeder is away.",
+     "rate": "every 5 s",
+     "talks_to": [
+      {
+       "to": "pet",
+       "via": "WMI start; Stop-Process -Force",
+       "what": "start between hunts; kill while a hunt or park runs"
+      },
+      {
+       "to": "hunt",
+       "via": "the process list",
+       "what": "a hunting command is running"
+      },
+      {
+       "to": "park",
+       "via": "the process list",
+       "what": "a `gamelab nav --park` counts as hunting"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 17,
+       "symbol": "the babysitter keeps that running exactly while no hunt runs"
+      },
+      {
+       "path": "gamelab/README.md",
+       "line": 2603,
+       "symbol": "kills the pet's process when a hunt starts"
+      },
+      {
+       "path": "gamelab/README.md",
+       "line": 167,
+       "symbol": "pet --map 10002073"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 296,
+       "symbol": "running_hunt"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 1267,
+       "symbol": "feed_pet_if_due"
+      }
+     ]
+    },
+    {
+     "id": "perceive-rule",
+     "name": "The perception service rule",
+     "runs_as": "library code on the caller's thread (the loop's)",
+     "started_by": "the loop, each round",
+     "lives": "as long as the babysitter",
+     "does": "If no `gamelab perceive` (other than `--frames`) runs, it starts `python -u -m gamelab perceive --map 10002073`, its console appended to `D:/MapleHelper-scratch/live/perceive.log`. It runs through hunts too. It also stops an old `gamelab watch --hz` it may find.",
+     "rate": "every 5 s",
+     "talks_to": [
+      {
+       "to": "perceive",
+       "via": "WMI start",
+       "what": "start it when none runs"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/README.md",
+       "line": 1786,
+       "symbol": "the babysitter keeps it running"
+      },
+      {
+       "path": "gamelab/README.md",
+       "line": 6127,
+       "symbol": "the service runs through hunts"
+      }
+     ]
+    },
+    {
+     "id": "recorder-rule",
+     "name": "The rolling recording rule",
+     "runs_as": "library code on the caller's thread (the loop's)",
+     "started_by": "the loop, each round",
+     "lives": "as long as the babysitter",
+     "does": "The perception service keeps the rolling 5-minute recording. If an old `gamelab recorder` still holds the recorders' mutex while the service waits for it (`gamelab/lab/recorder/waiting.json`), it stops the old recorder once it has nothing left to write (no Lie Detector alarm up or begun in the last 5 minutes, no save asked or waiting); if no recording runs at all for 30 s, it starts `gamelab recorder` as a fallback.",
+     "rate": "every 5 s",
+     "talks_to": [
+      {
+       "to": "recorder",
+       "via": "files gamelab/lab/recorder/status.json and waiting.json; WMI start; Stop-Process",
+       "what": "hand the recording to the service"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/README.md",
+       "line": 1705,
+       "symbol": "babysit3.ps1"
+      },
+      {
+       "path": "gamelab/README.md",
+       "line": 10058,
+       "symbol": "nothing left to write"
+      }
+     ]
+    },
+    {
+     "id": "idle-guard",
+     "name": "The idle guard",
+     "runs_as": "library code on the caller's thread (the loop's)",
+     "started_by": "the loop, each round (unless started with -NoGuard)",
+     "lives": "as long as the babysitter",
+     "does": "Sets simulator and test pythons (sim.harness, sim.golden, pytest, multiprocessing children, `gamelab sim`) to Idle priority within 5 s, unless their parent is a live gamelab command, so background work doesn't take CPU from the game and the live processes.",
+     "rate": "every 5 s",
+     "talks_to": [
+      {
+       "to": "windows",
+       "via": "SetPriorityClass",
+       "what": "Idle priority"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/README.md",
+       "line": 10463,
+       "symbol": "idle guard"
+      }
+     ]
+    },
+    {
+     "id": "wmi-start",
+     "name": "Starting programs (WMI) and stopping them",
+     "runs_as": "library code on the caller's thread (the loop's)",
+     "started_by": "the rules above, when something must start or stop",
+     "lives": "each call returns at once; no child of the babysitter is made: what it starts is a child of WMI's host (WmiPrvSE) and keeps running if the babysitter ends",
+     "does": "Starts each program with `Invoke-CimMethod Win32_Process Create` (`cmd.exe /c set PYTHONUNBUFFERED=1&& set OPENBLAS_NUM_THREADS=1&& python -u -m gamelab ... >> D:/MapleHelper-scratch/live/<name>.log`, window hidden, folder D:/MapleHelper) and stops one with `Stop-Process -Force`, a hard kill: nothing in the killed process runs at its end, which is why the pet feeder keeps its state in lab files.",
+     "rate": "only when something must start or stop",
+     "talks_to": [
+      {
+       "to": "pet",
+       "via": "WMI Win32_Process.Create; Stop-Process -Force",
+       "what": "start, kill"
+      },
+      {
+       "to": "perceive",
+       "via": "WMI Win32_Process.Create",
+       "what": "start"
+      },
+      {
+       "to": "recorder",
+       "via": "WMI Win32_Process.Create; Stop-Process -Force",
+       "what": "start, stop"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 211,
+       "symbol": "as the babysitter starts its programs"
+      },
+      {
+       "path": ".analysis/claude-memory/long-running-detached.md",
+       "line": 15,
+       "symbol": "WmiPrvSE"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

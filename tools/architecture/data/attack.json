@@ -1,0 +1,2841 @@
+{
+  "id": "attack",
+  "layer": "attack",
+  "title": "Attack: which monster, from where, and how",
+  "tagline": "Pure fight decisions: whom to hit, where to stand, which move, which attack.",
+  "summary": "The attack layer turns positions on the map into fighting decisions, without pressing keys or reading the clock. It ports the game client's own targeting rules (reach), decides the next move up close or at range (stance), picks the monster to hit (target) and the attack to use (choice), and measures how dangerous a place is (danger) to choose where to stand (spots, ropes) and what a knock-back costs (knock). The behavior layer calls it every look; control turns its answers into keys.",
+  "details_md": "**Where it sits.** Each look, perception and localization produce a `Scene` (her place, the monsters placed on platforms). `behavior` (the fight loop, the hunt loop, grinding) asks this layer what to do and hands the answer to `control.actions`. The layer may import only perception, localization and motion (`tests/test_architecture.py`), and nothing in it reads the clock, starts a thread or touches a file: the functions are computations over map units, so the simulator and the tests run exactly the same decisions as the live game. The only state is in-memory caches (per map or platform) and `magic`'s process-wide swap of module constants; the only outside reads are two environment switches in `stance` (`GAMELAB_JUMP_ASIDE`, `GAMELAB_HOP_UP`).\n\n**The foundation is reach** (`reach.py`): the game client's targeting ported from RustMS's v83 client and checked against live logs. A ground attack first swipes with the claw if a monster is in its 65-unit box, else the star's banded search (bands 20 wide from 65 to 400 ahead, windows widening 1 unit up and down per 4 ahead) picks the first body it overlaps, and one line from 28 units over her feet to that pick must not cross her own floor going down or a wall of her foothold group. From a jump the same search runs from wherever her feet are at the attack's start. `reach.shots` lists every jump and attack key that surely hits each monster.\n\n**The move** (`stance.py`): `stance()` for a group and `decide()` for one target return a small *act* tuple (throw, jump-throw, jump back, step away, close in, wait). Since 2026-10-27 every decision is made for the moment her attack will actually start (`Pace`): her remaining attack lock, the look's age and each monster's walk from its track. Up close she escapes by least danger, throws only where the attack surely takes the monster, or steps to where the next one will; at range she picks the side to throw, a passing jump, or a jump shot when nothing on the ground reaches.\n\n**The monster and the attack** (`target.py`, `choice.py`): the target-first planner (2026-11-04) scores every monster as (chance it's there) x EXP / (time to an attack + time to kill), keeps its pick unless another scores 1.3x as much, switches for one coming at her, and plans the next. With it on, behavior hands the stance that one monster as `wanted` and the rest as `among`, so the stance decides the move against the chosen target only. The attack choice uses Lucky Seven unless MP is short, nothing is seen in the throw's way, or the regular attack would finish the monster about as fast, reckoning a monster's HP left as a probability distribution.\n\n**Danger and places** (`danger.py`, `spots.py`, `ropes.py`, `knock.py`): danger is the expected share of her HP touches take soon at a place, from each kind's touch damage (game formula) and how soon it can walk to her, summed over seen monsters and unexplained spawn points. It sets how near a hard-hitting monster may come (`keep_off`: a Horny Mushroom 169 units), scores shooting spots (coverage minus danger), picks rope heights, and guards against respawns. `knock` flies a touch's knock-back like the simulator and prices it in EXP; it is built but not yet wired into decisions.\n\n**Characters.** The thief's values are the module constants. For the magician, `magic.apply` overwrites reach's search constants and several stance switches at the start of a hunting command (her Magic Claw: 50 to 300 ahead, nothing stops it, never cast mid-jump), the quick way the user asked for on 2026-10-28.\n\n**How it's tuned.** Almost every rule is a module constant or boolean switch with its evidence in a comment: live telemetry hours on Tree Dungeon, frame-by-frame clip reviews, and paired simulator runs. Switches let a rule be turned off to reproduce the earlier behaviour for A/B runs and golden traces.",
+  "groups": [
+    {
+      "id": "reach",
+      "title": "Where an attack lands",
+      "summary": "The client's targeting rules (claw, star search, line of sight, jump shots), and the magician's swap of them.",
+      "modules": [
+        "gamelab/attack/__init__.py",
+        "gamelab/attack/reach.py",
+        "gamelab/attack/magic.py"
+      ]
+    },
+    {
+      "id": "moves",
+      "title": "The fight's next move",
+      "summary": "Throw, jump-throw, jump back, step away or close in, judged at the moment the attack will start.",
+      "modules": [
+        "gamelab/attack/stance.py"
+      ]
+    },
+    {
+      "id": "which",
+      "title": "Which monster, and which attack",
+      "summary": "The target-first planner's EXP-per-second choice, and Lucky Seven versus the regular attack.",
+      "modules": [
+        "gamelab/attack/target.py",
+        "gamelab/attack/choice.py"
+      ]
+    },
+    {
+      "id": "places",
+      "title": "Danger and safe places",
+      "summary": "How badly she can be touched at a place, where to stand to shoot, ropes as refuges, and where a knock leaves her.",
+      "modules": [
+        "gamelab/attack/danger.py",
+        "gamelab/attack/spots.py",
+        "gamelab/attack/ropes.py",
+        "gamelab/attack/knock.py"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "path": "gamelab/attack/__init__.py",
+      "title": "Package charter",
+      "tagline": "The attack package's one-paragraph purpose and its import rule.",
+      "summary": "Holds only a docstring: attack is 'which monster to shoot, from where, and how (a throw, a jump-throw, a jump back)'. It names reach, stance and spots as the core and states the layer rule: attack may import perception, localization, motion and the shared modules.",
+      "details_md": "Seven lines, no code. The import rule it states is enforced by `tests/test_architecture.py`, whose table allows the `attack` layer `{perception, localization, motion}` (the shared modules such as `gamelab/directions.py` and `gamelab/character.py` are allowed to every layer). That rule is why the attack layer is **pure**: nothing in it presses a key, reads the clock or touches a file; the `behavior` layer calls it and `control` carries its answers out.\n\nThe docstring is older than some of the package: `target`, `danger`, `knock`, `choice`, `magic` and `ropes` were added later and are not named in it. The real entry points are the modules themselves: behavior imports `gamelab.attack.stance`, `reach`, `target` and the rest directly; nothing is re-exported here.",
+      "lines": 7,
+      "key_items": [],
+      "inputs": [],
+      "outputs": [
+        "the package namespace `gamelab.attack` that behavior, ui and sim import from"
+      ],
+      "uses": [],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [],
+      "decisions": [],
+      "gotchas": [
+        "The docstring lists only reach, stance and spots; the other six modules are not mentioned there."
+      ],
+      "tests": [
+        "tests/test_architecture.py"
+      ]
+    },
+    {
+      "path": "gamelab/attack/reach.py",
+      "title": "Reach",
+      "tagline": "The game client's targeting, ported: claw swipe, star search, line of sight, jump shots.",
+      "summary": "Answers 'would an attack from here hit that monster?' the way the game client decides it: the claw swipes anything in its box up close, else the star's banded target search picks the first body it overlaps, and one line from her to that pick is checked against walls and floors. It also lists every jump and attack key that surely hits each monster from where she stands (`shots`, `Coverage`). Everything else in the layer measures reach through this module.",
+      "details_md": "**Measured facts it starts from** (Thicket Around the Beach II): a star flies 400 map units, hits monsters 60 units below or above her, leaves her about 530 ms after the key and flies about 690 units/s. What it hits is decided when the attack **starts** (about 65 ms after the key), from the monsters' bodies in the game data; the flying star is only a picture.\n\n**From the ground, two stages** (a port of the v83 client's decompiled shot code as RustMS has it, cross-checked against meowdb's pages):\n\n1. **The claw first.** Each attack takes one of two stab stances at random (`CLAW_STANCES`: stabO1, stabO2). Its box from the game data is cut to `CLAW_FAR` (65) ahead. The nearest monster whose body reaches into it is swiped (9-11 damage, no star), on her level or not: the client has no level gate. `claw_edge(half)` = 65 + half its width + `CLAW_MARGIN` (12) is how far off a monster must be for a throw to be a star: a pig 111, an Orange Mushroom 109, a slime or a Green/Horny Mushroom 105, a snail 96.\n2. **The star's search.** Bands `SEARCH_STEP` (20) wide from `SEARCH_START` (65) to `STAR_RANGE` (400): 17 bands. Band k's window runs from 12 - 5k to 44 + 5k units above her feet (centred on `SHOT_H` = 28, the client's own constant). The star goes to a body overlapping the **first** band any body overlaps. Within that band the client takes the monster that entered the map first, which can't be seen, so `take_chances` splits it evenly.\n\n`ground_sure(half)` packages this as the nearest and farthest a ground attack surely takes a level monster: (claw_edge, `SHOT_RANGE` 410). `shot_dx` gives the nearest sideways for one off her level (60 below, an Orange Mushroom from 113, a pig 151, a snail 246). `can_shoot` is band and distance only; `can_hit` adds terrain and shielding and is the call almost everyone makes.\n\n**What stops a star** (`LINE` = 'v83', the default since 2026-10-21): one line, from `SHOT_H` above her feet to where the star hits the picked monster's body (`hit_point`). A floor of any foothold group stops it going **down** through, so her own platform blocks a star at a monster below unless she stands near enough its end. Walls stop it only if they belong to her own foothold group and only going in at their outer face (`faces`). `sight_stop` is the port of RustMS's `blocked`, including the corner rule; since 2026-11-01 footholds are found through a 64-unit grid (`_Sight`, `SIGHT_CELL`). Because the client checks only its pick's line, a monster picked first whose line is stopped **shields** everything behind it (`shielded`). `clear_length` is a numpy-vectorised version that `spots` uses over tens of thousands of lines.\n\n**From a jump** (`AIR_MODEL` = 'search' since 2026-10-27): the same search from wherever her feet are when the attack starts, with no claw. `air_sure` requires the pick to hold `AIR_MARGIN` (6) deep at both ends of the decide lag. Keyed 40 ms after the jump key (her feet 21-26 up) a Green or Horny Mushroom on her level is surely picked from 44 ahead; keyed 120 ms (an air turn, feet 52-56 up), only from 144.\n\n**Every shot from here** (`shots` -> `Coverage`): for each wanted monster a ground Shot if `can_hit`, and for each jump kind (`up`, `forward`, `back`) and side, two attack keys a jump (the user's, 2026-11-01): the soonest (`KEY_FIRST_MS` 40, or a turn's 120) and the top's (`TOP_KEY_MS` 278). A key is sure only if keying it 15 ms sooner or later (checked every 5 ms) picks the same monster with a clear line; the jitter room (`JITTER_FIRST_MS` 15 later, `JITTER_TOP_MS` 20 either way) is narrowed to where that holds. Landings and their variants come from `motion.physics`. `key_pick` says what an attack starting now would take ('claw', 'star', 'stopped', 'nothing'): the hunter logs it at every key and stance's jump-aside asks it.\n\nSeveral module constants are switches kept for probes and A/B runs (`WALLS_BLOCK`, `LINE`, `UP_BY_SEARCH`, `RAMP_BELOW`, `AIR_SEARCH`, `CLIENT_HIT_POINT`), and `attack.magic` overwrites the search constants for the magician at a command's start.",
+      "lines": 1357,
+      "key_items": [
+        {
+          "name": "can_hit",
+          "kind": "function",
+          "line": 833,
+          "signature": "def can_hit(platform, x, y, m, reach=SHOT_RANGE, rise=0.0, target=None, others=(), sizes=None) -> bool",
+          "summary": "Whether a star from (x, y) hits monster m: in reach by its body (can_shoot), its line not stopped (wall_to), and no monster the attack takes first has its line stopped (shielded).",
+          "details_md": "The single most-called reach question: stance, target, spots and behavior all go through it. It doesn't ask whether m is the pick *now*: a clear monster in front only orders the kills."
+        },
+        {
+          "name": "search_band",
+          "kind": "function",
+          "line": 357,
+          "signature": "def search_band(near, far, bottom, top, top0=None, floor0=None) -> int | None",
+          "summary": "The first band of the star's search a body overlaps (strictly, as the client's IntersectRect), or None.",
+          "details_md": "Bands start at SEARCH_START and are SEARCH_STEP wide; window(k) (line 339) gives each band's vertical extent: SHOT_H -/+ spread(k), spread(k) = (65 + 20k) // 4, i.e. 12 - 5k to 44 + 5k above her feet, one unit up and one down for every four ahead, as the client's."
+        },
+        {
+          "name": "can_shoot",
+          "kind": "function",
+          "line": 437,
+          "signature": "def can_shoot(dx, dy, reach=SHOT_RANGE, kind=None, sizes=None) -> bool",
+          "summary": "Band and distance alone, terrain aside: the target is within 60 above/below her (or higher where the search's windows reach, with UP_BY_SEARCH) and between shot_dx and min(reach, max_dx) sideways.",
+          "details_md": "can_hit is this plus the line-of-sight and shield checks; decide() and _clear_from use it directly for walk goals. Its default `reach` is bound at import, which is why magic.apply rewrites can_shoot.__defaults__."
+        },
+        {
+          "name": "attack_chances",
+          "kind": "function",
+          "line": 551,
+          "signature": "def attack_chances(bodies, claw=None, band=None) -> list[tuple[float, float]]",
+          "summary": "Each monster's chance of being swiped by the claw and of taking the star, for one ground attack.",
+          "details_md": "Per claw stance (each half the time) the nearest body in its box is swiped; otherwise the star's share is split evenly among the monsters in the first band. take_chances sums the two."
+        },
+        {
+          "name": "claw_edge",
+          "kind": "function",
+          "line": 493,
+          "signature": "def claw_edge(half: float) -> float",
+          "summary": "How far off a level monster must be for a ground throw not to be a claw swipe: CLAW_FAR + half + CLAW_MARGIN.",
+          "details_md": "A pig 111, Orange Mushroom 109, slime 105, snail 96."
+        },
+        {
+          "name": "ground_sure",
+          "kind": "function",
+          "line": 500,
+          "signature": "def ground_sure(half: float) -> tuple[float, float]",
+          "summary": "The nearest and farthest a ground attack surely takes a level monster: (claw_edge(half), SHOT_RANGE).",
+          "details_md": "The seam the stance's ground decisions go through (too_close, close_to, _from_here, _clear_step, landing)."
+        },
+        {
+          "name": "shot_dx",
+          "kind": "function",
+          "line": 427,
+          "signature": "def shot_dx(dy, kind=None, sizes=None) -> float",
+          "summary": "The nearest sideways a ground throw at a monster dy below (+) or above (-) her throws a star that picks it.",
+          "details_md": "Max of the search's min_dx by its body, the claw's reach (claw_dx), and the old ramp below her (ramp_dx, while RAMP_BELOW)."
+        },
+        {
+          "name": "wall_between",
+          "kind": "function",
+          "line": 743,
+          "signature": "def wall_between(platform, x, y, tx, rise=0.0, target=None, shot_h=None, ty=None, body=None, line=None, client=None, row_start=None) -> Segment | None",
+          "summary": "What stops a star from her to a monster at tx by the chosen line: a wall of her foothold group, or (v83) a floor it goes down through.",
+          "details_md": "With CLIENT_HIT_POINT the client's own hit point is checked too where it falls outside the target's platform. wall_in_way wraps it (None with WALLS_BLOCK off); wall_to takes a Monster."
+        },
+        {
+          "name": "sight_stop",
+          "kind": "function",
+          "line": 710,
+          "signature": "def sight_stop(platform, sx, sy, ex, ey, footholds=None) -> Segment | None",
+          "summary": "Port of the v83 client's line-of-sight test (RustMS ShotPath.h blocked): the first foothold the line crosses from its open to its closed side.",
+          "details_md": "Footholds come from the platform's cached grid (_Sight, SIGHT_CELL 64)."
+        },
+        {
+          "name": "shielded",
+          "kind": "function",
+          "line": 800,
+          "signature": "def shielded(platform, x, y, m, others, rise=0.0) -> Monster | None",
+          "summary": "A monster the attack picks before m whose own line is stopped: then no star reaches m from here.",
+          "details_md": "From the ground, one in an earlier search band; from a jump, a nearer one in the attack's area. A monster in the claw's box is never a shield (a swipe has no line)."
+        },
+        {
+          "name": "air_sure",
+          "kind": "function",
+          "line": 987,
+          "signature": "def air_sure(ahead, dy, top, half, gap_ms, margin=AIR_MARGIN) -> bool",
+          "summary": "Whether an attack keyed gap_ms after the jump key of a jump in place surely picks a monster: air_takes, margin deep, at both ends of the decide lag.",
+          "details_md": "Keyed 40 ms: a mushroom on her level from 44 ahead; keyed 120 ms: from 144."
+        },
+        {
+          "name": "shots",
+          "kind": "function",
+          "line": 1213,
+          "signature": "def shots(model, platform, x, y, monsters, sizes=None, kinds=JUMP_KINDS, where=None, others=None, lands=None) -> list[Shot]",
+          "summary": "Every attack from (x, y) that surely hits one of `monsters`: from the ground and from each kind of jump, at the sooner of its two attack keys that is sure.",
+          "details_md": "Poses come from physics.pose; picks from _air_pick at both ends of the decide lag with a clear wall_in_way line; a key counts only if keys KEY_SLACK_MS either side pick the same monster. `where` walks the monsters to their predicted x; `lands` skips jumps that don't land her back in a stretch (the stance's only)."
+        },
+        {
+          "name": "Coverage",
+          "kind": "class",
+          "line": 1326,
+          "signature": "class Coverage(shot_list: list[Shot])",
+          "summary": "shots indexed by monster: of(m), hits(m, kinds), ground(m), best(m) (ground first, else the soonest key).",
+          "details_md": "Built lazily by behavior.fight's jump_cover and passed to stance as the `jumps` callback."
+        },
+        {
+          "name": "Shot",
+          "kind": "dataclass",
+          "line": 1094,
+          "signature": "@dataclass(frozen=True) class Shot",
+          "summary": "One way to hit a target: side, the jump (None: from the ground), its attack key and jitter window, where she is at the pick, and where the jump lands (with its variants).",
+          "details_md": "lands_sure / land_span / lands_back check every variant of the jump (early or late lift-off, slower, the kick short)."
+        },
+        {
+          "name": "key_pick",
+          "kind": "function",
+          "line": 1193,
+          "signature": "def key_pick(platform, x, feet, side, rows, ground=True) -> tuple[str, list[Monster]]",
+          "summary": "What an attack starting now would take: ('claw', swiped) if both stances swipe, else ('star', clear ones of the first band), ('stopped', all of it) or ('nothing', []).",
+          "details_md": "Logged at each key by behavior.hunter.Hunter._key_pick; stance._search_says uses it for the jump aside."
+        }
+      ],
+      "inputs": [
+        "her map position and the platform she stands on (localization.mapdata.Platform, with its floors and her foothold group's walls)",
+        "monsters placed on the map (localization.monsters.Monster) and each kind's body (MobBody sizes from the map's game data, else the MONSTER_HALF/MONSTER_HEIGHT tables)",
+        "her jump arcs, landings and variants, and the input lags (motion.physics: pose, jump_of, jump_landing, jump_variants, JUMP_LAG, ATTACK_DECIDE_LAG_MS)"
+      ],
+      "outputs": [
+        "yes/no and distance answers (can_hit, ground_sure, shot_dx, claw_edge) for stance, target, spots and behavior",
+        "Shot lists and Coverage (what each jump and key hits) for stance's jump shots and behavior.fight/hunt's jump cover",
+        "key_pick's verdict for the hunter's per-key record",
+        "reach constants (SHOT_UP, SHOT_DOWN, STAR_REACH, LOOK_UP/LOOK_DOWN) read by the UI, the hunter's look band and patrol"
+      ],
+      "uses": [
+        "gamelab/localization/mapdata.py",
+        "gamelab/localization/monsters.py",
+        "gamelab/motion/physics.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "STAR_RANGE",
+          "value": "400",
+          "meaning": "units a star reaches, to the near side of a body (claw 200 + Keen Eyes 200, skill data)"
+        },
+        {
+          "name": "SHOT_RANGE",
+          "value": "410",
+          "meaning": "aim inside this: the target walks during the wind-up"
+        },
+        {
+          "name": "SHOT_DOWN / SHOT_UP",
+          "value": "60 / 60",
+          "meaning": "how far below/above her a target was measured hittable (the band)"
+        },
+        {
+          "name": "SHOT_H",
+          "value": "28",
+          "meaning": "the shot's row above her feet: the client's constant in every source"
+        },
+        {
+          "name": "SEARCH_START / SEARCH_STEP / SEARCH_SPREAD",
+          "value": "65 / 20 / 4",
+          "meaning": "the star search's first band, band width, and window growth (1 up, 1 down per 4 ahead)"
+        },
+        {
+          "name": "SEARCH_TOP0 / SEARCH_FLOOR0",
+          "value": "44 / 12",
+          "meaning": "the first band's window above her feet; the logs lean to a top of 21, unsettled"
+        },
+        {
+          "name": "BANDS",
+          "value": "17",
+          "meaning": "search bands from 65 to 400"
+        },
+        {
+          "name": "LEVEL",
+          "value": "15",
+          "meaning": "within this of her height a target counts as on her level"
+        },
+        {
+          "name": "CLAW_FAR / CLAW_MARGIN",
+          "value": "65 / 12",
+          "meaning": "the claw box's front cut, and the extra room kept past it for a walking monster"
+        },
+        {
+          "name": "EDGE_MARGIN",
+          "value": "25",
+          "meaning": "she never stands nearer than this to her platform's end to shoot"
+        },
+        {
+          "name": "AIR_MODEL",
+          "value": "'search'",
+          "meaning": "how an attack from a jump picks: the star's search from her feet ('widening' restores the older area model)"
+        },
+        {
+          "name": "AIR_MARGIN",
+          "value": "6",
+          "meaning": "how deep a body must reach for a jump attack's pick to count as sure"
+        },
+        {
+          "name": "LINE",
+          "value": "'v83'",
+          "meaning": "which line terrain must not cross: the client's (floors stop going down) or 'level'"
+        },
+        {
+          "name": "WALLS_BLOCK",
+          "value": "True",
+          "meaning": "decisions respect what stops a star; probes switch it off to measure"
+        },
+        {
+          "name": "UP_BY_SEARCH",
+          "value": "True",
+          "meaning": "ground throws reach monsters more than 60 above her where the search's windows do"
+        },
+        {
+          "name": "RAMP_BELOW",
+          "value": "True",
+          "meaning": "between her level and 60 below, keep the older, more cautious ramp until a probe settles it"
+        },
+        {
+          "name": "CLIENT_HIT_POINT",
+          "value": "True",
+          "meaning": "also check the line to the client's own hit point (cornered study R6)"
+        },
+        {
+          "name": "KEY_FIRST_MS / TOP_KEY_MS",
+          "value": "40 / 278",
+          "meaning": "the two attack keys tried per jump: at once, and at the top of the arc"
+        },
+        {
+          "name": "KEY_SLACK_MS / KEY_CHECK_MS",
+          "value": "15 / 5",
+          "meaning": "a key is sure only if keys this much either side pick the same monster, checked this far apart"
+        },
+        {
+          "name": "JITTER_FIRST_MS / JITTER_TOP_MS",
+          "value": "15 / 20",
+          "meaning": "how much later (first key) or either way (top key) the jitter may key an attack"
+        },
+        {
+          "name": "TURN_KEY_MS",
+          "value": "120",
+          "meaning": "soonest attack key of a jump that turns her in the air"
+        },
+        {
+          "name": "SIGHT_CELL",
+          "value": "64.0",
+          "meaning": "grid cell size for finding footholds near a line of sight"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-21",
+          "what": "The v83 client's line (LINE 'v83') became the default: her own floor stops a star at a monster below unless she stands near its end.",
+          "why": "The user, watching her hunt, saw her own platform stop her stars at monsters below, down a step and from a higher platform onto a lower one."
+        },
+        {
+          "date": "2026-10-25",
+          "what": "UP_BY_SEARCH on: ground throws reach monsters more than 60 above her where the search's windows do.",
+          "why": "The user's choice ('Turn it on now'): their own play killed Green Mushrooms 69-100 above from the ground; in the simulator +21.8% EXP. The review had called the evidence suggestive, not decisive."
+        },
+        {
+          "date": "2026-10-25",
+          "what": "AIR_SEARCH: from a jump the search's widening windows pick too, not only a fixed area around her feet.",
+          "why": "The user's play: of 30 kills of monsters 15+ above her, 23 fit the search; the user: 'remember the widening vertical search as horizontal scale out'."
+        },
+        {
+          "date": "2026-10-26",
+          "what": "TURN_KEY_MS raised to 120 ms (85 until then).",
+          "why": "Keyed 85 ms after the jump key, 36% of the turns in the air went the wrong way live."
+        },
+        {
+          "date": "2026-10-27",
+          "what": "AIR_MODEL 'search': from a jump the star's search alone picks, from her feet when the attack starts.",
+          "why": "788 live jump throws on Tree Dungeon fit it 111 log-likelihood better than the area model; matches RustMS having no case for the air."
+        },
+        {
+          "date": "2026-11-01",
+          "what": "Two attack keys a jump (at once and at the top) with a little jitter, instead of scanning every key from the soonest to 480 ms.",
+          "why": "The user: 'You only need two jump attacks: one with jump and immediately attack, another with jump and attack at mid air peak', and 'add a bit jitter ... can later on analyze if the jitter can show any pattern'. The scan was ~89 keys a start, most of the search's time."
+        },
+        {
+          "date": "2026-11-01",
+          "what": "Line-of-sight footholds found through a 64-unit grid (_Sight).",
+          "why": "The latency analysis: trying every floor and wall was 40% of the slowest jump-shot searches' time (59 us a line, 4 with the grid)."
+        },
+        {
+          "date": "2026-11-03",
+          "what": "CLIENT_HIT_POINT: check the line to the client's own hit point too.",
+          "why": "Cornered study R6: of her jumps in place up close, the 21 whose line to that point is stopped did damage 2 times, the 184 clear 80 times (p 0.0015)."
+        }
+      ],
+      "gotchas": [
+        "SEARCH_TOP0 (44) is the client's value but the shot logs lean to 21; the comment calls it 'the one number to change (to 21)' if the top-60 probe finds the lower top. Too high has her throw at monsters above her the star doesn't take.",
+        "Within the first band the client takes whichever monster entered the map first, which can't be seen: take_chances splits the star evenly, so a 'sure' pick only exists when a monster is alone in its band.",
+        "The claw has no level gate: a monster above or below her whose body reaches into the stab box is swiped instead of shot.",
+        "magic.apply overwrites this module's constants at runtime and patches can_hit/can_shoot's default `reach` via __defaults__ (bound at import). Code that copied a constant by name at import keeps the thief's value unless magic swaps that copy too (it does for spots.SHOT_RANGE).",
+        "_sight caches its grid on the Platform object itself (`platform._sight`), rebuilt if the platform's floors or walls tuple changes.",
+        "Between her level and 60 below her the search is unchecked in game and the only logged throws go against it, hence RAMP_BELOW keeping the older ramp.",
+        "Modules that import reach's constants by name keep the thief's values when magic swaps reach: gamelab/ui/render.py and ui/web.py import SHOT_UP, SHOT_DOWN and STAR_REACH so, and only spots.SHOT_RANGE is swapped among such copies."
+      ],
+      "tests": [
+        "tests/test_attack.py",
+        "tests/test_bench.py",
+        "tests/test_character.py",
+        "tests/test_clearance.py",
+        "tests/test_control.py",
+        "tests/test_cornered_aim.py",
+        "tests/test_fight.py",
+        "tests/test_grind.py",
+        "tests/test_jump_reach.py",
+        "tests/test_key_pick.py",
+        "tests/test_kill_credit.py",
+        "tests/test_landing.py",
+        "tests/test_magician_hunt.py",
+        "tests/test_probe.py",
+        "tests/test_sim.py",
+        "tests/test_stance_aside.py",
+        "tests/test_target.py",
+        "tests/test_tracking.py",
+        "tests/test_ui.py"
+      ]
+    },
+    {
+      "path": "gamelab/attack/stance.py",
+      "title": "Stance",
+      "tagline": "From positions to one act: throw, jump-throw, jump back, step away, close in, wait.",
+      "summary": "The fight's move policy. `stance()` decides for a group of monsters (fight.clear, tours, the hunt loop) and `decide()` for one target (fight.kill, `hunt kill`); `pick_target` orders who goes first. Every decision is judged at the moment her next attack will actually start (`Pace`), so a monster walking at her is treated as where it will be, not where it was seen. It also prices landings and says how much of a platform she may use.",
+      "details_md": "**Inputs.** `wanted`: whom she means to hit; `around`: every monster about her (they shield, block moves, add danger). With the target-first planner on, `wanted` is its one chosen monster and `among` the others nearby, which shape her room but get no answer.\n\n**The answer is a tuple** (an *act*): `('throw', side)`, `('jump_throw', side[, JumpPlan])`, `('jump_back', side[, JumpPlan])`, `('back', side, units[, AWAY])` (step away), `('approach', side, units)`, or `('wait',)`. `decide()` answers `('throw', side)`, `('walk', side, units)` or `('skip', reason)`. `behavior.fight` logs it (`act_text`); `control.actions` keys it.\n\n**Timing first** (`Pace`, from 2026-10-27): a decision asks where each monster will be when the attack starts: `lead` (her attack lock left plus the look's age) + `GROUND_PICK_S` (~0.07 s: key lag plus half the decide lag) + `TAP_S` (0.08 s) if she must turn. A monster walks by its track's speed; one walking at her stops where their bodies meet (`PACE_STOP`); one she just hit stands until `FLINCH_HOLD_S`. `too_close` then asks whether a ground throw at that predicted spot would be a claw swipe (`reach.ground_sure`) or nearer than its danger allows (`Danger.keep_off`).\n\n**`stance()` in order:**\n1. Sort the monsters: `mine` (on her platform, or on one just under or over whose body meets hers: `beside`, `BESIDE`), `close` (mine and too close), `reachable` (`reach.can_hit` by the game's body sizes).\n2. **Up close** (`_close_quarters_here`): the nearest close monster on the side she faces decides (with `FIRST_TO_REACH`, the other side's nearest if both throws are sure and it reaches her first, or a sure throw that way instead of an unsure jump in place). A kind that hits hard, or a touch she must clear before her invulnerability ends (`FIGHT_CLEAR`), goes to `_escape`: of a jump back, steps away and a throw from here, the least danger (`Danger.at`), a step only if `ESCAPE_THROW` (0.03) safer, and with `ESCAPE_UP` a jump up onto a platform overhead. Otherwise: a sure throw from here (`_from_here`: from the ground past the claw's edge, else a jump in place keyed 40 ms, an air turn at 120 ms, or a tap first); else the shortest step after which her next throw surely takes it (`_clear_step`, 15 to 120 units every 10); else a jump back (`JUMP_BACK_ROOM` 110 behind, nobody within `JUMP_BACK_CLEAR` 160); else, under a platform overhead, a plain step away; else the throw anyway (the claw within `CLAW_ONLY` 15, else a jump in place). Never into a monster's body (`_into`) nor onto a free spawn point (`_on_spawn`), and at most `MAX_MOVES` (2) moves in a row without a throw.\n3. **Something in reach:** in passing, a jump forward that hits on the way (`PASSING_JUMPS`); else `_throw_side` picks the way: an imminent toucher, then her wounds (`WOUNDS_FIRST`), then a toucher on her platform (`TOUCHER_FIRST`), then the way she faces, then the side with more. A touch from a monster the looks miss (`clawed`) makes it a jump throw instead where one surely picks the target, since the air has no claw (`CLAWED_AIR`).\n4. **Nothing in reach:** a jump shot from `reach.Coverage` (`_jump_shot`: landing back on her platform however the jump goes, her body clear of every monster along the arc every 0.02 s, landing danger at most `JUMP_DANGER` worse, landing with clearance); else step out from under a monster off her level; else close in to `SHOT_RANGE - 40`; else wait.\n\n**Room on the platform:** `_stand_limits` keeps `EDGE_MARGIN` (25) from the ends, plus `KNOCKBACK_ROOM` (25) with monsters about. Steps away keep `DROP_ROOM` (100) from an end with a long drop (`drop_limits`: next platform `LONG_DROP` 100 or more below, `end_drop`); up close, `move_limits` lets her go to `WALL_ROOM` (her half width + 3) of a wall end (both cached per platform).\n\n**Landings** (`landing`, `landing_of`, `Prices`): a landing whose first attack isn't sure to take the nearest monster costs `LANDING_PRICE_S` (1.36 s of hunting); one where a monster walks into her `MEET_PRICE_S` (2.86 s) more; with `Prices` the caller's map-specific numbers. The navigator's landing chains use it too.\n\nMost rules are boolean module constants, their evidence in comments, so each can be switched off for an A/B run; `attack.magic` switches several off for the magician (`POINT_BLANK`, `FIGHT_CLEAR`, `ESCAPE_UP`, `PASSING_JUMPS`). The jump aside and the hop up (`_aside`, `_hop`) exist but are off unless `GAMELAB_JUMP_ASIDE=1` / `GAMELAB_HOP_UP=1`.",
+      "lines": 1936,
+      "key_items": [
+        {
+          "name": "stance",
+          "kind": "function",
+          "line": 830,
+          "signature": "def stance(x, y, platform, wanted, approach=True, facing=None, can_jump=None, tops=None, halves=None, around=None, danger=None, jumps=None, toward=0, goal=None, edges=None, up=None, pace=NO_PACE, touch=(), limits=None, moves=0, castable=None, hurt=None, hidden_hurt=(), clawed=False, unsure=(), among=None) -> tuple",
+          "summary": "The group policy: what to do from (x, y) about the monsters around her, as one act tuple.",
+          "details_md": "Order: close quarters, then `unsure` too-close monsters (moves only), then a throw at something in reach (passing jump, wounds/imminent side, clawed air throw, hop), then a jump shot, a step from under, closing in, or wait. `castable` (the magician's) filters who her attack goes at; `among` is the target-first planner's others."
+        },
+        {
+          "name": "decide",
+          "kind": "function",
+          "line": 1869,
+          "signature": "def decide(x, y, platform, target, threats, halves=None, around=None) -> tuple",
+          "summary": "The single-target policy (fight.kill, `hunt kill`): step away from anything within TOO_CLOSE or claw reach, throw if in reach, else walk to the nearest spot in reach or skip.",
+          "details_md": "Walk goals are SHOT_RANGE - 30 and 20 past the claw's edge (or a search band past shot_dx) either side; terrain-stopped and shielded spots are dropped; a monster in the way is shot first."
+        },
+        {
+          "name": "pick_target",
+          "kind": "function",
+          "line": 1853,
+          "signature": "def pick_target(x, y, platform, targets, around=None) -> Monster",
+          "summary": "Who to shoot first: one on her platform within SHOT_RANGE (nearest), then the most hurt in reach, then the nearest in reach (|dx| + 2|dy|), then the nearest."
+        },
+        {
+          "name": "too_close",
+          "kind": "function",
+          "line": 457,
+          "signature": "def too_close(t, x, halves=None, danger=None, pace=NO_PACE, platform=None, turn=False) -> bool",
+          "summary": "Whether a monster will be too close for a ground star when her next attack starts: inside the claw's edge, or inside its kind's danger keep-off.",
+          "details_md": "For one beside her on another platform: only if their bodies touch (CONTACT_SLACK 10) or its danger there reaches KEEP_DANGER. The hunt loop's rule 1 uses it too."
+        },
+        {
+          "name": "Pace",
+          "kind": "dataclass",
+          "line": 403,
+          "signature": "@dataclass(frozen=True) class Pace(lead, walk, speeds, halves, hold, window)",
+          "summary": "How soon her next attack picks and how monsters walk meanwhile; at(m, x, t) predicts a monster's x, meets() whether bodies touch.",
+          "details_md": "Built by behavior.fight.pace_of from her attack lock, the look's age and the feed's tracks. NO_PACE: everyone stays where seen."
+        },
+        {
+          "name": "_close_quarters_here",
+          "kind": "function",
+          "line": 1161,
+          "signature": "def _close_quarters_here(x, close, mine, facing, lo, hi, can_jump, tops, halves=None, ends=None, danger=None, platform=None, around=None, up=None, y=None, pace=NO_PACE, moves=0, seen=None, castable=None, clawed=False, no_throw=False) -> tuple[tuple, bool]",
+          "summary": "Up close: escape, sure throw from here, clearing step, jump back, or throw anyway; also returns whether the act is an unsure jump in place."
+        },
+        {
+          "name": "_from_here",
+          "kind": "function",
+          "line": 1318,
+          "signature": "def _from_here(x, y, side, m, facing, can_jump, top, half, mine, halves, platform, pace, ground_ok=True) -> Here",
+          "summary": "The throw from where she stands at a too-close monster, and whether its attack surely takes it: ground past the claw's edge, else jump in place keyed 40 ms, air turn 120 ms, or tap first.",
+          "details_md": "Lines are checked at both ends of the decide lag (reach.wall_in_way). Without POINT_BLANK (magician): a ground cast only where her search surely picks it and bodies don't overlap, else wait."
+        },
+        {
+          "name": "_clear_step",
+          "kind": "function",
+          "line": 1461,
+          "signature": "def _clear_step(x, y, m, away, room, top, half, platform, around, halves, pace, can_jump=None, spawns=(), danger=None) -> float | None",
+          "summary": "The shortest step away (MIN_MOVE to STEP_AWAY, every CLEAR_STEP) after which her next throw surely takes the monster, its walk allowed for.",
+          "details_md": "Against one walking at her at 95 units/s she gains 54 units for each 149 walked, so often no step works."
+        },
+        {
+          "name": "_escape",
+          "kind": "function",
+          "line": 1525,
+          "signature": "def _escape(x, side, room, can_jump, danger, platform, around, here, halves=None, up=None, stepping=True, spawns=(), stay=0.0) -> tuple",
+          "summary": "From a hard-hitting monster: of a jump back, steps away, a throw from here and a jump up overhead, the one leaving her least danger.",
+          "details_md": "Steps are charged ESCAPE_THROW (they don't throw); an unsure throw too; `stay` (CLEAR_STAY) when touched."
+        },
+        {
+          "name": "_jump_shot",
+          "kind": "function",
+          "line": 1001,
+          "signature": "def _jump_shot(x, y, platform, wanted, cover, lo, hi, facing, around, danger, halves, toward=0, kinds=reach.JUMP_KINDS, why='', goal=None, pace=None, tops=None, can_jump=None) -> tuple | None",
+          "summary": "A jump throw at a monster no ground throw reaches, from reach's Coverage, kept only where it lands back safely and her arc meets no body.",
+          "details_md": "Ranked hurt first, then nearest, then in place < forward < back, then soonest key."
+        },
+        {
+          "name": "_throw_side",
+          "kind": "function",
+          "line": 1725,
+          "signature": "def _throw_side(x, in_reach, facing, platform=None, danger=None, hurt=None, imminent=None) -> str",
+          "summary": "Which way to throw: an imminent toucher, her most-hurt target, a toucher on her platform, the way she faces, then the busier side."
+        },
+        {
+          "name": "landing",
+          "kind": "function",
+          "line": 510,
+          "signature": "def landing(platform, x, near, halves=None, tops=None, danger=None, can_jump=None, air=True, prices=None) -> Landing",
+          "summary": "What a landing leaves her: the nearest monster's gap at her first attack, whether one meets her, whether that attack is sure, and its price in seconds.",
+          "details_md": "Used by _jump_shot, _aside and the navigator's chains (behavior.fight.FightOnTheWay.landings)."
+        },
+        {
+          "name": "JumpPlan",
+          "kind": "dataclass",
+          "line": 623,
+          "signature": "@dataclass(frozen=True) class JumpPlan(key_ms=40, way=0, air_turn=True, why='', shot=None, room=None, target=None, sure=True, land_x=None, weighed=None)",
+          "summary": "How a jump throw or jump back is keyed: attack key ms after the jump key, the jump's way, whether to turn in the air, and the jitter room.",
+          "details_md": "Carried as the act's third element; control.actions.Actions.jump_throw/jump_back read it; `why` becomes the telemetry 'jump' record's kind."
+        },
+        {
+          "name": "drop_limits",
+          "kind": "function",
+          "line": 784,
+          "signature": "def drop_limits(model, platform) -> tuple[float, float]",
+          "summary": "The stretch her steps away and jump backs keep to: DROP_ROOM in from an end with a long drop under it.",
+          "details_md": "move_limits (line 583) is the up-close version: WALL_ROOM from a wall end, EDGE_MARGIN from a short drop, DROP_ROOM from a long one."
+        },
+        {
+          "name": "_aside",
+          "kind": "function",
+          "line": 1608,
+          "signature": "def _aside(x, y, act, platform, close, around, facing, pace, tops, halves, danger, lo, hi) -> tuple | None",
+          "summary": "The jump aside (GAMELAB_JUMP_ASIDE, off by default): a jump back with no attack key, if it is priced to land an attack sooner than the unsure throw.",
+          "details_md": "Both sides priced in seconds until an attack lands (CYCLE_S, LANDS, SURE_LANDS, landing price, LEAVE_S, SPAWN_S)."
+        }
+      ],
+      "inputs": [
+        "her map (x, y), platform, facing and the monsters to fight and around her (localization Monster lists from behavior.fight)",
+        "Pace from behavior.fight.pace_of (attack lock, look age, the feed's tracks)",
+        "the map's Danger (attack.danger), the jump Coverage callback (reach.coverage via behavior.fight.jump_cover), can_jump (open_above)",
+        "the magician's castable/hurt callbacks from behavior.attacks"
+      ],
+      "outputs": [
+        "an act tuple for behavior.fight and behavior.hunt to carry out through control.actions (JumpPlan keys for Actions.jump_throw / jump_back)",
+        "Landing prices for the navigator's landing chains (behavior.fight.FightOnTheWay.landings)",
+        "place_to_shoot / shooting_place for the navigator's shot first at a monster by a landing",
+        "act_text log lines; jump_hits and too_close for the hunt loop's rules"
+      ],
+      "uses": [
+        "gamelab/attack/reach.py",
+        "gamelab/attack/danger.py",
+        "gamelab/localization/mapdata.py",
+        "gamelab/localization/monsters.py",
+        "gamelab/motion/physics.py",
+        "gamelab/motion/bodies.py",
+        "gamelab/directions.py",
+        "maplehelper/engine.py",
+        "maplehelper/game.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "TOO_CLOSE",
+          "value": "110",
+          "meaning": "decide(): a monster on her platform nearer than this is about to touch her"
+        },
+        {
+          "name": "STEP_AWAY / STEP_ROOM",
+          "value": "120 / 40",
+          "meaning": "how far she steps away, and the least room worth stepping into"
+        },
+        {
+          "name": "KNOCKBACK_ROOM",
+          "value": "25",
+          "meaning": "extra room from platform ends while monsters share it"
+        },
+        {
+          "name": "MIN_MOVE / MAX_WALK",
+          "value": "15 / 300",
+          "meaning": "shortest move worth making; longest walk between two looks"
+        },
+        {
+          "name": "JUMP_BACK_ROOM / JUMP_BACK_CLEAR / JUMP_BACK_SPAN",
+          "value": "110 / 160 / 95",
+          "meaning": "room needed behind for a jump back, no monster that close behind, how far it carries her"
+        },
+        {
+          "name": "ESCAPE_THROW",
+          "value": "0.03",
+          "meaning": "a step away must leave this much less danger than a throw to be chosen (a guess)"
+        },
+        {
+          "name": "JUMP_DANGER",
+          "value": "0.016",
+          "meaning": "a jump shot may land her at most this much more danger than here (a tenth of a Horny touch)"
+        },
+        {
+          "name": "DROP_ROOM / LONG_DROP",
+          "value": "100 / 100",
+          "meaning": "kept from an end whose drop is 100+ units (live knocks took her 53-79)"
+        },
+        {
+          "name": "GROUND_PICK_S",
+          "value": "~0.07 s",
+          "meaning": "from a throw's key to its attack's start (JUMP_LAG + half the decide lag)"
+        },
+        {
+          "name": "TAP_S",
+          "value": "0.08 s",
+          "meaning": "a throw that taps the arrow first starts this much later"
+        },
+        {
+          "name": "CLEAR_MARGIN",
+          "value": "10",
+          "meaning": "a jump in place counts only at a monster this far past where its pick is sure (track error)"
+        },
+        {
+          "name": "CLAW_ONLY",
+          "value": "15",
+          "meaning": "nearer than this with no clearing step, she swipes with the claw instead of jumping"
+        },
+        {
+          "name": "IMMINENT_S",
+          "value": "0.84",
+          "meaning": "look this far ahead (her next lock) for a monster about to be too close"
+        },
+        {
+          "name": "FLINCH_HOLD_S",
+          "value": "0.9",
+          "meaning": "a monster her attack hit stands until this long after the key"
+        },
+        {
+          "name": "TRACK_MATCH / TRACK_SEEN",
+          "value": "25 / 1",
+          "meaning": "a look's monster matches a track within this, and the track's speed counts after this many frames"
+        },
+        {
+          "name": "LANDING_PRICE_S / MEET_PRICE_S",
+          "value": "1.36 / 2.86",
+          "meaning": "seconds of hunting a not-sure landing, and a landing that meets a monster, cost (Tree Dungeon priors)"
+        },
+        {
+          "name": "TOUCH_EXP",
+          "value": "28.0",
+          "meaning": "EXP a touch costs in potions at the user's prices (pinned by tests/test_landing.py)"
+        },
+        {
+          "name": "MAX_MOVES",
+          "value": "2",
+          "meaning": "steps away in a row without a throw (a guess)"
+        },
+        {
+          "name": "WALL_ROOM",
+          "value": "HER_HALF + 3",
+          "meaning": "how near a wall end her up-close moves may go"
+        },
+        {
+          "name": "CONTACT_SLACK / KILL_BAR / CLEAR_STAY",
+          "value": "10 / 0.25 / 0.05",
+          "meaning": "FIGHT_CLEAR: contact slack, HP bar under which a throw may kill, how much dearer staying is"
+        },
+        {
+          "name": "ESCAPE_STEP",
+          "value": "20",
+          "meaning": "escape steps tried every this many units from STEP_ROOM up"
+        },
+        {
+          "name": "CYCLE_S",
+          "value": "1.3",
+          "meaning": "seconds an attack costs her to her next key (jump-aside pricing)"
+        },
+        {
+          "name": "POINT_BLANK",
+          "value": "True",
+          "meaning": "thief's point-blank answers up close; False for the magician"
+        },
+        {
+          "name": "JUMP_THROW_SNAILS / SNAIL_FAR_END",
+          "value": "False / False",
+          "meaning": "never jump-throw at a snail too close; don't step to a short platform's far end"
+        },
+        {
+          "name": "PASSING_JUMPS / ESCAPE_UP / TOUCHER_FIRST / WOUNDS_FIRST",
+          "value": "True",
+          "meaning": "rule switches (each off = behaviour before it)"
+        },
+        {
+          "name": "CLAWED_AIR / CLAWED_CLOSE / FIGHT_CLEAR / FIRST_TO_REACH / BESIDE / PACE_STOP / ROOM_LINE",
+          "value": "True",
+          "meaning": "rule switches from the clearance, evade and cornered studies"
+        },
+        {
+          "name": "WALK_AT",
+          "value": "False",
+          "meaning": "a monster whose walk is unknown stays where seen (True walks it at her)"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-21",
+          "what": "JUMP_THROW_SNAILS False: a snail too close for a ground star is never jump-thrown at; she steps back or stabs it.",
+          "why": "The user saw jump throws mostly miss snails, 'especially on short platform[s]'; the day's telemetry: 5 of 26 jump throws at a snail under 46 units off hurt it."
+        },
+        {
+          "date": "2026-10-25",
+          "what": "A passing jump must land no more than PASS_SLACK past where she is going.",
+          "why": "Review: overshooting a rope's foot or a takeoff by 15-80 units had her walk back, which a ground throw doesn't."
+        },
+        {
+          "date": "2026-10-26",
+          "what": "DROP_ROOM / LONG_DROP, ESCAPE_UP and TOUCHER_FIRST added.",
+          "why": "Live on 2026-10-25 three knocks took her off Tree Dungeon 23's left end, 389 units down and 43 s back up; 24's Green made 14 of her 34 touches."
+        },
+        {
+          "date": "2026-10-27",
+          "what": "Clearance kept ahead of time: decisions go by where each monster will be when the attack starts (Pace), with CLEAR_MARGIN and CLAW_ONLY.",
+          "why": "The user: 'I frequently find the player standing at the same X pos as the mob, doing jump hit but couldn't hit the mob because no minimal clearance is maintained'. Live, a monster within 60 on her platform 8.7 s a minute, 27% of her attacks."
+        },
+        {
+          "date": "2026-10-27",
+          "what": "Landings priced by what her first attack there would take; up close she moves away to where her next attack surely takes the monster.",
+          "why": "The user: 'the character should actively try to move away from the mob to attack it.' A not-sure landing cost 5.7 EXP and 0.13 touches live."
+        },
+        {
+          "date": "2026-10-27",
+          "what": "PACE_STOP: a monster walking at her stops where their bodies meet.",
+          "why": "Walking through her, a walker within ~85 in front had her tap round and throw at her empty back (86 such throws in the goldens)."
+        },
+        {
+          "date": "2026-10-28",
+          "what": "FIGHT_CLEAR (evade work R8): touched, she gets clear of the monster on her before her invulnerability ends.",
+          "why": "Live 53 of 148 touches came within 2 s of the one before; a fight stayed on a Horny Mushroom for three windows in the simulator."
+        },
+        {
+          "date": "2026-10-29",
+          "what": "WOUNDS_FIRST: throw the way of her most-hurt target and wait for a hidden one, unless a monster is imminent.",
+          "why": "166 of 1,497 first casts left a monster alive with no second cast for 8 s; the user: 'yes we should finish a monster, but we should also watch out for inmennent danger from a close by mob'."
+        },
+        {
+          "date": "2026-10-29",
+          "what": "POINT_BLANK off for the magician (via attack.magic).",
+          "why": "Her close quarters' jump throws went out as ground casts: 106 of 540 casts, 62% showing nothing."
+        },
+        {
+          "date": "2026-10-31",
+          "what": "BESIDE on: monsters on a platform just under or over hers count as on hers where their bodies meet.",
+          "why": "The user's choice of 'more exp and loot': +19.7 EXP a minute and 4.3 fewer hurting touches over 12 seeds."
+        },
+        {
+          "date": "2026-10-31",
+          "what": "TOUCH_EXP set from the user's prices (28), and Prices lets callers price landings with the map's own numbers.",
+          "why": "Review: one map's monster and rate had been frozen into general constants."
+        },
+        {
+          "date": "2026-11-01",
+          "what": "ROOM_LINE: a jump throw's later jitter keys have their line checked too.",
+          "why": "On a slope later keys' stars were stopped where the first key's hit (185 of 4,150 keys in the world's close throws)."
+        },
+        {
+          "date": "2026-11-03",
+          "what": "CLAWED_AIR and CLAWED_CLOSE (cornered study R1): after a touch by a monster the looks missed, throw from a jump in place where it is sure.",
+          "why": "From the ground the press goes to the claw; in that hour 59 of 586 ground Lucky Sevens aimed 105+ off with nothing seen within 105 took no MP, and every one checked on the frames was the claw on a monster the looks missed."
+        },
+        {
+          "date": "2026-11-03",
+          "what": "FIRST_TO_REACH (cornered study R8): up close, throw at whichever monster reaches her first, and prefer a sure throw the other way over an unsure jump in place.",
+          "why": "BugBaby's hour: 6 jumps in place at a monster they didn't surely take, with a sure one on her other side, none doing damage."
+        },
+        {
+          "date": "2026-11-05",
+          "what": "Jump aside and hop up added, both off by default (GAMELAB_JUMP_ASIDE, GAMELAB_HOP_UP).",
+          "why": "The user on the no-hit clips: 'no, jump aside and attack from a distance'; the pre-registered whole-run test failed on attacks at nothing, so both stay off."
+        }
+      ],
+      "gotchas": [
+        "Thresholds built on reach's constants are read at call time, so magic.apply's swaps reach them; the one cache (_JUMP_REACH) is cleared by magic.",
+        "decide() and stance() use different closeness rules: decide uses TOO_CLOSE (110) or close_to by positions as seen; stance uses too_close by where monsters will be (Pace) plus danger.",
+        "MAX_MOVES only counts where something on the map is a danger (danger.any); on the first map stance behaves as before.",
+        "Only ('back', side, units, AWAY) counts toward MAX_MOVES; _step_from_under's and held_step's steps have no AWAY.",
+        "By danger alone a step away always beat a jump back or a throw (it goes 120 to the jump's 95), so ESCAPE_THROW (a guess) biases toward throwing.",
+        "stance's knock model (end_drop looking 5 units past an end, margins of 25, 50, 100) disagrees with attack.knock's flown model; the README says replacing it is the planner's work.",
+        "Per-platform caches (_MOVES, _DROPS) are keyed by id(model) and keep the model itself so its id can't be reused while cached; cleared past 4096 entries.",
+        "SMALL_STEP_END is only used when SNAIL_FAR_END is on, which it isn't."
+      ],
+      "tests": [
+        "tests/test_attack.py",
+        "tests/test_clawed.py",
+        "tests/test_clearance.py",
+        "tests/test_control.py",
+        "tests/test_cornered_aim.py",
+        "tests/test_damage.py",
+        "tests/test_danger.py",
+        "tests/test_evade.py",
+        "tests/test_hunt.py",
+        "tests/test_jump_reach.py",
+        "tests/test_landing.py",
+        "tests/test_magician_hunt.py",
+        "tests/test_presence.py",
+        "tests/test_rope_hang.py",
+        "tests/test_sim_tree.py",
+        "tests/test_spawnclock.py",
+        "tests/test_stance_aside.py",
+        "tests/test_stay_or_go.py",
+        "tests/test_target.py"
+      ]
+    },
+    {
+      "path": "gamelab/attack/target.py",
+      "title": "Target",
+      "tagline": "Target-first planner: score monsters by EXP per second, keep the pick, plan the next.",
+      "summary": "Picks the one monster she hits next (the primary) and the one after it (the next), from a closed-form score per monster recomputed at every look: EXP over the seconds to get an attack on it and kill it. It keeps the primary unless another beats it by 30%, switches for a monster coming at her, and on the whole-screen setting also weighs places where she can hit a pile. Pure: what perception says comes in as `Her` and `Foe`s, no clock, no keys, no simulation.",
+      "details_md": "**Why it exists.** The user, 2026-11-04: \"planner should just decide which mob to hit and plan against that. This is simple, less costly, and easy to follow.\" `behavior.targeting` builds a `Her` (her platform, x, y, `lead` until her next keys, invulnerability left, facing, whether her attack goes from a jump, bodies, danger, `Pace`) and a `Foe` per monster (its kind's EXP, `kill_s` from its HP bar or reckoned HP, `p` the chance it's there and alive, `vx`, chasing, a newborn's `solid_s`/`hit_s`) at every look, then calls `Chooser.choose`.\n\n**How fast can she get an attack on it** (`soonest` -> `Way`):\n- too close (`stance.too_close`): `'close'`, a jump attack in `JUMP_S` (~0.11 s) for the thief; for the magician `'now'` if her search picks it from here, else a step to range;\n- in reach (`reach.can_hit`): `'now'`, plus `TAP_S` if she must turn;\n- a jump shot (`Her.jump_hits`, i.e. `stance.jump_hits`): `'jump'`;\n- else the walk to the nearest place along her platform from which it lands (`places`, from `bands`: the stretches `near_far` + `NEAR_SLACK` 12 to far - `FAR_SLACK` 20 either side of it), at her walk speed plus `STEP_SETTLE_S`; with `Her.routes` set (the whole screen), also trips to other platforms in height of it (`_ways`, `in_height`, the navigator's `Planner.arrive_within`).\n\n**Score:** `score = p * exp / (max(way.s, hit_s) + kill_s)`. A hurt or chasing monster gets no bonus term: it is close and quick to kill, so the numbers already favour it. With the whole screen, `place_score` also counts other monsters her attack lands on from the place, `PILE_MOST` (3) in all with the target itself (so at most 2 others), best EXP-per-kill-second first and each only if it raises the EXP rate, so a pile draws her from afar.\n\n**Cheap first** (`rank`, `_rank_screen`): monsters in reach are scored first; the expensive parts (walls and shielding via `reach.can_hit`, ~44 us; a jump's search, 2-3 ms) are asked only for the kept target and next, or for one that could still beat the best so far.\n\n**The choice** (`Chooser.choose`): keep the primary unless the top beats it by `MARGIN` (1.3x) (why 'beaten', or 'respawn' for a newborn); if it is gone, the planned next takes over at once (unless a newborn beats it); else the top ('first'/'gone'). Then `coming`: the first monster on or beside her platform walking at her that reaches her after her invulnerability ends and before she finishes the current kill takes over ('coming'). `after` scores the next as if the primary were dead, from where she will stand, with every monster walked on for that long; `also_next` slides her place so it reaches the next too. The result is a `Choice` with the top 3 for the log and the 'target' telemetry record (`Terms.record`).",
+      "lines": 623,
+      "key_items": [
+        {
+          "name": "Chooser",
+          "kind": "class",
+          "line": 564,
+          "signature": "class Chooser(margin: float = MARGIN)",
+          "summary": "Keeps the primary and the next from look to look; forget() when she goes off on a trip."
+        },
+        {
+          "name": "Chooser.choose",
+          "kind": "method",
+          "line": 576,
+          "signature": "def choose(self, her: Her, foes: list[Foe], walks: bool = True) -> Choice",
+          "summary": "One look's choice: keep, replace (beaten, respawn, gone, no way), take the planned next when the primary is gone, or switch for a monster coming at her; then plan the next (after) and, on the whole screen, shift her place to reach both (also_next).",
+          "details_md": "`walks` False (on her way somewhere): only what's in reach from where she stands."
+        },
+        {
+          "name": "soonest",
+          "kind": "function",
+          "line": 280,
+          "signature": "def soonest(her, f, x=None, y=None, lead=None, far=True, on=None) -> Way | None",
+          "summary": "How soon (and how: now, close, jump, walk, trip) she can get an attack on a monster from a place."
+        },
+        {
+          "name": "score",
+          "kind": "function",
+          "line": 326,
+          "signature": "def score(f: Foe, way: Way) -> float",
+          "summary": "p x EXP / (max(way.s, hit_s) + kill_s): EXP a second of going for it next."
+        },
+        {
+          "name": "place_score",
+          "kind": "function",
+          "line": 337,
+          "signature": "def place_score(her, f, way, foes) -> tuple[float, list[Foe]]",
+          "summary": "The EXP rate of going for a monster counting the others her attack lands on from the same place (PILE_MOST in all, the monster itself included), each only if it raises the rate."
+        },
+        {
+          "name": "rank",
+          "kind": "function",
+          "line": 416,
+          "signature": "def rank(her, foes, walks=True, keep=()) -> list[Terms]",
+          "summary": "Monsters by score, best first, with the expensive searches asked only where they can decide.",
+          "details_md": "With Her.routes and walks, delegates to _rank_screen (line 378), the whole-screen version."
+        },
+        {
+          "name": "_rank_screen",
+          "kind": "function",
+          "line": 378,
+          "signature": "def _rank_screen(her, foes, keep) -> list[Terms]",
+          "summary": "Whole-screen ranking: every monster by its best place's score; walls and jump searches checked only for kept ones or would-be winners."
+        },
+        {
+          "name": "coming",
+          "kind": "function",
+          "line": 443,
+          "signature": "def coming(her, foes, finish) -> Coming | None",
+          "summary": "The first monster on or beside her platform walking at her that reaches her after her invulnerability and before she finishes."
+        },
+        {
+          "name": "after",
+          "kind": "function",
+          "line": 469,
+          "signature": "def after(her, t, foes) -> Terms | None",
+          "summary": "The next target: best score as if t's monster were dead, from where she'll stand, the others walked on for that kill's time."
+        },
+        {
+          "name": "also_next",
+          "kind": "function",
+          "line": 506,
+          "signature": "def also_next(her, t, nxt, foes) -> Terms",
+          "summary": "Moves the primary's walk/trip place to one that also reaches the next, if that scores better."
+        },
+        {
+          "name": "near_far",
+          "kind": "function",
+          "line": 178,
+          "signature": "def near_far(her, m, y=None, on=None) -> tuple[float, float]",
+          "summary": "How near and far (middle to middle) her ground attack lands on a monster from a height: shot_dx / claw edge / danger keep-off to SHOT_RANGE.",
+          "details_md": "With Her.routes, cached in Her.known by (kind, height difference, same platform)."
+        },
+        {
+          "name": "bands",
+          "kind": "function",
+          "line": 203,
+          "signature": "def bands(her, m, p, lo, hi, y=None) -> list[tuple[float, float]]",
+          "summary": "The stretches of a platform (one each side of the monster) from which her ground attack lands, walls aside."
+        },
+        {
+          "name": "_ways",
+          "kind": "function",
+          "line": 241,
+          "signature": "def _ways(her, f, on, x, lead) -> list[Way]",
+          "summary": "Every candidate place: a walk along her platform and trips to platforms in height of the monster, via Her.routes."
+        },
+        {
+          "name": "Foe",
+          "kind": "dataclass",
+          "line": 73,
+          "signature": "@dataclass(frozen=True) class Foe(m, exp, kill_s, p=1.0, vx=None, chasing=False, solid_s=0.0, hit_s=0.0, born=False)",
+          "summary": "A monster as the choice sees it this look."
+        },
+        {
+          "name": "Her",
+          "kind": "dataclass",
+          "line": 90,
+          "signature": "@dataclass(frozen=True) class Her(platform, x, y, lead=0.0, invulnerable=0.0, facing=None, jumps=False, around=[], sizes=None, halves=None, danger=None, pace=NO_PACE, lo=-inf, hi=inf, jump_hits=None, can_jump=True, routes=None, stands={}, known={})",
+          "summary": "Her as the choice needs her, built by behavior.targeting.Targeting.her_at."
+        }
+      ],
+      "inputs": [
+        "Her and Foe objects built each look by behavior.targeting (her place, lock, invulnerability; each monster's EXP, kill time, presence chance, speed, newborn fade)",
+        "reach.can_hit and the stance's too_close, beside, Pace and jump_hits",
+        "the navigator's route times (Her.routes = motion.route Planner.arrive_within) for the whole-screen setting"
+      ],
+      "outputs": [
+        "a Choice (primary Terms, next Terms, why, how, top 3, coming) for behavior.targeting and the grind",
+        "Terms.record dicts for the 'target' telemetry record"
+      ],
+      "uses": [
+        "gamelab/attack/reach.py",
+        "gamelab/attack/danger.py",
+        "gamelab/attack/stance.py",
+        "gamelab/localization/mapdata.py",
+        "gamelab/localization/monsters.py",
+        "gamelab/motion/physics.py",
+        "gamelab/motion/bodies.py",
+        "maplehelper/engine.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "MARGIN",
+          "value": "1.3",
+          "meaning": "another monster must beat the target's score by this factor to take over (a guess; stops flip-flopping)"
+        },
+        {
+          "name": "MATCH_DX",
+          "value": "45.0",
+          "meaning": "with no track, last look's monster matches one of its kind and platform within this"
+        },
+        {
+          "name": "FAR_SLACK / NEAR_SLACK",
+          "value": "20 / 12",
+          "meaning": "a walk goal sits this far inside her farthest and past her nearest reach"
+        },
+        {
+          "name": "WALK_STEP",
+          "value": "100",
+          "meaning": "units she walks at once at most, a look after each (used by behavior.targeting)"
+        },
+        {
+          "name": "JUMP_S",
+          "value": "~0.11 s",
+          "meaning": "from her keys to a jump attack picking (jump_pick_s(40))"
+        },
+        {
+          "name": "HIT_ALPHA",
+          "value": "0.36",
+          "meaning": "a fading-in newborn can be hit from about this alpha (behavior.targeting turns it into hit_s)"
+        },
+        {
+          "name": "PILE_MOST",
+          "value": "3",
+          "meaning": "monsters counted at one place (a guess)"
+        },
+        {
+          "name": "ABOVE_MOST / BELOW_MOST / JUMP_ABOVE",
+          "value": "150 / 70 / 230",
+          "meaning": "quick height checks: how far over/under her feet the ground search, and a jump, can reach"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-11-04",
+          "what": "The target-first planner: one monster to hit, a closed-form score per monster, no rollouts; on by default (GAMELAB_TARGET=0 turns it off).",
+          "why": "The user: 'planner should just decide which mob to hit and plan against that. This is simple, less costly, and easy to follow.'"
+        },
+        {
+          "date": "2026-11-04",
+          "what": "Switch for a monster coming at her, newborns are foes from their first look, and plan the next target.",
+          "why": "The user: 'watch for respawns at each frame ... change target if a mob is moving towards you and can knock you back, if you are not already attacking that mob ... think about what's your next target'."
+        },
+        {
+          "date": "2026-11-04",
+          "what": "The whole screen: every monster on screen is a candidate, places on other platforms via the navigator, piles weighed (GAMELAB_SCREEN=0 off).",
+          "why": "The user: 'You aren't really looking at all mobs on the screen ... factor in piled up mobs and lean towards going to a place where you can hit a bunch of piled up mobs.'"
+        }
+      ],
+      "gotchas": [
+        "A monster already on her during her invulnerability isn't 'coming', so a later arrival can take her off the one she's hitting; the review tried two alternatives and neither gained (left as is).",
+        "Target flips on one-look misses (A-B-A within 1 s) happen about 1.24 a minute for the magician; holding the primary through a gap isn't built.",
+        "MARGIN (1.3) and PILE_MOST (3) are guesses.",
+        "Her.known caches near_far answers across looks; behavior.targeting keeps it until her danger changes.",
+        "MATCH_DX's comment refers to stance.HOLD_MATCH, but HOLD_MATCH lives in behavior/fight.py (TRACK_MATCH + 20), not in stance.py."
+      ],
+      "tests": [
+        "tests/test_target.py",
+        "tests/test_stay_or_go.py"
+      ]
+    },
+    {
+      "path": "gamelab/attack/danger.py",
+      "title": "Danger",
+      "tagline": "How much of her HP monster touches would soon take at a place.",
+      "summary": "Puts one number on a place (a platform and an x, or a height on a rope): the expected share of her HP monster touches would take in the next moments. Each kind's touch is computed from the game data with the game's damage formula; whether and how soon it can reach her comes from its platform, speed and body. Spots, the stance's keep-off and escapes, the hunt loop's waiting place and rope refuges all compare places by it, never by a kind or map name.",
+      "details_md": "**What a touch takes** (`touch_taken`, the formula from meowdb's damage-taken page and the osms datamine, which agree): raw = PADamage x (1.2 + 0.2u); taken = raw x (1 - DEF / (DEF + 300 + 2 raw)) - (DEF/25 + level/10), truncated, at least 1. `u` is the roll (0.5 by default). Her DEF is perception's (her stat window, else fitted to her touches); `DEFENCE` (75) is only the prior. A kind whose touch is under `DANGER_MIN` (5% of her HP) counts for nothing: at level 19 a pig takes 1.7% of her 642 HP, so on the first map nothing counts (`Danger.any` is False) and every decision there behaves as before the model. On Tree Dungeon a Horny Mushroom takes about 16% of her 752 HP at level 24, a Green Mushroom 7.2%.\n\n**Whether it can reach her** (`Danger.walk`): a monster walks only its own platform, turning where the game turns it (`walk_edges`). One on a platform just under or over hers touches her where their bodies overlap (`level`: its floor less than its top under her feet, or less than her height `HER_TALL` over them). A kind that hops (`MapModel.mob_hops`) can reach a platform within `HOP_ACROSS`/`HOP_UP` (60/60), weighted `HOP_CHANCE` (0.25, a guess). Fliers go straight at her.\n\n**How soon:** the walk to where its body meets hers at its speed, weighted `soon(t) = exp(-t / THREAT_S)` with `THREAT_S` = 1.7 s (about two of her throws). A Horny Mushroom at 100 units/s counts 0.71 at 100 units off, 0.39 at 200, 0.12 at 400.\n\n**The danger at a place** (`Danger.at`) is the sum over sources of share x chance x soon. Sources (`_sources`) are the monsters a look saw plus the spawn points they don't account for (per platform and kind, the unexplained fraction of points, each as one that may respawn now); with no look, every spawn point's monster at its point (the planning picture `spots` uses).\n\n**What it decides elsewhere:**\n- `keep_off(kind)`: how near a monster on her platform may come before she moves: where its danger reaches `KEEP_DANGER` (8% of her HP): half + `HER_HALF` + speed x `THREAT_S` x ln(share / 0.08). A Horny Mushroom 169 units; a Green Mushroom (7.2%) 0, i.e. only the claw's reach.\n- `of(kind, q, mx, p, x)`: one monster's share x chance x soon at a place: what `at` sums, and what stance's `too_close` asks for one beside her on another platform.\n- `beside`: whether a monster on a neighbouring platform counts as on hers (stance's BESIDE).\n- `free_points`: spawn points no seen monster accounts for (the stance never steps onto one).\n- `respawn_points` / `respawn_risk`: the spawn guard (from 2026-11-03): free points within `RESPAWN_NEAR` (70) of where she would stand, no monster within `SPAWN_CLEAR` (100), risk = fill x (`NEWBORN_TOUCH` 0.85 - `NEWBORN_SEEN` 0.29) x share x the chance her stay overlaps the map's spawn pass (`PASS_BEFORE` 0.15 s, `PASS_AFTER` 1.0 s).\n- `on_rope` / `walk_rope`: the same for hanging on a rope at a height (a monster touches her only if its body, up to its highest frame, `mob_tall`, reaches hers).\n- `taken(kind)`: the share a touch takes even under DANGER_MIN (for prices); an unknown kind is charged the map's hardest-touching kind.\n\n`of_map` builds one `Danger` per (map, her, least) and keeps up to 8; `every_kind` is the same with every touching kind counted (`least` 0), for `behavior.retreat`, since a place to stay a while should count even weak touches.",
+      "lines": 407,
+      "key_items": [
+        {
+          "name": "Danger",
+          "kind": "class",
+          "line": 170,
+          "signature": "class Danger(model: MapModel, her: Her, least: float = DANGER_MIN)",
+          "summary": "The danger of places on one map for her: per-kind Threats, spawn points of kinds that count, and the queries below."
+        },
+        {
+          "name": "Danger.at",
+          "kind": "method",
+          "line": 286,
+          "signature": "def at(self, pid: int, x: float, seen: list[Monster] | None = None) -> float",
+          "summary": "The danger of standing at x on platform pid: sum over seen monsters and unexplained spawn points of share x chance x soon."
+        },
+        {
+          "name": "Danger.keep_off",
+          "kind": "method",
+          "line": 214,
+          "signature": "def keep_off(self, kind: str) -> float",
+          "summary": "How near a monster of this kind on her platform may come: half + HER_HALF + speed x THREAT_S x ln(share / KEEP_DANGER); 0 for weaker kinds.",
+          "details_md": "A Horny Mushroom 169 units, replacing the hand-set 170 of 2026-10-24."
+        },
+        {
+          "name": "Danger.walk",
+          "kind": "method",
+          "line": 222,
+          "signature": "def walk(self, t, q, mx, p, x) -> tuple[float, float] | None",
+          "summary": "How far a monster at mx on platform q walks before touching her at x on p, and how likely it goes there; None if it can't."
+        },
+        {
+          "name": "touch_taken",
+          "kind": "function",
+          "line": 117,
+          "signature": "def touch_taken(pad, defence, level, u=0.5) -> int",
+          "summary": "HP a touch by a monster of touch damage pad takes at her DEF and level, by the game's formula.",
+          "details_md": "Shared with the simulator's touches (sim.world.touch_damage), behavior.bootstrap's DEF fit and behavior.safety."
+        },
+        {
+          "name": "Danger.beside",
+          "kind": "method",
+          "line": 253,
+          "signature": "def beside(self, m, p, x) -> bool",
+          "summary": "Whether a monster on another platform touches her at x as one on her own would (a platform just under or over hers)."
+        },
+        {
+          "name": "Danger.free_points",
+          "kind": "method",
+          "line": 323,
+          "signature": "def free_points(self, pid, seen) -> list[tuple[float, str]]",
+          "summary": "Spawn points on a platform that the seen monsters don't account for (each seen monster claims its nearest)."
+        },
+        {
+          "name": "Danger.respawn_points",
+          "kind": "method",
+          "line": 339,
+          "signature": "def respawn_points(self, pid, lo, hi, around) -> list[tuple[float, str]]",
+          "summary": "Free spawn points near a stretch that the next spawn pass may fill: no monster within SPAWN_CLEAR across and up/down."
+        },
+        {
+          "name": "Danger.respawn_risk",
+          "kind": "method",
+          "line": 355,
+          "signature": "def respawn_risk(self, points, fill, chance) -> float",
+          "summary": "Expected HP share newborns at those points take beyond what a monster in sight would."
+        },
+        {
+          "name": "Danger.on_rope",
+          "kind": "method",
+          "line": 292,
+          "signature": "def on_rope(self, rope, y, seen=None) -> float",
+          "summary": "The danger of hanging on a rope with her feet at y (for attack.ropes)."
+        },
+        {
+          "name": "Danger.taken",
+          "kind": "method",
+          "line": 203,
+          "signature": "def taken(self, kind: str) -> float",
+          "summary": "The share a touch by kind takes even under DANGER_MIN; an unknown kind gets the map's hardest-touching kind's."
+        },
+        {
+          "name": "Threat",
+          "kind": "dataclass",
+          "line": 143,
+          "signature": "@dataclass(frozen=True) class Threat(kind, share, speed, half, top, hops, flies=False, tall=0.0)",
+          "summary": "A kind as a danger: its touch share (0 under the threshold), speed, body size, and whether it hops or flies."
+        },
+        {
+          "name": "Her",
+          "kind": "dataclass",
+          "line": 108,
+          "signature": "@dataclass(frozen=True) class Her(hp, level, defence=DEFENCE)",
+          "summary": "What a touch is measured against: her max HP and level as perception read them, her DEF as estimated."
+        },
+        {
+          "name": "of_map",
+          "kind": "function",
+          "line": 394,
+          "signature": "def of_map(model, her, least=DANGER_MIN) -> Danger",
+          "summary": "The map's Danger for her, built once per (map, her, least) and kept (up to MODELS_KEPT = 8)."
+        },
+        {
+          "name": "every_kind",
+          "kind": "function",
+          "line": 404,
+          "signature": "def every_kind(d: Danger) -> Danger",
+          "summary": "The same map and her with every touching kind counted (least 0): behavior.retreat's measure for a place to stay."
+        }
+      ],
+      "inputs": [
+        "the map model (localization.mapdata: platforms, ropes, spawn points, mob_damage, mob_hops, mob_flies, mob_tall)",
+        "monster bodies and speeds (localization.monsters.bodies/speeds/walk_edges); kind names (perception.kinds.kind_of)",
+        "her max HP, level and DEF from perception (behavior.bootstrap, Hunter.her)",
+        "a look's monsters, when given"
+      ],
+      "outputs": [
+        "danger numbers for spots, stance (keep_off, escapes, jump landings), target (near_far), ropes and the hunt loop's waiting place",
+        "touch_taken / touch_range for the safety stop, bootstrap's DEF fit and the simulator",
+        "spawn-guard risk for behavior.hunt's _respawn_guard"
+      ],
+      "uses": [
+        "gamelab/localization/mapdata.py",
+        "gamelab/localization/monsters.py",
+        "gamelab/motion/bodies.py",
+        "gamelab/perception/kinds.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "DEFENCE",
+          "value": "75.0",
+          "meaning": "prior for her DEF until her stat window or her touches give one"
+        },
+        {
+          "name": "DANGER_MIN",
+          "value": "0.05",
+          "meaning": "a kind taking less than 5% of her HP a touch counts for nothing (hunting's threshold)"
+        },
+        {
+          "name": "THREAT_S",
+          "value": "1.7 s",
+          "meaning": "time constant of exp(-t / THREAT_S): about two of her throws"
+        },
+        {
+          "name": "HOP_ACROSS / HOP_UP / HOP_CHANCE",
+          "value": "60 / 60 / 0.25",
+          "meaning": "how far a hopping kind can leave its platform, and how likely (a guess)"
+        },
+        {
+          "name": "KEEP_DANGER",
+          "value": "0.08",
+          "meaning": "half a Horny Mushroom's touch: the danger at which a fight stops letting a monster come nearer"
+        },
+        {
+          "name": "SPAWN_CLEAR",
+          "value": "100.0",
+          "meaning": "spawn guard: a point is free when no monster is within this across and up/down (the server's rule)"
+        },
+        {
+          "name": "RESPAWN_NEAR",
+          "value": "70.0",
+          "meaning": "spawn guard: a newborn lands on her if she is within this of its point at the pass"
+        },
+        {
+          "name": "NEWBORN_TOUCH / NEWBORN_SEEN",
+          "value": "0.85 / 0.29",
+          "meaning": "touch rate within 4 s of a newborn within 70 vs an established monster first seen there (live)"
+        },
+        {
+          "name": "PASS_BEFORE / PASS_AFTER",
+          "value": "0.15 / 1.0 s",
+          "meaning": "the window around the spawn pass that counts"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-24",
+          "what": "The danger model replaces the hand-set KEEP_OFF (a Horny kept 170 off): places compared by HP share, never by kind or map name.",
+          "why": "The user saw her hit the near monsters 'without any good evasion menuver' and wait 'between two horny mushroom respawn points' ('This rule should be generalized'); KEEP_OFF had changed nothing (2.50 vs 2.82 touches a minute)."
+        },
+        {
+          "date": "2026-10-28",
+          "what": "Her DEF comes from perception (stat window, else fitted to her touches); 75 is only the prior.",
+          "why": "Her 178 exact touches of 10-24 to 10-28 fit the formula at DEF ~64 at levels 24-26 and ~111 at level 28: her gear changed."
+        },
+        {
+          "date": "2026-10-31",
+          "what": "Monsters turn where the game turns them (walk_edges) instead of half their width inside the ends.",
+          "why": "Stated in Danger.walk's docstring; reason not given there."
+        },
+        {
+          "date": "2026-11-01",
+          "what": "taken() charges an unknown kind the map's hardest touch instead of 0.",
+          "why": "Review: a meeting with a track of no kind had been priced at nothing."
+        },
+        {
+          "date": "2026-11-03",
+          "what": "The spawn guard: respawn_points and respawn_risk.",
+          "why": "Cornered study R3: of newborns seen within 70 of her, 11 of 13 touched her within 4 s, against 7 of 24 for an established Horny first seen there."
+        },
+        {
+          "date": "2026-11-05",
+          "what": "every_kind: a place to stay a while counts every touching kind.",
+          "why": "At level 35 a place with a Green Mushroom on her read 'safe' (its 48 HP touch was under DANGER_MIN)."
+        }
+      ],
+      "gotchas": [
+        "On the first map no kind passes DANGER_MIN, so Danger.any is False and every danger-driven path in stance, spots and the hunt loop is skipped.",
+        "SPAWN_CLEAR here (100, the server's free-point rule) is a different thing from spots.SPAWN_CLEAR (50, how far a shooting spot keeps from a point).",
+        "The spawn-guard constants are 'a guess built on those, not a fit' per the comment.",
+        "The safety stop does not trust DEFENCE: until her DEF is read or fitted it takes a touch at DEF 0 (behavior.bootstrap.PRIOR_DEF).",
+        "of_map keys its cache by id(model) and keeps the model so the id can't be reused; cleared when 8 are kept."
+      ],
+      "tests": [
+        "tests/test_bootstrap.py",
+        "tests/test_character.py",
+        "tests/test_danger.py",
+        "tests/test_evade.py",
+        "tests/test_fight.py",
+        "tests/test_grind.py",
+        "tests/test_guard.py",
+        "tests/test_hunt.py",
+        "tests/test_landing.py",
+        "tests/test_magician_hunt.py",
+        "tests/test_no_hit_scenes.py",
+        "tests/test_presence.py",
+        "tests/test_retreat.py",
+        "tests/test_ropes.py",
+        "tests/test_safety.py",
+        "tests/test_sim_tree.py",
+        "tests/test_spawnclock.py",
+        "tests/test_stance_aside.py",
+        "tests/test_stay_or_go.py",
+        "tests/test_unseen.py"
+      ]
+    },
+    {
+      "path": "gamelab/attack/spots.py",
+      "title": "Spots",
+      "tagline": "Where to stand to shoot a platform: most of it in reach, least danger, nearest.",
+      "summary": "For a platform she wants to hunt (a 'ground'), finds places on other platforms from which most of it is in a star's reach, scores them by that coverage less the danger there, and picks the nearest of the nearly-best ones she can safely stand on. If none qualifies she hunts the ground standing on it, from its safest place. Used by the hunt loop and tours.",
+      "details_md": "**Coverage** (`coverage`): the fraction of the target platform's length a star from (x, y) reaches either way, at a monster of a kind (a pig by default): within `shot_dx`..`SHOT_RANGE` sideways, inside the band (60 up/down), clipped by her foothold group's walls (`reach.clear_span`) and, by the v83 line, only where no floor stops it (`reach.clear_length`, vectorised). So to shoot down, a place near her platform's end covers most: 17 is shot from 14 at x 756.\n\n**The grid** (`_grid`): every `X_STEP` (10) units along every platform, `EDGE_MARGIN` (25) in from its ends, with coverage > 0, paired with the danger there as planned (`Danger.at` with no look: every spawn point's monster at its point). A spot's **score** is coverage - `DANGER_WEIGHT` (1.0) x danger. `_spots` takes each platform's best x and sorts safe platforms first (`MapModel.safe`: no monster can touch her there), then by score.\n\n**Off spawn points** (`_off_spawns`, from 2026-10-26): on a platform where kinds that count spawn, a spot keeps `SPAWN_CLEAR` (50: a monster's half width and hers) from those points, giving way on knock room at an end with a short drop if it must, as long as the best such place scores within the touch share of the kind whose point the best spot sits on. Spots on such platforms also keep `GROUND_MARGIN` (50) from the ends.\n\n**Choosing** (`spot`): candidates are spots on other platforms with at least `MIN_COVERAGE` (0.3) of the ground in reach that she may stand on: `spot_ok` (nobody worth hunting can touch her there) or, with danger, scoring better than hunting the ground itself (`_ground_score` = 1 - danger at its safest place). Of those scoring at least best - 30% (`NEAR_BEST` 0.7), the nearest by travel time (`travel`, the route planner's; `UNREACHABLE` without a route). Else `on_ground`: the ground's safest place (its middle where nothing counts). `spot_for` looks for a spot reaching more of the monsters still left, so she keeps shooting from safety instead of dropping into the pile; `spot_at` / `best_spot` give the plan-time spot for a sweep.\n\nOn Tree Dungeon, 23 (two Horny Mushrooms) is shot from 24 at x 221 (97.9% of 23 in reach), where only 24's Green Mushroom can touch her.\n\nEverything is cached per map in `_KEPT` (up to 4 maps) keyed also by her (`_her`) and by reach's switches (`_switches`: WALLS_BLOCK, LINE, the search window, CLAW, RAMP_BELOW), because a platform's spots take 3.6 ms and all of Tree Dungeon's grounds with danger 1.1 s.",
+      "lines": 404,
+      "key_items": [
+        {
+          "name": "spot",
+          "kind": "function",
+          "line": 323,
+          "signature": "def spot(model, pid, here, travel, worth, on_it=False, danger=None) -> Spot",
+          "summary": "Where to shoot platform pid from, for her at `here`: the nearest of the nearly-best standable spots elsewhere, else the ground's safest place."
+        },
+        {
+          "name": "spots",
+          "kind": "function",
+          "line": 112,
+          "signature": "def spots(model, target, danger=None) -> list[Spot]",
+          "summary": "Every platform's best place to shoot `target` from, safe ones first, then by score; cached per map, her and reach switches."
+        },
+        {
+          "name": "coverage",
+          "kind": "function",
+          "line": 86,
+          "signature": "def coverage(target, x, y, here=None, kind=None) -> float",
+          "summary": "Fraction of a platform's length a star from (x, y) reaches, walls and (v83) floors considered."
+        },
+        {
+          "name": "Spot",
+          "kind": "dataclass",
+          "line": 72,
+          "signature": "@dataclass(frozen=True) class Spot(platform, x, coverage, safe, danger=0.0)",
+          "summary": "A place to stand: platform and x, how much of the target it covers, whether it's safe, its danger; score = coverage - DANGER_WEIGHT x danger."
+        },
+        {
+          "name": "_grid",
+          "kind": "function",
+          "line": 177,
+          "signature": "def _grid(model, target, danger=None) -> dict[tuple[int, float], tuple[float, float]]",
+          "summary": "(platform, x) -> (coverage, danger) for every place tried along every platform; cached."
+        },
+        {
+          "name": "_off_spawns",
+          "kind": "function",
+          "line": 212,
+          "signature": "def _off_spawns(model, p, danger, xs, score) -> list[float]",
+          "summary": "Keeps candidate x's at least SPAWN_CLEAR from spawn points of dangerous kinds when that costs little score."
+        },
+        {
+          "name": "spot_for",
+          "kind": "function",
+          "line": 347,
+          "signature": "def spot_for(model, pid, left, current, here, travel, worth, danger=None) -> Spot | None",
+          "summary": "A spot off the ground that reaches more of the monsters still left than the current one: most reached, then safest, then nearest."
+        },
+        {
+          "name": "on_ground",
+          "kind": "function",
+          "line": 262,
+          "signature": "def on_ground(model, pid, danger=None) -> tuple[float, float]",
+          "summary": "Where she stands to hunt a platform on it: its safest place GROUND_MARGIN from the ends (its middle when nothing counts), and the danger there."
+        },
+        {
+          "name": "spot_ok",
+          "kind": "function",
+          "line": 280,
+          "signature": "def spot_ok(model, platform, worth) -> bool",
+          "summary": "Whether she can stand on a platform to shoot from: no monster can touch her there, or only kinds not worth hunting."
+        },
+        {
+          "name": "_standable",
+          "kind": "function",
+          "line": 295,
+          "signature": "def _standable(model, pid, worth, danger=None) -> Iterator[Spot]",
+          "summary": "Spots on other platforms with MIN_COVERAGE that she may stand on (spot_ok, or better than hunting the ground)."
+        },
+        {
+          "name": "best_spot",
+          "kind": "function",
+          "line": 398,
+          "signature": "def best_spot(model, pid, worth, danger=None) -> Spot",
+          "summary": "The plan-time spot for a ground (spot_at returns its platform and x): the best standable spot, else on_ground."
+        }
+      ],
+      "inputs": [
+        "the map model (platforms, spawn points, which platforms are safe, which monsters live where)",
+        "the map's Danger (attack.danger), her position (localization.pose.Where) and a travel-time callback from the route planner",
+        "the kinds worth hunting (`worth`)"
+      ],
+      "outputs": [
+        "a Spot (platform, x) for behavior.hunt (_next_ground, spot_for) and behavior.tour to walk to and shoot from",
+        "GROUND_MARGIN and Spot used by behavior.hunt, grind and the simulator's hunt scenes"
+      ],
+      "uses": [
+        "gamelab/attack/reach.py",
+        "gamelab/attack/danger.py",
+        "gamelab/attack/stance.py",
+        "gamelab/localization/mapdata.py",
+        "gamelab/localization/monsters.py",
+        "gamelab/localization/pose.py",
+        "gamelab/motion/physics.py",
+        "gamelab/perception/kinds.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "MIN_COVERAGE",
+          "value": "0.3",
+          "meaning": "shoot from another platform only if this share of the ground is in reach"
+        },
+        {
+          "name": "NEAR_BEST",
+          "value": "0.7",
+          "meaning": "spots scoring within 30% of the best count as good; the nearest wins"
+        },
+        {
+          "name": "X_STEP",
+          "value": "10",
+          "meaning": "map units between candidate places along a platform"
+        },
+        {
+          "name": "UNREACHABLE",
+          "value": "1e6 s",
+          "meaning": "cost of a spot with no route to it"
+        },
+        {
+          "name": "DANGER_WEIGHT",
+          "value": "1.0",
+          "meaning": "how much a unit of danger subtracts from coverage (a guess, not measured or swept)"
+        },
+        {
+          "name": "GROUND_MARGIN",
+          "value": "50",
+          "meaning": "EDGE_MARGIN + KNOCKBACK_ROOM: kept from ends where dangerous kinds spawn"
+        },
+        {
+          "name": "SPAWN_CLEAR",
+          "value": "50.0",
+          "meaning": "a spot keeps this far from spawn points of kinds that count"
+        },
+        {
+          "name": "MODELS_KEPT",
+          "value": "4",
+          "meaning": "maps whose spots are cached"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-21",
+          "what": "Coverage counts only what the v83 line lets through, so shooting down favours places near an end (17 shot from 14 at x 756, not 716).",
+          "why": "The v83 line became the default after the user saw her own platform stop stars."
+        },
+        {
+          "date": "2026-10-24",
+          "what": "Spots scored by coverage less danger; a spot on any platform may be taken if it beats hunting on the ground.",
+          "why": "Live, spot_ok had turned down 24 for one Green Mushroom, so she hunted 23 among its Horny Mushrooms: 38 of 56 touches and 78% of HP lost were on 23."
+        },
+        {
+          "date": "2026-10-26",
+          "what": "SPAWN_CLEAR 50: a spot keeps off spawn points of dangerous kinds (23 from 24 moved from x 231 to 221).",
+          "why": "Live on 2026-10-25 she spent 172 of 220 s on 24 within 50 units of its Green's point; a respawn landed on her there and 24's Green made 14 of her 34 touches."
+        }
+      ],
+      "gotchas": [
+        "The caches are keyed on reach's switches (_switches) because probes flip reach.WALLS_BLOCK for their run; anything else that changes reach's behaviour without being in that tuple would leave stale spots.",
+        "spots.SHOT_RANGE is a copy imported from reach at import time; attack.magic swaps it explicitly for the magician.",
+        "DANGER_WEIGHT is a guess: neither measured nor swept in the simulator.",
+        "spot_for returns None when she isn't on a platform (no telling how far a spot is)."
+      ],
+      "tests": [
+        "tests/test_attack.py",
+        "tests/test_danger.py",
+        "tests/test_grind.py",
+        "tests/test_hunt.py",
+        "tests/test_magician_hunt.py",
+        "tests/test_navigation.py",
+        "tests/test_ropes.py",
+        "tests/test_sim_tree.py"
+      ]
+    },
+    {
+      "path": "gamelab/attack/knock.py",
+      "title": "Knock",
+      "tagline": "Where a touch's knock-back leaves her, flown like the simulator, and what it costs.",
+      "summary": "Simulates a touch's knock-back exactly as the simulator's world does (270 units/s away and up, no steering, the game's walls, a slide to a stop or off an end) and tables the answers per platform for microsecond lookups. `cost` prices a knock off her platform in EXP: the time lost getting back plus the touches expected on the way. Built as the planner's knock term; not wired into decisions yet.",
+      "details_md": "**Why.** The arrival study of 2026-11-03 found that no decision priced where a touch's knock throws her and that the stack's knock models were wrong. The user: \"Motion planning should consider the current game situation and dynamically calculate the best action to perform\". This module is that knock term (prerequisite A); nothing decides by it yet.\n\n**The flight** (`fly`, `_launched`): from her feet at x on a platform, on the ground (`GROUND`) or mid-jump at a height (only the height matters: the world resets her upward speed), launched away from the monster at `KNOCK_VX` and up at `KNOCK_VY` (270 each). The push adds to her own sideways speed but not past the push (`pushed`): standing she flies off at 270; walking at the monster at her walk, at 270 less it (~120). Flown by `motion.physics.flight` (C code, the game's walls including group 0's, no arrow), with the map's outer platform ends as sides. On landing her speed is capped at her walk's, then braked a game step at a time (`body.ground_step`) to a stop, sliding off an end with no wall down onto what's under it; `slides` False models an attack playing as she lands (she stops where she lands). The answer is a `Flown`: the platform she rests on (None: out of the map), x, how far below her old floor, seconds, and whether she slid off.\n\n**The table** (`_Table`, `table`, `prepare`): per platform and her `Shoe`, every `GRID` (5) units from end to end, both sides, the ground and the `AIR` heights (10-70 every 10, and 77, her jump's top), standing and at her walk toward the monster (`TOWARD`). A row of ~45 flights is built the first time it's asked for (2-3 ms); `prepare` builds a whole map (~2.5 s for Tree Dungeon). Lookups (`flown`, `landing`) interpolate between grid points, heights and speeds where both neighbours rest on the same platform the same way, else take the nearer (~3 us; 5-10 us between heights or speeds). `from_state` flies any other state (mid-route, faster than her walk) directly (~40 us). `zone` measures how far in from an end a knock still takes her off.\n\n**The price** (`cost`): `FREE` if she stays on her platform (the flight and the walk back are the touch's own cost). Otherwise seconds lost = flight + the route planner's way back (`planner.arrive`, or `KNOCK_LOST_S` 30 s with none) + `HANG_S` (2 s) under each rope top on that way with a monster at it (`busy_tops`, within `TOP_REACH` 60), times her EXP rate; plus touches expected (`TOP_TOUCH` 0.95 per busy top, `touch_rate` a second elsewhere) times EXP a touch. Example from the README: knocked off 10 at -138 onto 13, 303 down, 0.79 s, way back 4.3 s: 62 EXP at 12.2 EXP/s, 113 with a Horny at the rope top.\n\n**Live check:** standing knocks agree with the table (rest x a median 0.2 short; resting platform the table's 92% of the time). Knocks while walking at the monster fly shorter live than the world's (28 units to rest against the table's 41).",
+      "lines": 385,
+      "key_items": [
+        {
+          "name": "landing",
+          "kind": "function",
+          "line": 325,
+          "signature": "def landing(model, platform, x, phase=GROUND, side=1, vx=0.0, slides=True) -> tuple[Platform | None, float, float]",
+          "summary": "Where a touch's knock from x on a platform puts her: (platform at rest or None, x, fall below her floor), from the table."
+        },
+        {
+          "name": "flown",
+          "kind": "function",
+          "line": 312,
+          "signature": "def flown(model, platform, x, phase=GROUND, side=1, vx=0.0, slides=True, shoe=None) -> Flown",
+          "summary": "landing's whole answer (seconds, slid) from the per-platform table, interpolated over x, height and speed."
+        },
+        {
+          "name": "fly",
+          "kind": "function",
+          "line": 154,
+          "signature": "def fly(model, platform, x, phase=GROUND, side=1, vx=0.0, slides=True, shoe=None) -> Flown",
+          "summary": "The same, worked out directly (~30 us) rather than looked up."
+        },
+        {
+          "name": "from_state",
+          "kind": "function",
+          "line": 168,
+          "signature": "def from_state(model, platform, x, y, vx, side, slides=True, shoe=None) -> Flown",
+          "summary": "A knock from any state the table doesn't hold: mid-move, past her platform's end, or faster than her walk (~40 us)."
+        },
+        {
+          "name": "cost",
+          "kind": "function",
+          "line": 361,
+          "signature": "def cost(model, planner, platform, x, landed, rate, touch_exp, *, busy=None, hang_s=HANG_S, top_touch=TOP_TOUCH, touch_rate=0.0, lost_s=KNOCK_LOST_S) -> Price",
+          "summary": "The EXP price of a knock landing her at `landed`: FREE on her platform, else seconds lost x rate + touches expected x EXP a touch."
+        },
+        {
+          "name": "Flown",
+          "kind": "dataclass",
+          "line": 82,
+          "signature": "@dataclass(frozen=True) class Flown(platform, x, fall, seconds, slid=False)",
+          "summary": "Where a knock leaves her; off(model, platform) says whether it took her off her place."
+        },
+        {
+          "name": "Price",
+          "kind": "dataclass",
+          "line": 98,
+          "signature": "@dataclass(frozen=True) class Price(exp, seconds=0.0, touches=0.0, back=0.0, hang=0.0, tops=0)",
+          "summary": "What a knock landing costs: EXP in all and its parts."
+        },
+        {
+          "name": "_launched",
+          "kind": "function",
+          "line": 187,
+          "signature": "def _launched(model, platform, x, y, vx, floor, shoe) -> tuple[Flown, Flown]",
+          "summary": "Flies the knock and slides her to rest (or off an end, down to what's under it); returns the sliding and the stopped-on-landing answers."
+        },
+        {
+          "name": "_Table",
+          "kind": "class",
+          "line": 225,
+          "signature": "class _Table(model, platform, shoe)",
+          "summary": "One platform's knocks by phase, side and speed, each row built on first use; at() interpolates."
+        },
+        {
+          "name": "prepare",
+          "kind": "function",
+          "line": 289,
+          "signature": "def prepare(model, shoe=None) -> None",
+          "summary": "Builds every platform's table now (a map's load) instead of at first lookup."
+        },
+        {
+          "name": "zone",
+          "kind": "function",
+          "line": 337,
+          "signature": "def zone(model, platform, end, phase=GROUND, vx=0.0, step=1.0, shoe=None) -> float",
+          "summary": "How far in from an end a knock toward it still takes her off the platform (0 at a wall)."
+        },
+        {
+          "name": "busy_tops",
+          "kind": "function",
+          "line": 350,
+          "signature": "def busy_tops(model, monsters, reach=TOP_REACH) -> Callable",
+          "summary": "cost's `busy` from the monsters seen: a climb is busy where one stands within reach of its top."
+        },
+        {
+          "name": "pushed",
+          "kind": "function",
+          "line": 139,
+          "signature": "def pushed(vx: float, side: int) -> float",
+          "summary": "Her sideways speed as a knock launches her: the push added to her speed, not past the push (the world's KNOCK_ADDS)."
+        }
+      ],
+      "inputs": [
+        "the map model and the platform she's on (localization.mapdata)",
+        "her movement physics and walls (motion.physics.flight, motion.body: fly, ground_step, wall_table, Shoe)",
+        "for cost: a route planner (arrive, plan), her EXP rate and the EXP a touch costs"
+      ],
+      "outputs": [
+        "Flown landings and Price costs for the planned knock term (no caller in gamelab yet; tests/test_knock.py exercises it)"
+      ],
+      "uses": [
+        "gamelab/localization/mapdata.py",
+        "gamelab/motion/body.py",
+        "gamelab/motion/physics.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "KNOCK_VX / KNOCK_VY",
+          "value": "270 / 270",
+          "meaning": "the knock's launch speed away and up (the simulator's, pinned by tests)"
+        },
+        {
+          "name": "GRID",
+          "value": "5.0",
+          "meaning": "map units between tabled x's"
+        },
+        {
+          "name": "AIR",
+          "value": "10, 20, ..., 70, 77",
+          "meaning": "mid-jump heights tabled (77 is her jump's top)"
+        },
+        {
+          "name": "TOWARD",
+          "value": "(0.0, 1.0)",
+          "meaning": "her speed at the monster as a share of her walk, tabled at both ends"
+        },
+        {
+          "name": "LIMIT",
+          "value": "4.0 s",
+          "meaning": "a flight longer than this means out of the map"
+        },
+        {
+          "name": "HANG_S",
+          "value": "2.0 s",
+          "meaning": "time under a rope top with a monster at it (the navigator's, the user's upper limit)"
+        },
+        {
+          "name": "TOP_TOUCH / TOP_REACH",
+          "value": "0.95 / 60",
+          "meaning": "chance of a touch at a busy rope top; how near the top a monster makes it busy"
+        },
+        {
+          "name": "KNOCK_LOST_S",
+          "value": "30.0 s",
+          "meaning": "the navigator's bound for a knock with no way back"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-11-03",
+          "what": "Knocks flown as the simulator's world flies them, tabled per platform and priced in EXP; nothing decides by it yet.",
+          "why": "The arrival study found no decision priced where a knock throws her; the user: 'Motion planning should consider the current game situation and dynamically calculate the best action to perform, not trying to reach some pre-defined attack location'."
+        },
+        {
+          "date": "",
+          "what": "A knock-zone step before attacking was tried twice with the target-first planner and dropped.",
+          "why": "As a price on each place and as a step off the zone (0.19 and 0.54 a run), her knock-offs were no lower (24 against 22): the monster that knocks her is mostly on her way back."
+        }
+      ],
+      "gotchas": [
+        "Not wired into any decision: the older knock models still decide (the navigator's flat KNOCK_REACH, 87 units on any slope; stance's end_drop looking 5 units past an end; the 25/50/100 margins kept from ends), and the README's reconciliation finds each of them disagreeing with this flown model at some of Tree Dungeon's platform ends.",
+        "Live, knocks while walking at the monster fly shorter than the world's (28 units to rest vs 41); the simulator was deliberately not changed (that re-baselines everything, the user's call).",
+        "8-21% of live knocks rest on another platform than the table says, mostly short steps between platforms; unchecked against frames.",
+        "The table only covers knocks from her platform; a route's moves must use from_state.",
+        "Flights call physics.flight with cache=False so they stay out of the route planner's cache."
+      ],
+      "tests": [
+        "tests/test_knock.py"
+      ]
+    },
+    {
+      "path": "gamelab/attack/choice.py",
+      "title": "Attack choice",
+      "tagline": "Lucky Seven or the regular attack, by her MP and what the monster has left.",
+      "summary": "Decides which of her attacks a throw is: the regular attack (one star) while her MP can't pay a cast or when it would finish the monster about as fast, Lucky Seven (two strong stars) otherwise. It reckons a monster's remaining HP as a probability distribution over amounts, updated by each throw and each look that sees it alive. Pure; behavior.attacks keeps the state.",
+      "details_md": "**The rules** (the user, 2026-10-24, out of MP and potions: \"use lucky seven first but for finishing up a low hp monster, use regular attack\", and \"if MP amount is not enough to cast a single lucky seven, then use regular attack\"). `pick` returns the attack and why:\n- `mode` 'regular': always the regular attack; 'skill': Lucky Seven whenever the MP pays;\n- 'choice' (the default): the regular attack if her MP can't surely pay a cast (`can_cast`: her bar's share x max MP, less one bar step of `MP_STEPS` = 104, at least the cast's MP), or nothing is seen in the throw's way, or it `finishes` the monster (its expected throws within `FINISH_SLACK` 0.25 of Lucky Seven's); else Lucky Seven.\n\n**Damage** (`Attack`): stars per throw, each a whole number uniformly from lo to hi, less the monster's defence (x 100 / (PDDamage + 100)). The regular star is `STAR` (20-140) and Lucky Seven `SKILL_STARS` (2) of `SKILL_STAR` (96-192) at `SKILL_LEVEL` 16, both read off monsters' HP bars at level 25 in the live hunts of the night of 2026-10-25; `lucky_seven(level)` scales by the skill's damage table and takes its MP from `LUCKY_SEVEN_MP`. So a cast does about 3.6x a regular throw: a Green Mushroom (233 HP) dies to one cast nine times in ten, a Horny Mushroom (403 HP, DEF 10) to two.\n\n**Expected throws** (`_throws`, cached): E(0) = 0 and E(k) = 1 + mean of E(k - d) over a throw's damage d, from the exact damage distribution (`_pmf`: the uniform star convolved per star).\n\n**What a monster has left** (`Left`): an array p[k], the chance it needs k more damage. `after(attack)` convolves in one throw's damage (or nothing, with `MISS` 0.275's chance); `alive()` removes 'dead' when a look sees it alive; `hit()` removes 'all missed' when its HP bar shows her damage. This matters: by average damage alone, a Green with two casts thrown and still walking had 16 HP left and the regular attack went to finish it; reckoned properly it has about 83 four times in five, and in the simulator 17 of 25 such finishing throws didn't kill.",
+      "lines": 261,
+      "key_items": [
+        {
+          "name": "pick",
+          "kind": "function",
+          "line": 219,
+          "signature": "def pick(hp, pdd, mp_share, max_mp, skill, mode='choice', regular=REGULAR) -> tuple[Attack, str]",
+          "summary": "The attack a throw is, and why ('regular', 'MP', 'skill', 'nothing in its way', 'finish', 'damage')."
+        },
+        {
+          "name": "Attack",
+          "kind": "dataclass",
+          "line": 81,
+          "signature": "@dataclass(frozen=True) class Attack(key, stars, lo, hi, mp=0.0)",
+          "summary": "One attack: its GameKeys key, stars a throw, each star's damage range before defence, and MP a throw.",
+          "details_md": "mean, throws, one_throw, pmf and table give its damage maths; name knows Lucky Seven and Magic Claw."
+        },
+        {
+          "name": "Left",
+          "kind": "dataclass",
+          "line": 129,
+          "signature": "@dataclass(frozen=True, eq=False) class Left(p: np.ndarray, pdd: float = 0.0)",
+          "summary": "What a monster has left as a distribution over the damage still needed; of(hp) starts it certain."
+        },
+        {
+          "name": "Left.after",
+          "kind": "method",
+          "line": 142,
+          "signature": "def after(self, attack: Attack, miss: float = MISS) -> Left",
+          "summary": "As it is after one throw: its damage convolved in, or nothing with the miss chance."
+        },
+        {
+          "name": "Left.alive",
+          "kind": "method",
+          "line": 160,
+          "signature": "def alive(self) -> Left | None",
+          "summary": "Seen alive: the 'dead' amount removed and the rest renormalised; None if her throws can't have left it alive."
+        },
+        {
+          "name": "Left.hit",
+          "kind": "method",
+          "line": 150,
+          "signature": "def hit(self) -> Left | None",
+          "summary": "Its HP bar shows her damage: the 'every throw missed' amount removed."
+        },
+        {
+          "name": "finishes",
+          "kind": "function",
+          "line": 211,
+          "signature": "def finishes(hp, pdd=0.0, regular=REGULAR, skill=None) -> bool",
+          "summary": "Whether the regular attack takes what's left about as fast as the skill: expected throws within FINISH_SLACK."
+        },
+        {
+          "name": "can_cast",
+          "kind": "function",
+          "line": 206,
+          "signature": "def can_cast(share: float, max_mp: float, cost: float) -> bool",
+          "summary": "Whether her MP (bar share x max, less one bar step) surely pays for a cast."
+        },
+        {
+          "name": "lucky_seven",
+          "kind": "function",
+          "line": 184,
+          "signature": "def lucky_seven(level: float, star=SKILL_STAR) -> Attack",
+          "summary": "Lucky Seven at a skill level: MP from LUCKY_SEVEN_MP, stars scaled by LUCKY_SEVEN_DAMAGE relative to SKILL_LEVEL."
+        },
+        {
+          "name": "_throws",
+          "kind": "function",
+          "line": 252,
+          "signature": "def _throws(stars, lo, hi, top) -> np.ndarray",
+          "summary": "Expected throws to deal each amount of damage, by the exact recursion over the damage distribution (lru-cached)."
+        },
+        {
+          "name": "REGULAR",
+          "kind": "constant",
+          "line": 120,
+          "signature": "REGULAR = Attack('attack', 1, *STAR)",
+          "summary": "Her regular attack: one star of 20-140."
+        }
+      ],
+      "inputs": [
+        "a monster's HP left (a number or a Left) and its defence (PDDamage), from behavior.attacks' reckoning and the map's game data",
+        "her MP bar's share (perception) and max MP; her Lucky Seven level (config / profile)"
+      ],
+      "outputs": [
+        "the Attack a throw is, and why, for behavior.attacks.Attacks.key (which Actions asks at each attack key)",
+        "Left distributions and Attack damage maths for behavior.attacks, behavior.damage and the hunter",
+        "MP_STEPS for behavior.darts and the simulator's fakes"
+      ],
+      "uses": [],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "STAR",
+          "value": "(20, 140)",
+          "meaning": "the regular star's damage before defence (live, level 25)"
+        },
+        {
+          "name": "SKILL_STAR / SKILL_STARS / SKILL_LEVEL",
+          "value": "(96, 192) / 2 / 16",
+          "meaning": "Lucky Seven's star damage, stars per cast, and the skill level it was measured at"
+        },
+        {
+          "name": "MISS",
+          "value": "0.275",
+          "meaning": "share of throws that do nothing (a guess, used only for reckoning HP left)"
+        },
+        {
+          "name": "FINISH_SLACK",
+          "value": "0.25",
+          "meaning": "throws the regular attack may take beyond Lucky Seven's and still be chosen to finish (a guess)"
+        },
+        {
+          "name": "THROW_S",
+          "value": "0.84 s",
+          "meaning": "seconds between her throws (stance.IMMINENT_S matches it)"
+        },
+        {
+          "name": "MP_STEPS",
+          "value": "104",
+          "meaning": "her MP bar's pixel steps at 1366x768: she casts only with one step more than a cast"
+        },
+        {
+          "name": "LUCKY_SEVEN_MP / LUCKY_SEVEN_DAMAGE",
+          "value": "8..16 MP / 60..140%",
+          "meaning": "per skill level 1-20, from the game data (skill 4001003)"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-24",
+          "what": "A mixture: Lucky Seven first, the regular attack to finish a low-HP monster or when MP can't pay a cast.",
+          "why": "The user, out of MP and potions: 'The lucky seven simply consumes MP too quick and I'm broke', then 'use lucky seven first but for finishing up a low hp monster, use regular attack'."
+        },
+        {
+          "date": "2026-10-25",
+          "what": "Left.hit: an HP bar shown removes the chance that all her throws missed.",
+          "why": "Review: the game shows a monster's bar to whoever damages it."
+        },
+        {
+          "date": "2026-10-26",
+          "what": "Damage re-measured from monsters' HP bars: STAR 20-140 (was 30-70), SKILL_STAR 96-192 (was 45-105).",
+          "why": "HP bars became readable at 1366x768 on 2026-10-25; with the old numbers no cast could kill a Green, while live 45 of 53 Green kills opened with Lucky Seven took one cast."
+        }
+      ],
+      "gotchas": [
+        "MISS only shapes the reckoning of HP left; it never decides which attack is chosen.",
+        "With nothing seen in a throw's way the choice is the regular attack, so Lucky Seven's MP isn't spent on nothing.",
+        "The magician never uses the regular attack (behavior.attacks: no_regular); her Magic Claw is an Attack here too."
+      ],
+      "tests": [
+        "tests/test_choice.py",
+        "tests/test_character.py",
+        "tests/test_damage.py",
+        "tests/test_darts.py",
+        "tests/test_keycheck.py",
+        "tests/test_magician_hunt.py",
+        "tests/test_sim_tree.py"
+      ]
+    },
+    {
+      "path": "gamelab/attack/magic.py",
+      "title": "Magic",
+      "tagline": "The magician's Magic Claw, done the quick way: swap reach's constants at a command's start.",
+      "summary": "For the magician, overwrites the attack layer's module constants (reach's search geometry, spots' copy of the range, and several stance switches) with her spell's search, so every decision reads her geometry instead of the thief's star. Called once at the start of the hunting commands; the thief's process never calls it.",
+      "details_md": "**Why so blunt.** The user, 2026-10-28 ~23:55: \"I need it ASAP to start grinding on magician\". The proper design (an aim facade with per-profile geometry, S1 in D:/MapleHelper-scratch/mage/design.md) is for later. Because the thief's decisions already read reach's constants at call time, setting them once per process makes every decision go by her search.\n\n**What `swaps` sets** (from her profile, `classes.magician.SEARCH`: start 50, range 300):\n- reach: `STAR_RANGE` 300, `STAR_REACH` 300 + the widest body's half, `SHOT_RANGE` 310, `SEARCH_START` 50, `SEARCH_STEP` and `SEARCH_SPREAD` from her profile, `SEARCH_FLOOR0`/`SEARCH_TOP0` (first window 16-40 over her feet), `BANDS` 13, `AREA_UP`, `CLAW_FAR` 50 and a `CLAW` box no body reaches (no swipe), `RAMP_BELOW` False, `WALLS_BLOCK` False (nothing stops a spell), `STAR_SPEED` 1e9 (no flight);\n- spots: `SHOT_RANGE` 310;\n- stance: `PASSING_JUMPS`, `JUMP_THROW_SNAILS` and `ESCAPE_UP` False (she never casts mid-jump), `POINT_BLANK` = her `Policy.close_quarters == 'claw'` (False for 'touch'), `FIGHT_CLEAR` False.\n\n**`apply(c)`** does nothing for the thief (or a profile whose skill geometry isn't a 'search'); otherwise restores any earlier swap first, saves the old values (and `can_hit`/`can_shoot`'s `__defaults__`, which bound `SHOT_RANGE` at import) on `_SAVED`, sets the new ones, recomputes `reach.STAR_SURE` and clears stance's `_JUMP_REACH` cache. `restore()` puts everything back; `swapped(c)` is a context manager for tests. One swap at a time.\n\nCallers: `gamelab/__main__.py` for the commands that hunt (`hunt`, `nav`, `tour`), printing that her search is in use, and the simulator's harness for a magician run. Her keys are also kept on the ground by `control.actions.Actions.ground_only`, and her casts are gated by `behavior.attacks.Attacks.picks`, both outside this module.",
+      "lines": 131,
+      "key_items": [
+        {
+          "name": "apply",
+          "kind": "function",
+          "line": 79,
+          "signature": "def apply(c: Character) -> bool",
+          "summary": "Sets reach's constants (and the copies of them) to character c's spell search if it isn't the thief; returns whether anything was set."
+        },
+        {
+          "name": "swaps",
+          "kind": "function",
+          "line": 47,
+          "signature": "def swaps(c: Character) -> dict",
+          "summary": "The table of {(module, name): value} apply sets: reach's search, range and claw, spots' range, stance's switches."
+        },
+        {
+          "name": "restore",
+          "kind": "function",
+          "line": 104,
+          "signature": "def restore() -> None",
+          "summary": "Puts back the constants (and can_hit/can_shoot defaults) saved by the last apply."
+        },
+        {
+          "name": "swapped",
+          "kind": "function",
+          "line": 124,
+          "signature": "def swapped(c: Character)",
+          "summary": "Context manager for tests: apply for the block, then restore."
+        },
+        {
+          "name": "applied",
+          "kind": "function",
+          "line": 118,
+          "signature": "def applied() -> bool",
+          "summary": "Whether her constants are currently set."
+        },
+        {
+          "name": "_SAVED",
+          "kind": "constant",
+          "line": 39,
+          "signature": "_SAVED: list[dict] = []",
+          "summary": "The constants as they were before apply (a stack of one)."
+        }
+      ],
+      "inputs": [
+        "the active Character profile (gamelab/character.py; classes.magician's Search geometry and Policy)"
+      ],
+      "outputs": [
+        "process-wide changes to reach, spots and stance module constants for the rest of the run"
+      ],
+      "uses": [
+        "gamelab/character.py",
+        "gamelab/attack/reach.py",
+        "gamelab/attack/spots.py",
+        "gamelab/attack/stance.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "SEARCH_START (magician)",
+          "value": "50",
+          "meaning": "her spell's search starts 50 ahead (thief: 65)"
+        },
+        {
+          "name": "STAR_RANGE / SHOT_RANGE (magician)",
+          "value": "300 / 310",
+          "meaning": "her search's reach and where she aims inside (thief: 400 / 410)"
+        },
+        {
+          "name": "BANDS (magician)",
+          "value": "13",
+          "meaning": "search bands from 50 to 300"
+        },
+        {
+          "name": "WALLS_BLOCK (magician)",
+          "value": "False",
+          "meaning": "walls and floors don't stop her spell"
+        },
+        {
+          "name": "POINT_BLANK (magician)",
+          "value": "close_quarters == 'claw'",
+          "meaning": "False for her 'touch' policy: no thief-style point-blank answers"
+        },
+        {
+          "name": "FIGHT_CLEAR / ESCAPE_UP / PASSING_JUMPS (magician)",
+          "value": "False",
+          "meaning": "rules that rely on attacking from a jump"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-27",
+          "what": "Her spell's search geometry settled: walls and platforms don't block it, never cast mid-jump.",
+          "why": "Settled by the user (classes.magician.SEARCH)."
+        },
+        {
+          "date": "2026-10-28",
+          "what": "Swap the attack layer's constants per process instead of building the aim facade first.",
+          "why": "The user, ~23:55: 'I need it ASAP to start grinding on magician'."
+        },
+        {
+          "date": "2026-10-29",
+          "what": "POINT_BLANK off for her, and ESCAPE_UP off.",
+          "why": "Her close quarters' jump throws went out as ground casts that picked nothing ('cast magic claw for nothing'); an escape up would cast from the ground beside the monster just ruled too near (review)."
+        },
+        {
+          "date": "2026-10-29",
+          "what": "FIGHT_CLEAR off for her.",
+          "why": "R8 was measured on the thief, whose jump back throws; hers is the jump away alone, which would trade a sure ground cast for a jump with none (the integration of 2026-10-29)."
+        }
+      ],
+      "gotchas": [
+        "It mutates module globals for the whole process: a test that applies it must restore (use swapped).",
+        "A module that copied a constant by name at import (`from .reach import X`) keeps the thief's value unless swaps lists that copy too; spots.SHOT_RANGE is listed for that reason.",
+        "can_hit/can_shoot's default `reach` argument was bound at import, so apply rewrites their __defaults__.",
+        "The thief's goldens are the check that nothing of his changes: his process never calls apply.",
+        "Only the copies listed in swaps are changed: gamelab/ui/render.py and ui/web.py import reach's SHOT_UP, SHOT_DOWN and STAR_REACH by name and keep the thief's values."
+      ],
+      "tests": [
+        "tests/test_character.py",
+        "tests/test_damage.py",
+        "tests/test_kill_credit.py",
+        "tests/test_magician_hunt.py",
+        "tests/test_target.py"
+      ]
+    },
+    {
+      "path": "gamelab/attack/ropes.py",
+      "title": "Ropes",
+      "tagline": "Ropes and ladders as places to wait out monsters, at their safest height.",
+      "summary": "Lists the ropes she can get onto from a platform and back, each at its safest hanging height by `Danger.on_rope`, with the seconds to get on and off. The hunt loop hangs on one only while waiting for respawns and when it is ROPE_GAIN safer than anywhere on her platform; behavior.retreat uses it too.",
+      "details_md": "**Why.** The user, 2026-10-24: \"holding on a rope can also be a safe ground sometimes (less ideal because you can't recover hp while hanging on the rope)\".\n\n**Which ropes** (`_way`): one hanging from her platform (`'top'`: she steps down onto it from its top and climbs back over, its top within the route planner's `ROPE_TOP_DY` of the floor), or one whose bottom she can grab jumping straight up (`'under'`: its bottom within `ROPE_REACH` - `GRAB_MARGIN` above her floor, at least `ROPE_IN` (15) in from her platform's ends so letting go lands her back on it, and her platform is what's under its bottom).\n\n**Where on it** (`_hang`): heights every `HANG_STEP` (10) units between limits: from a top rope `END_KEEP` (10) inside both ends; from under, from `TOP_KEEP` (70) below its top (nearer, getting off climbs her over the top) down to `GRAB_CLIMB` (20) above where she grabs it. Each height is charged the worst `Danger.on_rope` within `HANG_SLACK` (15) either way (her climb stops within about that); ties go to the one with nothing within `margin` either way, then the quickest on and off.\n\n**Costs** (`_times`): on = the jump to its bottom (jump lag + time to the top of the jump) or the step onto its top, plus the climb at `CLIMB_SPEED`; off = the climb back, then the fall from its bottom (gravity, capped at `FALL_SPEED`) or the climb-over at the top (`motion.flow.CLIMB_OVER`). While hanging she regains no HP: `REGEN_S` (a guess of 1 of her 752 HP a second) is defined here but not used in this module; `behavior.hunt._refuge` charges a rope `REGEN_S` x `HANG_EXPECT_S` on top of its danger.\n\n`refuges` returns the list safest first (by danger, then on+off seconds). `behavior.hunt` (rule 9, `_refuge`) uses it only while waiting for respawns with no place along her platform `ROPE_GAIN` safer, never as the default; `behavior.retreat` uses it too (with its ROPE_MARGIN) when it looks for a safe place to retreat to.",
+      "lines": 130,
+      "key_items": [
+        {
+          "name": "refuges",
+          "kind": "function",
+          "line": 69,
+          "signature": "def refuges(model, danger, pid, seen=None, margin=0.0) -> list[Refuge]",
+          "summary": "The ropes she can get onto from platform pid and back, each at its safest height, safest first."
+        },
+        {
+          "name": "Refuge",
+          "kind": "dataclass",
+          "line": 50,
+          "signature": "@dataclass(frozen=True) class Refuge(rope, platform, y, from_top, on_s, off_s, danger=0.0)",
+          "summary": "Where she would wait on a rope: the rope, her feet's y, how she got on, seconds on and off, and the danger there."
+        },
+        {
+          "name": "_way",
+          "kind": "function",
+          "line": 84,
+          "signature": "def _way(model, p, rope) -> str | None",
+          "summary": "How she gets onto a rope from platform p and back: 'top', 'under', or None."
+        },
+        {
+          "name": "_hang",
+          "kind": "function",
+          "line": 98,
+          "signature": "def _hang(danger, p, rope, way, seen, margin=0.0) -> Refuge",
+          "summary": "The safest height on a rope (worst danger within HANG_SLACK), ties broken by margin and by on+off time."
+        },
+        {
+          "name": "_times",
+          "kind": "function",
+          "line": 119,
+          "signature": "def _times(way, rope, floor, start, y) -> tuple[float, float]",
+          "summary": "Seconds getting on to a height and back off to the floor: jump or step, climb, fall or climb-over."
+        },
+        {
+          "name": "REGEN_S",
+          "kind": "constant",
+          "line": 46,
+          "signature": "REGEN_S = 1.0 / 752.0",
+          "summary": "Her natural HP recovery standing, a share of her HP a second, which she doesn't get on a rope (a guess); read by behavior.hunt._refuge, not by this module."
+        }
+      ],
+      "inputs": [
+        "the map model (ropes, platforms, platform_below) and the map's Danger (attack.danger.on_rope)",
+        "a look's monsters, or none for the planning picture; route constants (motion.route ROPE_TOP_DY, grab_height, hung_from) and physics (CLIMB_SPEED, FALL_SPEED, GRAVITY, JUMP_SPEED, LAGS, ROPE_REACH)"
+      ],
+      "outputs": [
+        "Refuge lists for behavior.hunt's rope hang (rule 9) and behavior.retreat's safe places",
+        "REGEN_S, read by behavior.hunt._refuge to price what a hang costs in HP not regained"
+      ],
+      "uses": [
+        "gamelab/attack/danger.py",
+        "gamelab/localization/mapdata.py",
+        "gamelab/localization/monsters.py",
+        "gamelab/motion/flow.py",
+        "gamelab/motion/physics.py",
+        "gamelab/motion/route.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "GRAB_MARGIN",
+          "value": "8.0",
+          "meaning": "a rope's bottom must be this far within her grab reach (the mover's)"
+        },
+        {
+          "name": "TOP_KEEP",
+          "value": "70.0",
+          "meaning": "hanging from under, her feet stay this far below the top"
+        },
+        {
+          "name": "END_KEEP",
+          "value": "10.0",
+          "meaning": "on a rope from her platform's top, this far above its bottom"
+        },
+        {
+          "name": "GRAB_CLIMB",
+          "value": "20.0",
+          "meaning": "from under, at least this far above where she grabs it"
+        },
+        {
+          "name": "ROPE_IN",
+          "value": "15.0",
+          "meaning": "a rope got onto from under must be this far in from her platform's ends"
+        },
+        {
+          "name": "HANG_STEP / HANG_SLACK",
+          "value": "10.0 / 15.0",
+          "meaning": "heights tried, and how far either way each is charged the worst danger"
+        },
+        {
+          "name": "REGEN_S",
+          "value": "1/752 per s",
+          "meaning": "HP recovery she forgoes on a rope (a guess)"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-24",
+          "what": "Ropes are places too, used only while waiting and only when clearly safer than her platform.",
+          "why": "The user: 'holding on a rope can also be a safe ground sometimes (less ideal because you can't recover hp while hanging on the rope)'."
+        }
+      ],
+      "gotchas": [
+        "Tree Dungeon's ropes over the ends of 20 (1 unit in) and 19 (6 in) are excluded by ROPE_IN: letting go of the one over 20, she came down on 21 below in the simulator.",
+        "REGEN_S is a guess (about 10 HP every 10 s is 'said to be' the game's base; not measured).",
+        "The game doesn't knock her off a rope (she stayed on after 11 of 11 hits on ropes on 10-25 and 10-26, per the README)."
+      ],
+      "tests": [
+        "tests/test_ropes.py",
+        "tests/test_guard.py"
+      ]
+    }
+  ],
+  "data_types": [
+    {
+      "name": "act",
+      "module": "gamelab/attack/stance.py",
+      "line": 652,
+      "summary": "The plain tuple stance() and decide() return and behavior.fight carries out (no class: plan_of, at this line, reads its optional JumpPlan).",
+      "fields": [
+        {
+          "name": "[0]",
+          "type": "str",
+          "meaning": "'throw', 'jump_throw', 'jump_back', 'back' (step away), 'approach', 'wait'; decide() also 'walk' and 'skip'"
+        },
+        {
+          "name": "[1]",
+          "type": "str",
+          "meaning": "the side (LEFT/RIGHT from maplehelper.engine); a reason string for 'skip'"
+        },
+        {
+          "name": "[2]",
+          "type": "JumpPlan | float",
+          "meaning": "a jump's plan, or the units to step/walk"
+        },
+        {
+          "name": "[3]",
+          "type": "'away'",
+          "meaning": "AWAY on a step away from a close monster: what MAX_MOVES counts"
+        }
+      ]
+    },
+    {
+      "name": "Pace",
+      "module": "gamelab/attack/stance.py",
+      "line": 403,
+      "summary": "How soon her next attack picks and how monsters walk meanwhile; built by behavior.fight.pace_of, read by stance and target.",
+      "fields": [
+        {
+          "name": "lead",
+          "type": "float",
+          "meaning": "s from the look's frame to when her next keys can go"
+        },
+        {
+          "name": "walk",
+          "type": "Callable[[Monster], float | None] | None",
+          "meaning": "a monster's speed along its platform from its track (None: unknown)"
+        },
+        {
+          "name": "speeds",
+          "type": "dict[str, float] | None",
+          "meaning": "each kind's speed, for WALK_AT"
+        },
+        {
+          "name": "halves",
+          "type": "dict[str, float] | None",
+          "meaning": "half each kind's width (where one walking at her stops)"
+        },
+        {
+          "name": "hold",
+          "type": "Callable | None",
+          "meaning": "(from, until) s a monster she just hit stands (FLINCH_HOLD_S)"
+        },
+        {
+          "name": "window",
+          "type": "float",
+          "meaning": "s left of her invulnerability after a touch"
+        }
+      ]
+    },
+    {
+      "name": "JumpPlan",
+      "module": "gamelab/attack/stance.py",
+      "line": 623,
+      "summary": "How a jump throw or jump back is keyed; the act's third element, read by control.actions.",
+      "fields": [
+        {
+          "name": "key_ms",
+          "type": "int",
+          "meaning": "attack key ms after the jump key (40 by default)"
+        },
+        {
+          "name": "way",
+          "type": "int",
+          "meaning": "+1/-1 a jump forward that way, 0 in place"
+        },
+        {
+          "name": "air_turn",
+          "type": "bool",
+          "meaning": "turn in the air (False: tap the arrow before the jump)"
+        },
+        {
+          "name": "why",
+          "type": "str",
+          "meaning": "why it was chosen; the telemetry 'jump' record's kind"
+        },
+        {
+          "name": "shot",
+          "type": "reach.Shot | None",
+          "meaning": "the shot it makes, if worked out"
+        },
+        {
+          "name": "room",
+          "type": "tuple[int, int] | None",
+          "meaning": "keys the jitter may use, each as sure"
+        },
+        {
+          "name": "target",
+          "type": "Monster | None",
+          "meaning": "the monster it's for"
+        },
+        {
+          "name": "land_x",
+          "type": "float | None",
+          "meaning": "where a jump aside should land her"
+        }
+      ]
+    },
+    {
+      "name": "Landing",
+      "module": "gamelab/attack/stance.py",
+      "line": 495,
+      "summary": "What a landing leaves her, priced in seconds of hunting; made by landing()/landing_of(), used by jump shots and the navigator's chains.",
+      "fields": [
+        {
+          "name": "gap",
+          "type": "float | None",
+          "meaning": "nearest monster's distance when her first attack there starts"
+        },
+        {
+          "name": "kind",
+          "type": "str | None",
+          "meaning": "its kind"
+        },
+        {
+          "name": "meets",
+          "type": "bool",
+          "meaning": "one walks into her before then"
+        },
+        {
+          "name": "sure",
+          "type": "bool",
+          "meaning": "her first attack there surely takes the nearest"
+        },
+        {
+          "name": "price_s",
+          "type": "float",
+          "meaning": "the landing's price (0 for a clear one)"
+        }
+      ]
+    },
+    {
+      "name": "Prices",
+      "module": "gamelab/attack/stance.py",
+      "line": 318,
+      "summary": "The caller's own landing prices (behavior.fight.landing_prices): EXP a touch by kind, her EXP rate, the share of touches that hurt.",
+      "fields": [
+        {
+          "name": "touch",
+          "type": "Callable[[str], float]",
+          "meaning": "EXP a touch of a kind costs in potions"
+        },
+        {
+          "name": "rate",
+          "type": "float",
+          "meaning": "her EXP a second"
+        },
+        {
+          "name": "hurt",
+          "type": "float",
+          "meaning": "share of touches that hurt (HURT_SHARE 0.7)"
+        }
+      ]
+    },
+    {
+      "name": "Shot",
+      "module": "gamelab/attack/reach.py",
+      "line": 1094,
+      "summary": "One sure way to hit a target from where she stands: from the ground or from a jump with an attack key; made by reach.shots.",
+      "fields": [
+        {
+          "name": "side",
+          "type": "int",
+          "meaning": "+1 right, -1 left"
+        },
+        {
+          "name": "target",
+          "type": "Monster",
+          "meaning": "the monster it surely picks"
+        },
+        {
+          "name": "jump",
+          "type": "physics.Jump | None",
+          "meaning": "None: from the ground"
+        },
+        {
+          "name": "key_ms / window",
+          "type": "int / tuple[int, int]",
+          "meaning": "the attack key and the jitter room, ms after the jump key"
+        },
+        {
+          "name": "x / rise",
+          "type": "float",
+          "meaning": "where she is at the pick, and how high"
+        },
+        {
+          "name": "land / land_x / land_s",
+          "type": "Platform | None / float / float",
+          "meaning": "where and when the jump lands her"
+        },
+        {
+          "name": "turn",
+          "type": "bool",
+          "meaning": "an in-place jump that turns her in the air"
+        },
+        {
+          "name": "alts",
+          "type": "tuple",
+          "meaning": "the jump's variants and where each lands"
+        }
+      ]
+    },
+    {
+      "name": "Coverage",
+      "module": "gamelab/attack/reach.py",
+      "line": 1326,
+      "summary": "reach.shots indexed by monster: what her attacks reach from one place; passed to the stance as its `jumps` callback's result.",
+      "fields": [
+        {
+          "name": "shots",
+          "type": "list[Shot]",
+          "meaning": "every sure shot from here"
+        }
+      ]
+    },
+    {
+      "name": "Foe",
+      "module": "gamelab/attack/target.py",
+      "line": 73,
+      "summary": "A monster as the target chooser takes it at a look; built by behavior.targeting.",
+      "fields": [
+        {
+          "name": "m",
+          "type": "Monster",
+          "meaning": "the monster"
+        },
+        {
+          "name": "exp",
+          "type": "float",
+          "meaning": "its kind's EXP"
+        },
+        {
+          "name": "kill_s",
+          "type": "float",
+          "meaning": "s to kill it from what it has left"
+        },
+        {
+          "name": "p",
+          "type": "float",
+          "meaning": "chance it's there and alive"
+        },
+        {
+          "name": "vx",
+          "type": "float | None",
+          "meaning": "its speed along its platform"
+        },
+        {
+          "name": "chasing",
+          "type": "bool",
+          "meaning": "her aggro belief has it chasing her"
+        },
+        {
+          "name": "solid_s / hit_s",
+          "type": "float",
+          "meaning": "s until a newborn can touch her / be hit"
+        },
+        {
+          "name": "born",
+          "type": "bool",
+          "meaning": "a newborn"
+        }
+      ]
+    },
+    {
+      "name": "Her",
+      "module": "gamelab/attack/target.py",
+      "line": 90,
+      "summary": "Her at a look as the target chooser needs her; built by behavior.targeting.Targeting.her_at.",
+      "fields": [
+        {
+          "name": "platform / x / y",
+          "type": "Platform / float / float",
+          "meaning": "where she stands"
+        },
+        {
+          "name": "lead / invulnerable",
+          "type": "float",
+          "meaning": "s until her next keys; s of invulnerability left"
+        },
+        {
+          "name": "jumps",
+          "type": "bool",
+          "meaning": "her attack goes from a jump (the thief's)"
+        },
+        {
+          "name": "around / sizes / halves / danger / pace",
+          "type": "...",
+          "meaning": "the monsters, bodies, danger and Pace the reach checks need"
+        },
+        {
+          "name": "jump_hits",
+          "type": "Callable | None",
+          "meaning": "stance.jump_hits, asked only where it decides"
+        },
+        {
+          "name": "routes",
+          "type": "Callable | None",
+          "meaning": "the whole screen: s to another platform's stretch (Planner.arrive_within)"
+        }
+      ]
+    },
+    {
+      "name": "Way",
+      "module": "gamelab/attack/target.py",
+      "line": 121,
+      "summary": "How she gets an attack on a monster: seconds and how ('now', 'close', 'jump', 'walk', 'trip').",
+      "fields": [
+        {
+          "name": "s",
+          "type": "float",
+          "meaning": "s until an attack can pick it"
+        },
+        {
+          "name": "how",
+          "type": "str",
+          "meaning": "now, close, jump, walk, trip"
+        },
+        {
+          "name": "place",
+          "type": "float | None",
+          "meaning": "where she walks to (None: from where she stands)"
+        },
+        {
+          "name": "platform",
+          "type": "int | None",
+          "meaning": "the platform that place is on (None: hers)"
+        },
+        {
+          "name": "pile",
+          "type": "tuple",
+          "meaning": "others her attack lands on from there"
+        }
+      ]
+    },
+    {
+      "name": "Terms",
+      "module": "gamelab/attack/target.py",
+      "line": 133,
+      "summary": "One monster's score and how she gets at it: what Choice.primary/next/top hold, what the log shows and what Terms.record writes to the 'target' telemetry record.",
+      "fields": [
+        {
+          "name": "foe",
+          "type": "Foe",
+          "meaning": "the monster as the choice took it"
+        },
+        {
+          "name": "way",
+          "type": "Way",
+          "meaning": "how and how soon she gets an attack on it (and the pile from there)"
+        },
+        {
+          "name": "score",
+          "type": "float",
+          "meaning": "EXP a second of going for it next (score or place_score)"
+        }
+      ]
+    },
+    {
+      "name": "Choice",
+      "module": "gamelab/attack/target.py",
+      "line": 162,
+      "summary": "One look's target choice, returned by Chooser.choose to behavior.targeting.",
+      "fields": [
+        {
+          "name": "primary / next",
+          "type": "Terms | None",
+          "meaning": "the target and the one after it, with their scores"
+        },
+        {
+          "name": "why / how",
+          "type": "str",
+          "meaning": "why it changed (a log text) / what kind of change: first, next, gone, beaten, respawn, coming, no way, or none"
+        },
+        {
+          "name": "top",
+          "type": "tuple",
+          "meaning": "up to 3 best Terms for the log"
+        },
+        {
+          "name": "coming",
+          "type": "Coming | None",
+          "meaning": "a monster coming at her"
+        },
+        {
+          "name": "left",
+          "type": "Monster | None",
+          "meaning": "the one it left (with next and gone)"
+        }
+      ]
+    },
+    {
+      "name": "Danger",
+      "module": "gamelab/attack/danger.py",
+      "line": 170,
+      "summary": "The map's danger model for her: built once per map by of_map, passed to stance, spots, target, ropes and behavior.",
+      "fields": [
+        {
+          "name": "model / her",
+          "type": "MapModel / danger.Her",
+          "meaning": "the map and her HP, level, DEF"
+        },
+        {
+          "name": "threats",
+          "type": "dict[str, Threat]",
+          "meaning": "each kind as a danger"
+        },
+        {
+          "name": "takes",
+          "type": "dict[str, float]",
+          "meaning": "each kind's touch share, under the threshold too"
+        },
+        {
+          "name": "points / counts",
+          "type": "list / Counter",
+          "meaning": "spawn points of kinds that count, and how many per platform and kind"
+        }
+      ]
+    },
+    {
+      "name": "Threat",
+      "module": "gamelab/attack/danger.py",
+      "line": 143,
+      "summary": "A monster kind as a danger to her.",
+      "fields": [
+        {
+          "name": "share",
+          "type": "float",
+          "meaning": "share of her HP a touch takes (0 under DANGER_MIN)"
+        },
+        {
+          "name": "speed / half / top / tall",
+          "type": "float",
+          "meaning": "walk speed, half width, height walking, highest frame"
+        },
+        {
+          "name": "hops / flies",
+          "type": "bool",
+          "meaning": "can leave its platform / flies straight at her"
+        }
+      ]
+    },
+    {
+      "name": "Spot",
+      "module": "gamelab/attack/spots.py",
+      "line": 72,
+      "summary": "A place to stand to shoot a platform from; returned by spots.spot to behavior.hunt and tour.",
+      "fields": [
+        {
+          "name": "platform / x",
+          "type": "int / float",
+          "meaning": "where to stand"
+        },
+        {
+          "name": "coverage",
+          "type": "float",
+          "meaning": "share of the target platform in reach"
+        },
+        {
+          "name": "safe",
+          "type": "bool",
+          "meaning": "no monster can reach her there"
+        },
+        {
+          "name": "danger",
+          "type": "float",
+          "meaning": "the danger there"
+        }
+      ]
+    },
+    {
+      "name": "Flown",
+      "module": "gamelab/attack/knock.py",
+      "line": 82,
+      "summary": "Where a knock leaves her; from knock.fly/flown/from_state.",
+      "fields": [
+        {
+          "name": "platform",
+          "type": "Platform | None",
+          "meaning": "where she comes to rest (None: out of the map)"
+        },
+        {
+          "name": "x / fall / seconds",
+          "type": "float",
+          "meaning": "rest x, how far below her old floor, time from the touch"
+        },
+        {
+          "name": "slid",
+          "type": "bool",
+          "meaning": "she slid off an end after landing"
+        }
+      ]
+    },
+    {
+      "name": "Price",
+      "module": "gamelab/attack/knock.py",
+      "line": 98,
+      "summary": "What a knock landing costs her (knock.cost).",
+      "fields": [
+        {
+          "name": "exp",
+          "type": "float",
+          "meaning": "EXP in all"
+        },
+        {
+          "name": "seconds / touches",
+          "type": "float",
+          "meaning": "time lost and touches expected"
+        },
+        {
+          "name": "back / hang / tops",
+          "type": "float | None / float / int",
+          "meaning": "the planner's way back, hang time, busy rope tops"
+        }
+      ]
+    },
+    {
+      "name": "Attack",
+      "module": "gamelab/attack/choice.py",
+      "line": 81,
+      "summary": "One of her attacks with its damage maths; chosen by choice.pick for behavior.attacks.",
+      "fields": [
+        {
+          "name": "key",
+          "type": "str",
+          "meaning": "'attack', 'lucky_seven' or 'magic_claw'"
+        },
+        {
+          "name": "stars / lo / hi",
+          "type": "int",
+          "meaning": "stars a throw and each star's damage range before defence"
+        },
+        {
+          "name": "mp",
+          "type": "float",
+          "meaning": "MP a throw"
+        }
+      ]
+    },
+    {
+      "name": "Left",
+      "module": "gamelab/attack/choice.py",
+      "line": 129,
+      "summary": "A monster's remaining HP as a probability distribution; kept per monster by behavior.attacks.",
+      "fields": [
+        {
+          "name": "p",
+          "type": "np.ndarray",
+          "meaning": "p[k]: chance it needs k more damage (before defence)"
+        },
+        {
+          "name": "pdd",
+          "type": "float",
+          "meaning": "its defence"
+        }
+      ]
+    },
+    {
+      "name": "Refuge",
+      "module": "gamelab/attack/ropes.py",
+      "line": 50,
+      "summary": "Where she would wait on a rope; from ropes.refuges for behavior.hunt and retreat.",
+      "fields": [
+        {
+          "name": "rope / platform",
+          "type": "Rope / int",
+          "meaning": "the rope and the platform she gets on from"
+        },
+        {
+          "name": "y",
+          "type": "float",
+          "meaning": "her feet's height on it"
+        },
+        {
+          "name": "from_top",
+          "type": "bool",
+          "meaning": "it hangs from that platform"
+        },
+        {
+          "name": "on_s / off_s",
+          "type": "float",
+          "meaning": "seconds to get on and off"
+        },
+        {
+          "name": "danger",
+          "type": "float",
+          "meaning": "the danger there"
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "fight-act",
+      "title": "How the monsters around her become one fight move",
+      "summary": "At each look in a fight, behavior.fight asks the stance for one act; the stance predicts where every monster will be when her attack starts and works down a fixed order of answers.",
+      "trigger": "a look during a fight (behavior.fight.clear, the hunt loop's _stance, fighting on the way)",
+      "steps": [
+        {
+          "module": "gamelab/behavior/fight.py",
+          "symbol": "_take_stance",
+          "process": "",
+          "text": "Gathers the monsters (visible and hidden), each kind's body from the game data, the Pace (pace_of: her lock, the look's age, the feed's tracks), the map's Danger and a lazy jump-coverage callback, and calls stance()."
+        },
+        {
+          "module": "gamelab/attack/stance.py",
+          "symbol": "stance",
+          "process": "",
+          "text": "Sorts monsters into hers (beside), too close (too_close at their predicted x) and reachable (reach.can_hit)."
+        },
+        {
+          "module": "gamelab/attack/stance.py",
+          "symbol": "_close_quarters_here",
+          "process": "",
+          "text": "If any is too close: the nearest decides; a hard hitter or a touch to clear goes to _escape (least danger), else a sure throw from here, else a clearing step, else a jump back, else the throw anyway."
+        },
+        {
+          "module": "gamelab/attack/stance.py",
+          "symbol": "_from_here",
+          "process": "",
+          "text": "Checks a ground throw past the claw's edge, else a jump in place keyed 40 ms, an air turn at 120 ms or a tap first, each with reach.air_sure and a clear line at both ends of the decide lag."
+        },
+        {
+          "module": "gamelab/attack/stance.py",
+          "symbol": "_throw_side",
+          "process": "",
+          "text": "With something in reach and nobody too close, picks the way to throw: imminent toucher, most-hurt target, toucher on her platform, the way she faces, the busier side."
+        },
+        {
+          "module": "gamelab/attack/reach.py",
+          "symbol": "shots",
+          "process": "",
+          "text": "With nothing in reach from the ground, the coverage callback builds every sure jump shot (two keys per jump, landings and variants)."
+        },
+        {
+          "module": "gamelab/attack/stance.py",
+          "symbol": "_jump_shot",
+          "process": "",
+          "text": "Keeps shots that land her back where she keeps to, meet no monster along the arc, don't land in more danger and land with clearance; ranks hurt first, nearest, in place before forward before back."
+        },
+        {
+          "module": "gamelab/behavior/fight.py",
+          "symbol": "_take_stance",
+          "process": "",
+          "text": "Logs the act (act_text) and returns it; the fight loop carries it out through control.actions, which keys it (a JumpPlan's attack key ms after the jump key)."
+        }
+      ]
+    },
+    {
+      "id": "target-choice",
+      "title": "Choosing the primary target and the next",
+      "summary": "The target-first planner scores every monster by EXP per second at each look and keeps its pick unless clearly beaten or a monster comes at her.",
+      "trigger": "each look while grinding with the target-first planner on (GAMELAB_TARGET, the default)",
+      "steps": [
+        {
+          "module": "gamelab/behavior/targeting.py",
+          "symbol": "Targeting.decide",
+          "process": "",
+          "text": "Builds Her (her_at) and the Foes (foes_of: EXP, kill time, presence chance, speed, newborn fade) and calls Chooser.choose."
+        },
+        {
+          "module": "gamelab/attack/target.py",
+          "symbol": "Chooser.choose",
+          "process": "",
+          "text": "Finds last look's primary and next among this look's foes and asks for a ranking."
+        },
+        {
+          "module": "gamelab/attack/target.py",
+          "symbol": "rank",
+          "process": "",
+          "text": "Scores monsters in reach first; asks the expensive searches (walls, jumps, walks, trips) only for the kept ones or would-be winners. With the whole screen, _rank_screen with place_score's piles."
+        },
+        {
+          "module": "gamelab/attack/target.py",
+          "symbol": "soonest",
+          "process": "",
+          "text": "For each monster: now (in reach), close (jump attack or step), jump, walk to the nearest place in reach, or a trip to another platform."
+        },
+        {
+          "module": "gamelab/attack/target.py",
+          "symbol": "score",
+          "process": "",
+          "text": "p x EXP / (time to an attack + kill time)."
+        },
+        {
+          "module": "gamelab/attack/target.py",
+          "symbol": "Chooser.choose",
+          "process": "",
+          "text": "Keeps the primary unless the top beats it by MARGIN 1.3; if gone, the planned next takes over; then coming() may switch to a monster walking at her."
+        },
+        {
+          "module": "gamelab/attack/target.py",
+          "symbol": "after",
+          "process": "",
+          "text": "Plans the next as if the primary were dead, from where she'll stand; also_next moves her place to reach both."
+        }
+      ]
+    },
+    {
+      "id": "shoot-spot",
+      "title": "Where to stand to hunt a platform",
+      "summary": "When the hunt loop picks a ground, spots finds a nearby, low-danger place on another platform that covers most of it, or the ground's own safest place.",
+      "trigger": "the hunt loop choosing its next hunting ground (behavior.hunt Hunt._next_ground), or a tour's spot",
+      "steps": [
+        {
+          "module": "gamelab/behavior/hunt.py",
+          "symbol": "Hunt._next_ground",
+          "process": "",
+          "text": "Calls spots.spot for the chosen ground with her position, a travel-time callback and the map's Danger."
+        },
+        {
+          "module": "gamelab/attack/spots.py",
+          "symbol": "_standable",
+          "process": "",
+          "text": "Takes spots on other platforms with at least MIN_COVERAGE that are safe or score better than hunting on the ground."
+        },
+        {
+          "module": "gamelab/attack/spots.py",
+          "symbol": "_grid",
+          "process": "",
+          "text": "Every 10 units along every platform: coverage of the ground (reach.clear_span, reach.clear_length) and the planned danger (Danger.at with no look)."
+        },
+        {
+          "module": "gamelab/attack/spots.py",
+          "symbol": "_off_spawns",
+          "process": "",
+          "text": "Moves candidates SPAWN_CLEAR (50) off spawn points of dangerous kinds where that costs little."
+        },
+        {
+          "module": "gamelab/attack/spots.py",
+          "symbol": "spot",
+          "process": "",
+          "text": "Of spots within 30% of the best score, the nearest by travel time; else on_ground, the ground's safest place."
+        }
+      ]
+    },
+    {
+      "id": "attack-key",
+      "title": "Which attack a throw is",
+      "summary": "As each attack key goes out, the hunter's Attacks asks the choice whether it's Lucky Seven or the regular attack, from her MP and the target's reckoned HP.",
+      "trigger": "control.actions keying any attack (it asks the hunter's Attacks.key)",
+      "steps": [
+        {
+          "module": "gamelab/behavior/attacks.py",
+          "symbol": "Attacks.key",
+          "process": "",
+          "text": "Finds the likeliest monster in the throw's way and what it has left as reckoned (a Left, alive if it's alive when the star lands)."
+        },
+        {
+          "module": "gamelab/attack/choice.py",
+          "symbol": "pick",
+          "process": "",
+          "text": "Regular if MP can't surely pay a cast (can_cast) or nothing is in the way; regular if it finishes the monster about as fast; else Lucky Seven."
+        },
+        {
+          "module": "gamelab/attack/choice.py",
+          "symbol": "finishes",
+          "process": "",
+          "text": "Compares expected throws from the exact damage distributions (Left.throws, _throws) within FINISH_SLACK."
+        },
+        {
+          "module": "gamelab/behavior/attacks.py",
+          "symbol": "Attacks",
+          "process": "",
+          "text": "After the throw and each look, updates the monster's Left with Left.after, Left.alive and Left.hit."
+        }
+      ]
+    }
+  ],
+  "not_done": [
+    "attack.knock is built and tested but no decision uses it yet; the navigator's flat KNOCK_REACH and stance's end_drop margins still decide, and all three knock models disagree (README 'Her knock landings').",
+    "Live, knocks while walking at the monster fly shorter than the simulator's (28 units to rest vs 41); whether the world changes is the user's call.",
+    "The jump aside and the hop up (stance._aside, _hop) are off by default: the pre-registered whole-run test failed on attacks at nothing; only the wall's-foot scene is solved whatever the seed.",
+    "reach.SEARCH_TOP0: the client's 44 against the logs' lean to 21 is unsettled until `probe run top-60`; the claw's edge, step-down, hanging-wall and below-42 probes are also unrun in game.",
+    "The target-first planner is on by default by the user's call although its pre-registered second gate failed (README, 'The reviews' fixes and the second gate: FAIL'); GAMELAB_TARGET=0 turns it off.",
+    "A monster already on her during her invulnerability isn't 'coming'; target flips on one-look misses aren't held through the gap.",
+    "The magician's aim facade (design S1) isn't built: her geometry is a process-wide swap of module constants.",
+    "Several weights are guesses, not fits: target.MARGIN and PILE_MOST, spots.DANGER_WEIGHT, stance.MAX_MOVES and ESCAPE_THROW, danger.HOP_CHANCE and the spawn-guard numbers, ropes.REGEN_S, choice.MISS and FINISH_SLACK.",
+    "stance.SNAIL_FAR_END (a step to a short platform's far end from a snail) was measured only in the simulator, not in game.",
+    "Most of the evidence in the code's comments comes from Tree Dungeon (live hours and simulator runs) and the first map (Thicket Around the Beach II); nothing is keyed by map or kind name (danger compares places by HP share), so another map relies on its game data alone."
+  ]
+}

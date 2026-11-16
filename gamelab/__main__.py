@@ -111,6 +111,10 @@ def cmd_player(args) -> int:
         from .control.player import serve
         serve()
         return 0
+    from .control import player
+    if player.running():  # (one at a time: player.only_one; no UAC prompt for one that would refuse)
+        print("a player is already running: `python -m gamelab stop-player` first to start a new one")
+        return 0
     # ShellExecute "runas" shows the UAC prompt and starts `python -m gamelab player` elevated.
     rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, "-X utf8 -m gamelab player",
                                              str(REPO), SW_SHOWMINNOACTIVE)

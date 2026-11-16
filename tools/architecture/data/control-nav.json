@@ -1,0 +1,2419 @@
+{
+ "id": "control-nav",
+ "layer": "control",
+ "title": "Control: actions, the mover, the navigator and the client",
+ "tagline": "Decisions turned into key plans; routes carried out closed loop; keys mailed to the player",
+ "summary": "Everything the stack decides ends up here as a key plan: a list of timed key events for the elevated key player, handed over as files in lab/inbox and answered in lab/outbox (client). Actions turns one action at a time (a throw, a walk, a pick-up, a potion) into such a plan; the Mover carries out one route move closed loop; the Navigator gets her onto a platform by chaining many moves into one plan, watching it 15 times a second and cutting, splicing or queuing plans as she goes. Keymap and timeline supply her keys and MapleHelper's own combo timelines.",
+ "details_md": "Nothing in this slice presses a key itself. MapleStory runs as administrator and Windows blocks input from normal\nprograms into it, so one small elevated process, the **key player** (`control/player.py`, another slice), presses the\nkeys. Everything here talks to it only through files: `client.send` writes a **plan** as JSON into `lab/inbox/`, the\nplayer renames it to `.running` when it takes it, plays it, and writes the result into `lab/outbox/`.\n\nA plan is a list of timed events, `[ms into the plan, key name, \"down\" | \"up\"]`, key names as `config.toml` names them\n(mouse plans use `[ms, \"mouse\", x, y]`). A plan may also say how long it lasts (`end_ms`) so the next plan starts the\nmoment it ends, and a running plan can be cut short (a `.cancel` file) or taken over mid-play by another (a `.splice`\nfile), the arrow held kept held.\n\nThree layers of \"doing\" sit on the client:\n\n- **Actions** (`actions.py`): one key plan per action of hers (a throw, a jump throw, a jump back, a walk with pick-up\n  pressed all the way, pick-ups standing, a potion, pet food), each blocking until the player has played it. It also\n  keeps the timing every plan must respect: her **attack lock** (730 ms after an attack key the game ignores jumps and\n  attacks) and the **arrow lock** (an arrow pressed too soon after an attack key, 0.59-0.62 s as measured, only moves her\n  from about 0.79 s after the key, so no plan's first arrow goes down before 0.8 s), and which way she faces, by her keys and by the frame, which decides whether a throw taps the arrow to turn her first.\n- **The Mover** (`mover.py`): one route move (`motion.route.Move`) at a time, closed loop: a look, one key plan from\n  wherever she stands, a look once she has settled. It is the fallback for moves the chain planner can't predict\n  (climbing down a rope, which needs her lined up on its top; jumping off a rope sideways; run-ups she has to back off\n  for), and gets her off ropes.\n- **The Navigator** (`navigator.py`, 4,437 lines): gets her onto a platform. Each **pass** looks, plans a route\n  (`motion.route.Planner`, Dijkstra over every move the physics allows), and chains as many of its moves as it can\n  predict into one continuous key plan (`motion.flow.Flow.chain`: a **chain** of **legs**, one leg per move; a chain is\n  cut off for length after 5 legs or 3.5 s, `flow.MAX_LEGS` and `MAX_SECONDS`, and the next follows on). While a chain plays it\n  **glances** at her minimap dot and HP at perception's 15 states a second: a touch or being off the planned path cuts\n  the plan; a monster coming into a leg still to come has the chain **replanned** and spliced in where she'll be 40 ms\n  on; late in a chain the next one is planned from a look and **queued**, so she runs on without stopping.\n\nMonsters are why the navigator is so large. Without an **escort** (mode `avoid`), each chain keeps clear of every\nmonster: her body's box against each monster's wherever it can walk by then. A blocked move costs extra so a way around\nwins, else she waits a few looks, else the **evade step** takes her to a refuge, else she goes past. With an escort\n(modes `hunt` and `transit`: the hunter's fights on the way, `behavior.fight.FightOnTheWay`, plugged in through the\n`Escort` protocol) she shoots what's in her\nway and keeps clear only of the kinds whose touch counts. Special handling covers her invulnerability after a touch\n(1.45 s, during which her chains may pass a monster), the top of a rope (hanging under it until the way up clears) and\nwhere a knock lands her.\n\nTwo smaller modules deal with keys themselves: **keymap** follows her keys to wherever the game's KEY BINDINGS window\nshows their functions and remembers that per character; **timeline** runs MapleHelper's own combo code on a virtual\nclock, so tests and the `combo` and `do` commands play exactly what the helper plays, and loads her setup from\n`config.toml`.\n\nBy the layer rules (`tests/test_architecture.py`) control may import perception, localization and motion (plus the\nshared modules); behavior sits above it and drives it: the hunter owns her `Actions` and makes navigators\n(`Hunter.navigator`, with the fights on the way as escort or without), the tour and the hunt loop call `Navigator.go` /\n`begin` + `step`, and the Lie Detector retreat builds its own navigator on `Actions.moves_only()`.\n",
+ "groups": [
+  {
+   "id": "keys-out",
+   "title": "Key plans and the mailbox to the player",
+   "summary": "Actions turns her actions into key plans and respects her attack and arrow locks; client hands every plan to the elevated player as a file and reads its answer.",
+   "modules": [
+    "gamelab/control/actions.py",
+    "gamelab/control/client.py"
+   ]
+  },
+  {
+   "id": "one-move",
+   "title": "The Mover: one move, closed loop",
+   "summary": "A single route move from wherever she stands, with a look before and after; the fallback for what a chain can't predict, and getting off ropes.",
+   "modules": [
+    "gamelab/control/mover.py"
+   ]
+  },
+  {
+   "id": "navigator",
+   "title": "The Navigator: routes, chains, glances, replans",
+   "summary": "A trip as a loop of passes: look, plan, chain, deal with monsters, send, watch, cut or splice, queue the next chain.",
+   "modules": [
+    "gamelab/control/navigator.py"
+   ]
+  },
+  {
+   "id": "her-keys",
+   "title": "Her keys and the helper's combos",
+   "summary": "Which key does what (followed off the game's window, remembered per character), MapleHelper's combos as exact timelines, and the package overview.",
+   "modules": [
+    "gamelab/control/keymap.py",
+    "gamelab/control/timeline.py",
+    "gamelab/control/__init__.py"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "path": "gamelab/control/__init__.py",
+   "title": "Package overview",
+   "tagline": "The control package's table of contents and its import rule.",
+   "summary": "Only a docstring: what each control module is for (actions, mover, navigator, client, player, alarm, lie_recorder, rolling, timeline) and what control may import.",
+   "details_md": "The package docstring describes control as \"decisions turned into key plans for the elevated key player, and the\nclosed loops that carry out moves and routes\", plus the player itself and the Lie Detector alarm. It lists the modules\none line each and states the rule `tests/test_architecture.py` enforces: control may import perception, localization,\nmotion and the shared modules.\n\nIt also records one constraint that shapes the whole package: the player (`player.py`) runs as administrator and loads\nits code once, so what it imports must stay small. `tests/test_architecture.py` checks it (`test_the_elevated_player_loads_only_what_it_needs`):\nloading the player must bring in nothing of behavior, motion, localization, attack, ui, the simulator, the game data or\ngamelab's C pieces. So `player.py` (another slice) imports only `paths`, `window`, `control.alarm` and the Lie Detector's\nspotter, while `client.py`, `actions.py`, `mover.py` and `navigator.py`, which run in the ordinary (unelevated)\ncommand processes, import freely from the layers below.\n\nThe file defines no names; there are no key items.\n",
+   "lines": 16,
+   "key_items": [],
+   "inputs": [],
+   "outputs": [
+    "the package's docstring (documentation only)"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [],
+   "gotchas": [
+    "Defines nothing: importing gamelab.control alone loads no submodule."
+   ],
+   "tests": []
+  },
+  {
+   "path": "gamelab/control/navigator.py",
+   "title": "Navigator",
+   "tagline": "Gets her to a platform: plans, chains moves into one plan, watches, replans.",
+   "summary": "The biggest file in the stack (4,437 lines). A trip (`go`, or `begin` then `step`) is a loop of passes: look, plan a route (motion.route.Planner), chain as many predictable moves as possible into one key plan (motion.flow.Flow.chain), deal with any monster in the way (shoot, go around, hop, wait, evade, or pass), send the chain and watch it about 15 times a second, cutting it, splicing in a replan, or queuing the next chain as she goes. Moves the chain can't predict go to the Mover.",
+   "details_md": "**How the file is laid out.** Most of its length is tunables with the measurements behind them, and a few large\nprocedures. Line ranges:\n\n| Lines | Part | What's there |\n|---|---|---|\n| 1-41 | docstring | look -> plan -> chain -> one key plan -> check where she landed |\n| 78-775 | tunables | 167 module-level constants (tunables, feature flags, the mode names), most with the incident or A/B numbers behind them |\n| 778-1041 | types | `Escort` (what the fights on the way provide), `TopPrice`, `_Wait`, `Trip`, `KeyNames`, `_Running`, `_Ahead`, `Choice`, `TripState` |\n| 1043-1218 | trip API | `__init__`, `go`, `begin`, `step`, `leaves_at`, `fresh` |\n| 1220-1337 | `_pass` | one pass: the decision procedure |\n| 1341-1487 | the route | `_look`, `_plan`, `_route` (a way chosen and kept), `_way_through` (the loot chain), `_penalty`, `_made` |\n| 1488-1716 | monsters for a plan | `_chain_monsters`, `trip_monsters`, `remembered`, `hidden_tracks`, `_walking`, `_toucher`, `_ghost` |\n| 1717-2147 | meeting monsters | `_chain`, `_pricing`, `_clear_landing`, `_meet`, `_shoot_ahead`, `_last_shot`, `_regardless`, `_wait_for_monster`, `_worth_waiting` |\n| 2148-2475 | the evade step | `_evade_step`, `_refuge`, `_contact`, `_go_past`, `_within_window`, `_around` |\n| 2476-2877 | carrying out | `_carry_out_chain`, `_carry_out_move`, `_move_watch`, `_arrival_clear`, `_onto_platform`, `_rope_top`, `_immunity`, `_after_chain`, `_note_landing` |\n| 2878-3164 | the watch | `follow`, `_watch`, `_watching` (the glance loop), `_landing_calls` |\n| 3165-3500 | replanning | `_switch`, `_take_over`, `_splice_point`, `_stop_calls`, `_knock_landing`, `_keys_seen`, `_queued_meets` |\n| 3501-3981 | ropes | `_climb_on`, `_hang_check`, `_hang`, `_hang_judge`, `_walks_off`, `_take_now`, `_knock_cost` |\n| 3982-4255 | glance helpers, follow-ons | `_coming`, `_room_to_stop`, `_track_of`, `_placed`, `recover`, `_tail`, `_look_ahead`, `_queue_next` |\n| 4257-4437 | module helpers | `rope_at_top`, `standing`, `fresh_touch`, `_key`, `_arrow_at`, `_stood` |\n\n**Modes** (`go(mode=...)`). `avoid` (no escort): looks cover the whole screen and every chain keeps clear of every\nmonster. `hunt` (with an escort, the default then): before each chain she shoots what's in reach, at most\n`ON_WAY_TRIES` (5) times a platform, and what's in the way of a move along her platform (`MAX_FIGHTS`, 3 in a row).\n`transit` (the hunt loop's trips to its objectives, and its stand-by trip at the end): only what's in the way,\nwithout finishing what she hurt. With an\nescort a chain keeps clear only of kinds whose touch counts (`Escort.threat`); on a map where none counts (the first\nmap) chains are planned blind.\n\n**Monsters as the planner sees them.** A chain's monsters (`_chain_monsters`) are `MonsterTrack`s: every monster in the\nlook's state (the whole screen, 15 states a second), each walking the way perception says it heads at its kind's speed\nfrom the game data (a standing one either way for up to `STAND_UNSURE_S`, 1 s), plus those her memory saw on the chain's\nplatforms within `TRIP_MEMORY_S` (2 s) that the look missed, the feed's tracks out of sight, and the monster the last cut\nwas for. `flow.danger` checks her body's box against each one's box wherever it can be by then, every 0.05 s of each leg.\n\n**Her invulnerability.** After a touch she can't be touched for 1.45 s (`perception.touches.INVULNERABLE_S`). Chains are\nplanned with no touch counting before that ends, less `IMMUNE_MARGIN_S` (0.15 s), so she may pass a monster then\n(`IMMUNE`); the planning's own time is taken out again before a chain goes (`IMMUNE_RECHECK`). No fight starts and the\ntrip's `until` isn't asked during that window (`POST_HIT`): fighting from wherever a hit knocked her kept her there.\n\n**Feature flags.** Most behaviour since 2026-10-26 sits behind a module switch, each with its measurements: `TOUCH_CUTS`,\n`IMMUNE`, `POST_HIT`, `REACT`, `REPLAN`, `KNOCK_REPLAN`, `LANDING_CLEAR`, `MEET_WALK`, `EVADE` with the contact rule\n(`CONTACT`) and the evade review's R2-R7 (`WATCH_MOVES` R2, `STAND_WINDOW` R3, `AROUND_ALL` R4, `UNSEEN_AVOID` R5,\n`QUEUE_CHECK` R6, `TOUCHER_S` R7), `ROPE_TOP`, `ROPE_CUT`, `ROPE_DROP`, `DROP_RELOOK`, `ROPE_HANG`\nwith `HANG_LONGER` and `HANG_TAKE`, `ARRIVE_STAND`, `PASS_WINDOW`. Measured and left off: `BLOCK_MEMORY`, `PASS_AVOID`,\n`REFUGE_WORTH`, `TOUCHER_ALL`, `SAFE_PASS`, `QUEUE_SPREAD`.\n\n**Like a player, not the same way every time.** Each trip weighs every move by a random 1 to 1 + `variety`\n(`route.NOISE`, 0.35), kept through its replans, so near-equal routes take turns, and Flow varies where moves start.\nChoosing among whole ways (`route.ROUTES` over 1, `--ways 3`) is off by default: 3 ways made as much EXP but picked up\nfewer drops in the harness.\n\n**Chain length.** `Flow.chain` stops a chain after 5 legs or once it passes 3.5 s (`flow.MAX_LEGS`, `MAX_SECONDS`): it\nends 'long', and the watch plans the next one late in it (`_look_ahead`, `_queue_next`) so she runs on.\n\n**Small public helpers** others use: `leaves_at` (where the quickest way leaves her platform: the hunt loop),\n`first_clear` (the first of several walk goals that is clear of a look's monsters: behavior.targeting),\n`fresh_touch` and `rope_at_top` (behavior.hunter, behavior.fight).\n",
+   "lines": 4437,
+   "key_items": [
+    {
+     "name": "Navigator",
+     "kind": "class",
+     "line": 1043,
+     "signature": "class Navigator: def __init__(self, senses: Senses, actions: Actions, model: MapModel, *, log=print, health: Callable[[Scene], None] | None = None, escort: Escort | None = None, variety: float | None = None, rng: random.Random | None = None, memory=None, moves=None, danger: Callable[[], object] | None = None, price: Callable[[int, str], TopPrice | None] | None = None)",
+     "summary": "Holds the route Planner, a Mover, a Flow (with her live key names: KeyNames), a monster Tracker and what persists between trips (when each move was last set off on, monsters already reacted to, the map's kinds whose touch counts). Each trip's random move weights live in its TripState.",
+     "details_md": "Constructor hooks, all optional: `health(scene)` (the hunter's potions and safety stop), `escort` (behavior.fight.FightOnTheWay: fights on the way), `memory` (localization.memory: monsters seen anywhere), `moves` (behavior.keycheck.MoveWatch: told whether her jumps and runs moved her dot), `danger` (attack.danger model: breaks ties between refuge spots), `price(platform, kind)` (TopPrice: what her time up a rope is worth, for HANG_TAKE). `variety` defaults to route.NOISE (0.35); 0 for a retreat."
+    },
+    {
+     "name": "Navigator.go",
+     "kind": "method",
+     "line": 1129,
+     "signature": "def go(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6, until: Callable[[Scene], bool] | None = None, *, mode: str | None = None, scene: Scene | None = None, keep_off=(), vary: bool = True, stand_until: float | None = None, evade_s: float | None = None, refuge_s: float | None = None, toucher: bool = False, deadline_pass: bool = True, arrive_waits: int = 0) -> Trip",
+     "summary": "A whole trip onto platform dst (and to x on it): begin, then step until it's over; while looks fail (LookLost) she stands still until the deadline.",
+     "details_md": "`until(scene)` is asked before every chain: True ends the trip 'in position'. `scene` lets the caller's last look serve the first pass if no key went since and it shows her standing. `keep_off` platforms cost route.KEEP_OFF_S (8 s) a move onto them. The Lie Detector retreat passes its own budget (`evade_s`, `refuge_s`, `deadline_pass`, False while it lingers at a refuge, `toucher`, `arrive_waits`). Results: 'arrived', 'in position', 'timeout', 'too many misses', 'lost: not on any platform', 'no route from platform A to B'."
+    },
+    {
+     "name": "Navigator._pass",
+     "kind": "method",
+     "line": 1220,
+     "signature": "def _pass(self, st: TripState) -> Trip | None",
+     "summary": "One pass of a trip: the decision procedure from a look to a chain carried out.",
+     "details_md": "In order, each pass:\n1. Ends the trip on its deadline (`timeout`, or `timeout (at a refuge)`) or after `max_misses` misses.\n2. Unless this is a retreat's trip (`actions.kind` set), `client.check_alarm()`: the Lie Detector stops the trip.\n3. Looks (`_look`: a fresh look kept from the last chain, else `Mover.locate(mobs=True, wide=not fight)`), calls\n   `health(s)` (her potions and the safety stop, which raises), and ends 'in position' if `until(s)` says so (not\n   while she's invulnerable after a touch).\n4. `_onto_platform`: in the air, waits to land (`FALL_LOOKS` looks); on a rope, `Mover.off_rope`. Nowhere: 'lost'.\n5. On the destination platform: shoots a monster between her and x (escort), checks the walk on (`_arrival_clear`),\n   `Mover.walk_to(x)`, 'arrived'.\n6. In hunt mode, shoots what's in reach here (`_shoot_on_the_way`) and looks again.\n7. Plans (`_plan` -> `_route`), clears the way to the first move (escort), picks the monsters (`_chain_monsters`) and\n   chains (`_chain` -> `Flow.chain`: legs, keys and why it ended: 'done', 'monster', 'long', 'unpredictable').\n8. Meets a monster blocking the first move: `_meet` with an escort, else `_wait_for_monster`; either may end the pass\n   (look again) or hand back a chain planned past it. With an escort and nothing to meet, `_clear_landing`\n   (`LANDING_CLEAR`) may shoot or wait out a monster that makes the chain's last landing dear.\n9. Drops the chain if planning ate into her invulnerability (`_immunity_spent`).\n10. Carries out the chain (`_carry_out_chain`, replanned as it runs) or, with nothing chained, the first move alone\n    (`_carry_out_move`: the Mover).\n11. Checks for a rope's top (`_rope_top`), notes where she landed (`_note_landing`): a miss counts only if she ended\n    elsewhere with no touch and no deliberate stop.\n"
+    },
+    {
+     "name": "Navigator._route",
+     "kind": "method",
+     "line": 1382,
+     "signature": "def _route(self, st: TripState, src: int, x: float, dst: int) -> tuple[list[Move] | None, tuple | None]",
+     "summary": "The trip's route, weighed by its random weights and penalized (monster in the way, keep-off, can't); with route.ROUTES over 1 it chooses one of several ways and keeps it through replans.",
+     "details_md": "Penalties (`_penalty`): `AVOID_SECONDS` (6 s) for a move a monster was in the way of within `AVOID_MEMORY_S` (4 s), route.KEEP_OFF_S for one onto a keep-off platform, `CANNOT_S` (60 s) for one the mover couldn't do. Choosing among ways happens only with `route.ROUTES` over 1 (default 1: the quickest by the weights) and a trip that varies (`vary`). A chosen way (`Choice`) is dropped once she has set off on its move, is past it, it costs more than the quickest by more than route.STRETCH of the quickest, or it would take her back onto a platform."
+    },
+    {
+     "name": "Navigator._chain_monsters",
+     "kind": "method",
+     "line": 1520,
+     "signature": "def _chain_monsters(self, st: TripState, s: Scene, path: list[Move], start: float | None = None) -> tuple[list, list | None]",
+     "summary": "The monsters a chain keeps clear of (and those its run-on tail must avoid): the whole state's, walking as perception has them head, plus remembered, hidden and last-cut ones."
+    },
+    {
+     "name": "Navigator._meet",
+     "kind": "method",
+     "line": 1856,
+     "signature": "def _meet(self, st: TripState, s: Scene, path: list[Move], monsters: list, legs: list[Leg], why: str, planned_at: float, looked: float)",
+     "summary": "With an escort: what to do about a monster whose touch counts blocking the route (shoot, way around, hop, wait, evade, last shot, pass regardless).",
+     "details_md": "With an escort, when a monster whose touch counts stopped the chain:\n1. Her chains have stopped short of such monsters for `MEET_S` (8 s) without a move that got her where it was going:\n   go regardless, blind (a backstop event).\n2. The chain got some legs and stopped at a later one: shoot that monster from here if a star reaches it\n   (`_shoot_ahead`), else carry out what chained.\n3. The first move is blocked: shoot it from where she stands (`Escort.clear_for`), or from along her platform within\n   `SHOOT_WALK` (150 units, `MEET_WALK`); at most `MAX_FIGHTS` (3) shots in a row.\n4. A way around: the move, and each move of the next way offered that the same monsters block, cost `AVOID_SECONDS`\n   (6 s) more for `AVOID_MEMORY_S` (4 s) (`_around`, `AROUND_TRIES` 8).\n5. A hop over it (a chain with `hops=True`).\n6. Wait `WAIT_S` (0.3 s), up to `WAIT_LOOKS` (6), only where she's safe standing (`_safe_to_stand`) and waiting can\n   clear the way (`_worth_waiting`: its walk not known, it stands, or walking as seen it clears within `WAIT_AHEAD`,\n   2.4 s).\n7. Not safe here: the evade step (`_evade_step`).\n8. A last look and shot at it (`LAST_SHOT`), then `_regardless`: the chain planned as if that monster weren't there,\n   the others still kept clear of (a backstop event `NO_WAIT` or `WAIT_LOOKS`, with its episode).\n"
+    },
+    {
+     "name": "Navigator._wait_for_monster",
+     "kind": "method",
+     "line": 2070,
+     "signature": "def _wait_for_monster(self, st: TripState, s: Scene, path: list[Move], monsters: list, legs: list[Leg], why: str, planned_at: float, looked: float = 0.0) -> bool",
+     "summary": "Without an escort, a monster blocking the first move: where she can stand safely and waiting can clear the way, first a way around, then up to WAIT_LOOKS waits; otherwise the evade step and, failing that, a pass (_go_past)."
+    },
+    {
+     "name": "Navigator._evade_step",
+     "kind": "method",
+     "line": 2204,
+     "signature": "def _evade_step(self, st: TripState, s: Scene, path: list[Move], monsters: list, looked: float) -> bool",
+     "summary": "The contact rule, waiting at a refuge while it stays safe, or a new refuge, all within the blocked move's budget.",
+     "details_md": "The contact rule (`CONTACT`): a monster seen live within `CONTACT_LIVE_S` (0.5 s) that touches her within `CONTACT_S` (0.25 s) whatever she does (standing, or running either way) is a touch taken as given: the chain is planned in the invulnerability window after it. A refuge (`_refuge`): the nearest spot along her platform within `EVADE_WALK` (150 units), at least `EVADE_STEP_MIN` (8) away and `EVADE_IN` (22) in from its ends, tried every `SPOT_STEP` (5), where the step and standing `EVADE_HOLD_S` (1.5 s) stay clear; else the quickest single move off her platform that chains clear and costs the trip at most `EVADE_MOVE_S` (1.5 s) more. Budget: `EVADE_S` (3.5 s) from the move's first block, `EVADE_REFUGES` (4), and not with `EVADE_DEADLINE_S` (4 s) or less left of the trip. Then `_go_past`: the chain planned without the blocking monster, one at a time, `PASS_TRIES` (3), else blind; with `PASS_WINDOW` left out only within the window its first touch would open."
+    },
+    {
+     "name": "Navigator._carry_out_move",
+     "kind": "method",
+     "line": 2508,
+     "signature": "def _carry_out_move(self, st: TripState, s: Scene, path: list[Move], monsters=()) -> tuple[list[Move], Platform, Scene]",
+     "summary": "The route's first move alone through the Mover, watched (cut on a touch, HP drop, off the move, a rope top to hang under) and its run-ups checked against the monsters.",
+     "details_md": "MoveCut -> `recover` and replan (a touch starts the POST_HIT window). MoveRefused -> the move costs AVOID_SECONDS and counts a refusal (after `REFUSALS`, 3, it goes unchecked). ValueError (a move it can't do from here) -> `CANNOT_S` for the rest of the trip."
+    },
+    {
+     "name": "Navigator.follow",
+     "kind": "method",
+     "line": 2878,
+     "signature": "def follow(self, legs, keys, hp: float, dst: int, why: str, trip: Trip, st: TripState | None = None, path: list[Move] | None = None, monsters=(), since: float | None = None, replan: bool = False) -> tuple[str, list]",
+     "summary": "Sends a chain's plan and runs the watch; any exception (Ctrl+C included) cancels every plan it sent so no keys play on unwatched.",
+     "details_md": "A chain cut off for length ('long') gets a tail (`_tail`): the plan keeps her running on with the arrow held (short of the next move by `RUN_ON_ROOM`, 50 units) or standing, long enough for a look to place her and the next chain to be planned. The plan goes out with `end_ms` = the predicted landing plus the tail, after `Actions.hold_back`, via `client.send` (name 'flow')."
+    },
+    {
+     "name": "Navigator._watching",
+     "kind": "method",
+     "line": 2960,
+     "signature": "def _watching(self, current, hp, dst, send, st, since, queued, sent, cut, stood, off_since, off_leg, ahead, over, first, moved, first_at, last_at, dot, glanced, top, checked, withdrawn) -> tuple[str, list]",
+     "summary": "The glance loop while chains run: queue the next, check touches and the path, hang under a rope's top, react to monsters coming, replan, cut.",
+     "details_md": "Each turn of the loop waits for the feed's next frame, `GLANCE_S` (30 ms) at most, and takes the newest state\n(perception gives 15 a second, each with the whole screen's monsters and their tracks):\n- **Follow-on.** `LOOK_AHEAD` (0.9 s) before the chain's last landing, `_look_ahead` looks around; then a look placing her\n  (`_check_at`: `CHECK_AFTER`, 0.05 s, after she's back on the ground for good, and no sooner than `CHECK_LEAD`, 0.25 s,\n  before the plan ends), from which `_queue_next` plans and sends the next chain.\n- **Its end.** With nothing to follow, a tail kept for a look is cut at the last leg's end; within `END_WATCH` (0.1 s) of\n  the end it polls every 5 ms (`END_POLL_S`).\n- **A glance** (`Senses.glance`: her minimap dot and HP), each with its frame's time.\n- **Splices**: whether the player took the spliced plan (`client.taken`); if not, she stops.\n- **Queue check** (`QUEUE_CHECK`): 2 glances before a queued chain whose first leg is a drop or a climb starts, its\n  flight against the newest tracks; a meeting withdraws it.\n- **Cuts**: a touch told since the look, or HP down by `HIT` (0.4%) -> 'touched'; standing `OFF_PATH_S` (0.109 s) off the\n  planned path, or `OFF_LEG_S` (0.046 s) where the leg doesn't go, or still at a run's start while the plan has her\n  `OFF_SPAN` (30 units) along -> 'off the path'; a landing the hunt wants to act on (`_landing_calls`); a climb whose way\n  up is blocked -> hang (`ROPE_HANG`).\n- **Monsters coming** (`REACT`): one the plan didn't know meets a leg ahead -> replan and splice (`_switch`), else stop\n  where there's room. Every `BETTER_EVERY_S` (5 states) a replan for a better way.\n- **On a cut**: cancel the running and queued plans, then hang, climb on after a touch on a rope (`_climb_on`), or wait\n  for the knock's landing (`_knock_landing`).\n"
+    },
+    {
+     "name": "Navigator._switch",
+     "kind": "method",
+     "line": 3167,
+     "signature": "def _switch(self, st: TripState | None, running: _Running, dst: int, why: str, kind: str) -> _Running | None",
+     "summary": "REPLAN: the running chain replanned from where she'll be when new keys can act, against the newest state, and handed over (spliced) if it's worth it and not too late.",
+     "details_md": "Only from the ground, where the state has her on the plan's platform within `SPLICE_DRIFT` (20 units) of where the plan has her. 'monster': taken if anything chains. 'better': taken where the running chain stops short and the new one goes on past, or the new route is `SWITCH_GAIN_S` (0.25 s) cheaper; never within `SWITCH_MIN_S` (0.5 s) of the last switch, never the same way again. Dropped if the player would take it more than `SPLICE_LATE_S` (0.05 s) past its start or after a takeoff key (measured replans: p99 36 ms, the most 51)."
+    },
+    {
+     "name": "Navigator._splice_point",
+     "kind": "method",
+     "line": 3345,
+     "signature": "def _splice_point(self, running: _Running, t: float) -> tuple[float, Body] | None",
+     "summary": "Where the running plan can be taken over at its time t at the soonest: on a run or a stand, there (with the arrow the plan holds then); in or about to start a flight or climb, where it ends.",
+     "details_md": "A leg with a flight or a climb can't be changed from `KEY_COMMIT_S` (68 ms) before its takeoff key on (the key is the flight's start less `KEY_LEAD`: a jump's 65 ms lag, a drop's 0.28 s, a walk-off's stop time): the game has that key before new keys could act, so from then the splice point is where the leg lands her. With `SPLICE_PHYSICS` her place on a run comes from flow's own physics (`_ground`), not the span's straight line (off by up to 18 units early in a run)."
+    },
+    {
+     "name": "Navigator._queue_next",
+     "kind": "method",
+     "line": 4183,
+     "signature": "def _queue_next(self, st: TripState, running: _Running, ahead: _Ahead, dst: int, send) -> _Running | None",
+     "summary": "Looks until she stands on the running chain's last platform, plans the next chain from there and sends it to start the moment the running plan ends.",
+     "details_md": "Planned from a real look, not the predicted end: a landing 12.5 units off made the next running jump leave 12.5 units early, and landing late the next chain's keys came while she was still in the air. Refused (she stops) when she isn't seen standing in time (by `SEND_S`, 0.03 s, before the end), nothing chains, a monster is in the way of the next move (escort), or a monster seen could get near the chain."
+    },
+    {
+     "name": "Navigator._hang",
+     "kind": "method",
+     "line": 3724,
+     "signature": "def _hang(self, rope: Rope, y: float, why: str) -> str",
+     "summary": "ROPE_HANG: hang on the rope about 80 under its top until the way up clears, a touch is told, or the wait (HANG_S 2 s, longer for monsters predicted to walk off) is over; then climb the rest.",
+     "details_md": "Judged at the start and every look (`_hang_judge`): `HANG_LONGER`: where every monster in the way is predicted to walk off, she hangs until that predicted clear plus `HANG_MARGIN_S` (0.3 s), if that is past `HANG_S` and at most `HANG_HORIZON_S` (3 s) from the hang's start; a monster that turns or stops puts it back to `HANG_S`; `HANG_TAKE` climbs at once where the rest of the wait, at what her time up there is worth (TopPrice.rate), costs more than the touch(es) and knock it avoids, and her HP stays over the safety reserve. Each hang is a 'rope_hang' telemetry event; a hang ending at HANG_S is a backstop event."
+    }
+   ],
+   "inputs": [
+    "looks (Scene) and glances (her dot, HP, the perception feed's whole-screen state with monster tracks) from localization.senses",
+    "the map model and every route move (motion.route.Planner), chains and touch checks (motion.flow.Flow)",
+    "what behavior plugs in: the escort (FightOnTheWay), until/health callbacks, her memory of monsters, the danger model, TopPrice, the keycheck's MoveWatch",
+    "her actions' locks, keys and facing (Actions); touches and her invulnerability (Senses.touched_since, invulnerable_until)"
+   ],
+   "outputs": [
+    "Trip results (how it ended, moves, misses, hits, kills, chains, waits, replans, time spent) for the hunter, tour, hunt loop, retreat and loot chain",
+    "key plans, splices and cancels to the player via client",
+    "telemetry: 'route', 'chain', 'move', 'moved', 'replan', 'trip', 'glance', 'monsters', and events (backstop, evade, landing, rope_hang, climb_on, follow, cannot, immune, move_cut, rope_top, replan)",
+    "whether each chain's jumps and runs moved her dot, told to behavior.keycheck's MoveWatch"
+   ],
+   "uses": [
+    "gamelab/character.py",
+    "gamelab/directions.py",
+    "gamelab/telemetry.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/memory.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/pose.py",
+    "gamelab/localization/scene.py",
+    "gamelab/localization/rate.py",
+    "gamelab/localization/senses.py",
+    "gamelab/localization/tracking.py",
+    "gamelab/localization/unseen.py",
+    "gamelab/localization/worldstate.py",
+    "gamelab/motion/bodies.py",
+    "gamelab/motion/flow.py",
+    "gamelab/motion/physics.py",
+    "gamelab/motion/route.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/perception/touches.py",
+    "gamelab/control/client.py",
+    "gamelab/control/actions.py",
+    "gamelab/control/mover.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/inbox/<plan id>.json",
+     "mode": "write",
+     "what": "each chain's plan, with end_ms (via client.send)"
+    },
+    {
+     "path": "lab/inbox/<running id>.splice",
+     "mode": "write",
+     "what": "a replanned chain taking over (via client.splice)"
+    },
+    {
+     "path": "lab/inbox/<plan id>.cancel",
+     "mode": "write",
+     "what": "a running chain cut short (via client.cancel)"
+    },
+    {
+     "path": "lab/outbox/<plan id>.json",
+     "mode": "read",
+     "what": "each chain's result (via client.wait)"
+    },
+    {
+     "path": "lab/ALARM.json",
+     "mode": "read",
+     "what": "the Lie Detector alarm, checked at every pass and hang glance"
+    }
+   ],
+   "concurrency": "No threads of its own: it runs on the calling hunt's thread. While a chain plays it waits for each new perception state (up to GLANCE_S, 30 ms; states come 15 a second from the perception feed, a separate process) and glances at it, while the elevated player process plays the plans at the same time. A glance with no state for GLANCE_LOST_S raises LookLost (Senses.glance).",
+   "tunables": [
+    {
+     "name": "ON_WAY_TRIES",
+     "value": "5",
+     "meaning": "bursts at what's in reach per platform passed through (hunt mode)"
+    },
+    {
+     "name": "MAX_FIGHTS",
+     "value": "3",
+     "meaning": "fights or shots in a row clearing the way, without a move between"
+    },
+    {
+     "name": "AVOID_SECONDS / AVOID_MEMORY_S",
+     "value": "6.0 s / 4 s",
+     "meaning": "extra route cost of a move a monster blocked, and for how long"
+    },
+    {
+     "name": "CANNOT_S",
+     "value": "60.0",
+     "meaning": "s added for the rest of the trip to a move the mover couldn't do"
+    },
+    {
+     "name": "WAIT_LOOKS / WAIT_S / WAIT_AHEAD",
+     "value": "6 / 0.3 s / 2.4 s",
+     "meaning": "looks spent waiting for a monster, their spacing, how far ahead a wait must clear the way"
+    },
+    {
+     "name": "MEET_S",
+     "value": "8.0",
+     "meaning": "s her chains may stop short of monsters without a move that arrives, then she goes regardless"
+    },
+    {
+     "name": "SETTLE_S",
+     "value": "0.35",
+     "meaning": "s after a plan she may still be sliding: a chain's first jump or drop waits"
+    },
+    {
+     "name": "ARRIVE_TOLERANCE",
+     "value": "20",
+     "meaning": "map units: close enough to the x she's sent to"
+    },
+    {
+     "name": "LOOK_AHEAD",
+     "value": "0.9",
+     "meaning": "s before a chain's last landing that the look around is taken"
+    },
+    {
+     "name": "CHECK_AFTER / CHECK_LEAD",
+     "value": "0.05 s / 0.25 s",
+     "meaning": "the look placing her for the next chain: after she's down, before the plan ends"
+    },
+    {
+     "name": "SEND_S",
+     "value": "0.03",
+     "meaning": "s before the running plan ends that the next chain must be sent by"
+    },
+    {
+     "name": "FRESH_S",
+     "value": "0.3",
+     "meaning": "s a look stays good enough to plan from, if no key plan went since"
+    },
+    {
+     "name": "AFTER_STILL_S",
+     "value": "0.35",
+     "meaning": "s at most waited for her to stand still after a chain"
+    },
+    {
+     "name": "GLANCE_S",
+     "value": "0.03",
+     "meaning": "s between glances while a plan runs"
+    },
+    {
+     "name": "OFF_PATH_S / OFF_LEG_S",
+     "value": "0.109 / 0.046",
+     "meaning": "s off the planned path (or where the leg doesn't go) that cut a plan"
+    },
+    {
+     "name": "STILL / STILL_S",
+     "value": "0.6 px / 0.109 s",
+     "meaning": "her dot within this, this long: she's standing"
+    },
+    {
+     "name": "OFF_SPAN",
+     "value": "30",
+     "meaning": "units the plan may have her along a run while her dot still stands at its start"
+    },
+    {
+     "name": "HIT",
+     "value": "0.004",
+     "meaning": "HP fraction lost that counts as a hit where no touch was told"
+    },
+    {
+     "name": "IMMUNE_MARGIN_S",
+     "value": "0.15",
+     "meaning": "s taken off her invulnerability window when planning through it"
+    },
+    {
+     "name": "STUCK_S / STUCK_GAP",
+     "value": "0.4 s / 12 units",
+     "meaning": "a chain whose dot never moved this long, this far under the platform: she's on a rope under its top"
+    },
+    {
+     "name": "TRIP_MEMORY_S",
+     "value": "2.0",
+     "meaning": "s her memory's monsters the look missed are kept clear of"
+    },
+    {
+     "name": "STAND_UNSURE_S",
+     "value": "1.0",
+     "meaning": "s a standing monster is planned as maybe setting off either way"
+    },
+    {
+     "name": "REACT_LEAD_S / REACT_AGAIN_S / REACT_ROOM",
+     "value": "0.25 s / 3.0 s / 50 units",
+     "meaning": "a monster coming: from how far ahead, how often per monster, room needed to stop"
+    },
+    {
+     "name": "STATE_S",
+     "value": "1/15 s",
+     "meaning": "between perception's states (localization.rate.HZ 15)"
+    },
+    {
+     "name": "SPLICE_LEAD_S",
+     "value": "0.04",
+     "meaning": "s from now that a splice can take over at the soonest"
+    },
+    {
+     "name": "KEY_COMMIT_S",
+     "value": "0.068",
+     "meaning": "s: a takeoff key this close after a splice point is the game's already"
+    },
+    {
+     "name": "BETTER_EVERY_S",
+     "value": "5 states (about 0.33 s)",
+     "meaning": "between replans for a better way (a guess)"
+    },
+    {
+     "name": "SWITCH_GAIN_S / SWITCH_MIN_S",
+     "value": "0.25 s / 0.5 s",
+     "meaning": "a better way must save this much, and not within this of the last switch (guesses)"
+    },
+    {
+     "name": "SPLICE_DRIFT",
+     "value": "20",
+     "meaning": "units: a replan only where the state has her this near where the plan does"
+    },
+    {
+     "name": "SPLICE_LATE_S",
+     "value": "0.05",
+     "meaning": "s past its start a replan may land before it's dropped"
+    },
+    {
+     "name": "KNOCK_LAND_S / KNOCK_STILL_DX",
+     "value": "0.8 s / 3 units",
+     "meaning": "after a touch, how long the knock's landing is waited for, and when her slide has ended"
+    },
+    {
+     "name": "SHOOT_WALK",
+     "value": "150",
+     "meaning": "units: the longest walk along her platform to shoot a monster by a landing or in the way"
+    },
+    {
+     "name": "LAND_WAITS",
+     "value": "4",
+     "meaning": "looks spent waiting for a monster to clear the last landing (a guess)"
+    },
+    {
+     "name": "EVADE_WALK / EVADE_HOLD_S / EVADE_MOVE_S",
+     "value": "150 units / 1.5 s / 1.5 s",
+     "meaning": "refuge spot reach, how long she must be able to stand there, how much dearer a refuge move may make the trip"
+    },
+    {
+     "name": "EVADE_S / EVADE_REFUGES / EVADE_DEADLINE_S",
+     "value": "3.5 s / 4 / 4.0 s",
+     "meaning": "the evade step's budget per blocked move, refuges at most, trip time left below which she just goes past"
+    },
+    {
+     "name": "PASS_TRIES",
+     "value": "3",
+     "meaning": "monsters left out of a pass one at a time before it's planned blind"
+    },
+    {
+     "name": "CONTACT_S / CONTACT_LIVE_S",
+     "value": "0.25 s / 0.5 s",
+     "meaning": "the contact rule: a touch within this whatever she does, from a monster seen this recently"
+    },
+    {
+     "name": "HANG_UNDER / HANG_FLOOR",
+     "value": "80 / 70",
+     "meaning": "units under a rope's top she hangs; nearer the top than HANG_FLOOR she just climbs on"
+    },
+    {
+     "name": "HANG_S",
+     "value": "2.0",
+     "meaning": "s she hangs under a rope's top at most (unless HANG_LONGER)"
+    },
+    {
+     "name": "HANG_HORIZON_S / HANG_MARGIN_S",
+     "value": "3.0 s / 0.3 s",
+     "meaning": "HANG_LONGER's furthest wait and margin past the predicted clear"
+    },
+    {
+     "name": "KNOCK_PUSH",
+     "value": "270.0",
+     "meaning": "units/s a touch's knock throws her (about 87 units on the ground)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-21",
+     "what": "Glances judged by how long something lasts (STILL_S, OFF_PATH_S...), not by counts of glances",
+     "why": "so it means the same however often she's glanced at (until then 3, 3, 2 and 2 glances 63 ms apart)"
+    },
+    {
+     "date": "2026-10-24",
+     "what": "The kinds whose touch counts worked out at a trip's start, not between a look and its chain",
+     "why": "the escort's first read of the game data took 535 ms on Tree Dungeon, a chain then planned from a look that old"
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Her memory's monsters kept clear of on fighting trips, those in view too (TRIP_MEMORY_S)",
+     "why": "live on 2026-10-25 a Horny Mushroom the looks had missed on 23 was dropped from the plan; she landed beside it (6 touches and a fall)"
+    },
+    {
+     "date": "2026-10-27",
+     "what": "Landings with clearance: a chain's moves done where they land the cheapest; the monster making a landing dear shot first or waited out (LANDING_CLEAR)",
+     "why": "the user: \"the character should actively try to move away from the mob to attack it\""
+    },
+    {
+     "date": "2026-10-28",
+     "what": "Any touch told (a MISS too) cuts a chain (TOUCH_CUTS); chains plan through her invulnerability (IMMUNE)",
+     "why": "before, only HP dropping did, so a MISS (half her touches live) changed nothing and she went on into the same monster"
+    },
+    {
+     "date": "2026-10-28",
+     "what": "The evade step: refuges, the contact rule, passes, the mover's moves watched (EVADE, R2-R7)",
+     "why": "the user, watching a movement-only walk: \"there was no attempt to even evade\"; 57% of 148 touches came after a blocked move was handed to the unwatched mover"
+    },
+    {
+     "date": "2026-10-28",
+     "what": "Key names read from her actions at every chain (KeyNames), not taken at the navigator's start",
+     "why": "keys followed to where the game has them (keymap) must reach the next chain"
+    },
+    {
+     "date": "2026-10-29",
+     "what": "ROPE_CUT, ROPE_DROP, ARRIVE_STAND, PASS_WINDOW (the evade work's review)",
+     "why": "chains from a rope's top cut 112 times in 4 minutes; a drop that ended on a rope replanned 12 times in 57 s; a retreat 'arrived' where a monster kept touching her"
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Chains planned by the whole state's monsters, walking as perception has them head at their kind's game-data speed; no quick look after a touch (POST_HIT window instead)",
+     "why": "the user: \"make motion planing work on the 15fps whole screen result\"; the quick look planned from monsters a median 1.2 s old"
+    },
+    {
+     "date": "2026-10-30",
+     "what": "REPLAN: the running chain replanned at every state and spliced in",
+     "why": "the user: \"ideally we probably want to regenerate motion plan at every frame so any hit/new spawn will cause motion plan to react immediately\""
+    },
+    {
+     "date": "2026-10-30",
+     "what": "MEET_WALK: a monster in the way shot from along her platform too",
+     "why": "the user: \"in general you should kill all the mobs that are in the way\""
+    },
+    {
+     "date": "2026-10-31",
+     "what": "DROP_RELOOK, SPLICE_PHYSICS, KNOCK_STILL (the review of 2026-10-31)",
+     "why": "a drop judged from a frame before the fall; a splice's start off by a median 29 units/s; plans from a knock's landing while she still slid (18 of 28 landings elsewhere came right after one)"
+    },
+    {
+     "date": "2026-11-01",
+     "what": "A replan dropped as too late is asked about again at the next state (LATE_RETRIES)",
+     "why": "the load that makes a replan late makes the next one late too; marked for 3 s, the monster went unheeded"
+    },
+    {
+     "date": "2026-11-02",
+     "what": "ROPE_HANG: hang under a rope's top until the way up clears, HANG_S 2 s",
+     "why": "19-23 of 170 touches in an hour of recordings came at the top of one rope; the user: \"otherwise 2s is what we wait\""
+    },
+    {
+     "date": "2026-11-02",
+     "what": "HANG_LONGER and HANG_TAKE kept on",
+     "why": "the user's rule (\"keep the rope rule on\"), though measured worse for her than the plain 2 s hang on the merged world"
+    },
+    {
+     "date": "2026-11-03",
+     "what": "ARRIVE_CHECK_POST_HIT: after a touch an escorted trip's walk on arrival is checked as an unescorted one's (on for the magician)",
+     "why": "the user: \"One-line patch for her now, then planner\"; she walked through a chasing Horny Mushroom and was knocked off 10 again and again"
+    }
+   ],
+   "gotchas": [
+    "Chains are planned from a look that shows her standing, never from where the last chain was predicted to end.",
+    "Her minimap dot can sit still for 63 ms in mid-air (near a jump's top, or within a minimap pixel at full speed): standing is judged over STILL_S and never while the plan has her airborne.",
+    "Hanging on a rope just under a platform's top, her dot snaps onto the platform (from up to 33 units under it; 17 by a rope since localization.pose.ROPE_TOP_GAP): a chain whose dot never moved there means she's on the rope, where a jump or an arrow does nothing (ROPE_TOP, Mover.off_rope).",
+    "A replan is only spliced in from the ground: in a flight or past a takeoff key the next state asks again.",
+    "With a player started before splices existed, a replan cuts the running plan and resends: every key is let go for 15-35 ms.",
+    "The Lie Detector check at each pass and hang glance raises LieDetectorAlarm, except on a retreat's own trip (actions.kind set).",
+    "TripState.paused shifts the trip's clocks after a LookLost stand-still, and drops looks and sightings from before it.",
+    "Most of its behaviour is switched by module-level flags; tests and the harness flip them to measure each."
+   ],
+   "tests": [
+    "tests/test_navigation.py",
+    "tests/test_replan.py",
+    "tests/test_evade.py",
+    "tests/test_rope_hang.py",
+    "tests/test_rope_top.py",
+    "tests/test_landing.py",
+    "tests/test_knock.py",
+    "tests/test_touches.py",
+    "tests/test_feed.py",
+    "tests/test_loot_chain.py",
+    "tests/test_stay_or_go.py",
+    "tests/test_clawed.py",
+    "tests/test_character.py",
+    "tests/test_framecheck.py",
+    "tests/test_geometry.py",
+    "tests/test_harness.py",
+    "tests/test_jump_reach.py",
+    "tests/test_keymap.py",
+    "tests/test_magician_hunt.py",
+    "tests/test_panel_speed.py",
+    "tests/test_records.py",
+    "tests/test_sim.py",
+    "tests/test_grind.py",
+    "tests/test_player_splice.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/mover.py",
+   "title": "Mover",
+   "tagline": "One route move at a time, closed loop: look, one key plan, settle, look.",
+   "summary": "Carries out a single route move (motion.route.Move) from wherever she stands, the way a player does it: run toward the end and jump on the way, run at a rope and jump onto it holding up, walk and drop in one go. The navigator hands it the moves a chain can't predict; the hunter uses it to get her off ropes. Its key plans go through Actions (locks respected), or, when the navigator watches the move, out with client.send and a check between glances.",
+   "details_md": "**Looking.** `locate()` asks `Senses.look` until a look places her (`where` set): up to 40 tries 0.25 s apart (about\n10 s), moving the mouse inside the game on the 4th (a tooltip from another program once hid the minimap), then\n`RuntimeError(\"can't find her minimap dot\")`. Its first look waits for her keys' effect to show\n(`Senses.fresh_after`). `settle(seconds=2)` looks every 0.08 s until two looks in a row have her on the same platform with\nher dot within 0.6 minimap px: she has stopped. With `since` (her dot where the move began) it also sets `still`, whether\nevery look had her dot there: keys that moved her nowhere, which the navigator reads as \"on a rope under its top\".\n\n**`do(move, s)`** dispatches on `move.kind`, then returns `settle()`:\n- `jump` (`_run_and_jump`): run toward the end and press jump so she leaves the ground at the move's takeoff (or\n  `route.JUMP_FROM`, 33 units, from the end). A run shorter than `MIN_RUN` (15 units: keyed 155 ms after the arrow, past\n  the 150 ms blind spot, so she leaves at full speed) first walks back to the move's start. The arrow is let go just\n  before she lands (`flow.ARROW_LAG`), the flight time from `physics.fly`.\n- `walk_off`: from at least `MIN_RUN` in from the end (else she backs off to `MIN_RUN + RUN_UP_SPARE` first), so she\n  leaves at full speed; held long enough for where she lands plus 20 units.\n- `drop`: walk to within 20 units of the spot, then down, jump 120 ms later, down let go at 200 ms\n  (`DROP_DOWN_UP_MS`). Where a drop there wouldn't go through (by a rope's top, a foothold that forbids it) or would come\n  down by a cliff (`route.drop_clear`), it walks to the nearest spot that would (`route.drop_spots`), or exactly to the\n  move's own spot (`DROP_AT_SPOT`).\n- `climb` (`_climb`): run at the rope and jump `grab_lead` (WALK_SPEED x JUMP_SPEED / GRAVITY, about 41 units) before it,\n  up held from the jump on; walk in holding up where the rope comes down to within 10 of her feet; jump straight up\n  from under it (within 6 units). Up is held `climb_ms(height)`: height / CLIMB_SPEED + 500 ms. A rope ending more than\n  87 above her feet (ROPE_REACH 95 less GRAB_MARGIN 8) raises ValueError. Near a portal, up goes down only 100 ms after\n  the jump key (`PORTAL_UP_MS`).\n- `climb_down`: line up on the rope's top (walk within 12 units, then up to 3 on-screen nudges to within 6 px of the rope\n  found within 70 px of where the map puts it), then hold down.\n- `jump_up`: walk to the takeoff and jump straight up.\n- `rope_jump` (`_rope_jump`): onto the rope, a look, a climb to the move's hang height if off by more than 15 units,\n  then the arrow and the jump 40 ms later, up held for a rope it jumps onto or the arrow let go just before landing. Not\n  on the rope at the look: nothing more, the navigator replans.\n\n**Watched moves.** With `watch` set (the navigator's `_move_watch`), `_send` sends the plan with `client.send` and asks\n`watch()` between glances; a reason (a touch, HP dropping, off the move, a rope top to hang under) cancels the plan,\nevery key let go, and raises `MoveCut`. With `clear(x0, x1)` set, a run-up's or back-off's walk is checked against the\nmonsters first: into one raises `MoveRefused` before any key goes (a climb's back-off switches to climbing from under the\nrope if that walk is clear).\n\n**Ropes outside a trip.** `off_rope` gets her off a rope: up (held 0.9 s) if she's within 70 of a top that leads onto\na platform; down past its bottom onto the platform under it where the top leads onto none (959's, under 17's block) or\nthe caller asks for `down` (up did nothing); else a sideways jump toward the side whose fall lands on a platform.\n`hang` / `unhang` put her on a rope at a height and back (attack.ropes' places to wait).\n",
+   "lines": 522,
+   "key_items": [
+    {
+     "name": "Mover",
+     "kind": "class",
+     "line": 91,
+     "signature": "class Mover: def __init__(self, senses: Senses, actions: Actions, model: MapModel, log=print)",
+     "summary": "Carries out route moves one at a time, each from a look at where she is; `watch` and `clear` are the navigator's hooks."
+    },
+    {
+     "name": "Mover.do",
+     "kind": "method",
+     "line": 239,
+     "signature": "def do(self, m: Move, s: Scene | None = None) -> Scene",
+     "summary": "Dispatches a move by kind (climb, climb_down, jump_up, jump, walk_off, drop, rope_jump) and returns a look once she has settled."
+    },
+    {
+     "name": "Mover.locate",
+     "kind": "method",
+     "line": 109,
+     "signature": "def locate(self, tries: int = 40, mobs: bool = False, wide: bool = False, after: float | None = None) -> Scene",
+     "summary": "A look that places her; up to ~10 s, nudging the mouse once in case a tooltip hides the minimap."
+    },
+    {
+     "name": "Mover.settle",
+     "kind": "method",
+     "line": 124,
+     "signature": "def settle(self, seconds: float = 2.0, since: tuple[float, float] | None = None) -> Scene",
+     "summary": "Looks until she stands still on a platform; with `since`, records whether her dot never moved."
+    },
+    {
+     "name": "Mover._watched",
+     "kind": "method",
+     "line": 153,
+     "signature": "def _watched(self, events: list, name: str) -> None",
+     "summary": "Sends a plan without waiting, asks `watch` between glances, cancels it and raises MoveCut on a reason; cancels on any other error too."
+    },
+    {
+     "name": "Mover.walk_to",
+     "kind": "method",
+     "line": 186,
+     "signature": "def walk_to(self, x: float, tolerance: float = X_TOLERANCE, tries: int = 4, s: Scene | None = None) -> Scene",
+     "summary": "Walks along her platform to map x, up to 4 walks, pick-up pressed; keeps its walks for the trip's record."
+    },
+    {
+     "name": "Mover._run_and_jump",
+     "kind": "method",
+     "line": 307,
+     "signature": "def _run_and_jump(self, m: Move, s: Scene) -> None",
+     "summary": "Run toward the end and jump at the takeoff; back up first if the run is under MIN_RUN; arrow let go just before landing."
+    },
+    {
+     "name": "Mover._climb",
+     "kind": "method",
+     "line": 329,
+     "signature": "def _climb(self, m: Move, s: Scene, to: float | None = None) -> None",
+     "summary": "Grab a rope on the run (jump at it holding up), walk into it, or jump straight up from under it."
+    },
+    {
+     "name": "Mover._drop",
+     "kind": "method",
+     "line": 282,
+     "signature": "def _drop(self, m: Move, s: Scene) -> None",
+     "summary": "Walk to a spot where a drop goes through cleanly, then down + jump."
+    },
+    {
+     "name": "Mover._walk_off",
+     "kind": "method",
+     "line": 265,
+     "signature": "def _walk_off(self, m: Move, s: Scene) -> None",
+     "summary": "Walk off the end from at least MIN_RUN in, so she leaves at full speed as the route assumes."
+    },
+    {
+     "name": "Mover._rope_jump",
+     "kind": "method",
+     "line": 392,
+     "signature": "def _rope_jump(self, m: Move, s: Scene) -> None",
+     "summary": "Onto the rope, a look, adjust the height, then jump off sideways onto a platform or another rope."
+    },
+    {
+     "name": "Mover.off_rope",
+     "kind": "method",
+     "line": 480,
+     "signature": "def off_rope(self, s: Scene, rope: Rope | None = None, at: tuple[float, float] | None = None, down: bool = False) -> Scene",
+     "summary": "Gets her off a rope she's hanging on: up near a top, down to a platform below, or a sideways jump."
+    },
+    {
+     "name": "MoveCut",
+     "kind": "class",
+     "line": 70,
+     "summary": "A watched move cut short (a touch, HP dropping, off the move, hung under a rope's top)."
+    },
+    {
+     "name": "MoveRefused",
+     "kind": "class",
+     "line": 74,
+     "summary": "A move refused before its keys went: its run-up's or back-off's walk meets a monster."
+    },
+    {
+     "name": "grab_lead",
+     "kind": "function",
+     "line": 78,
+     "signature": "def grab_lead(gap: float) -> float | None",
+     "summary": "How far before a rope to jump to grab it at the top of the jump (~41 units); None if out of reach."
+    }
+   ],
+   "inputs": [
+    "a route Move (motion.route) from the navigator, or a rope and height from attack.ropes / the hunter",
+    "looks from Senses.look (localization) placing her: platform, x, minimap dot, ropes on screen",
+    "the map model (platforms, ropes, portals) and motion.physics for flights and hold times",
+    "the navigator's watch() and clear() hooks"
+   ],
+   "outputs": [
+    "key plans via Actions.play (blocking) or client.send (watched)",
+    "a settled Scene after each move; `still` and `walked` for the navigator's checks and trip record",
+    "MoveCut, MoveRefused, ValueError (a move it can't do from here)"
+   ],
+   "uses": [
+    "gamelab/directions.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/scene.py",
+    "gamelab/localization/senses.py",
+    "gamelab/motion/body.py",
+    "gamelab/motion/flow.py",
+    "gamelab/motion/physics.py",
+    "gamelab/motion/route.py",
+    "gamelab/control/client.py",
+    "gamelab/control/actions.py",
+    "maplehelper/engine.py"
+   ],
+   "files_io": [],
+   "concurrency": "None of its own: runs on the caller's thread, sleeping between looks (0.08-0.45 s); a watched move polls client.done between the navigator's glances while the elevated player plays it.",
+   "tunables": [
+    {
+     "name": "SLIDE_MS",
+     "value": "220",
+     "meaning": "ms she slides to a stop after the arrow is let go"
+    },
+    {
+     "name": "X_TOLERANCE",
+     "value": "8",
+     "meaning": "map units: close enough when walking to an x"
+    },
+    {
+     "name": "SPOT_TOLERANCE",
+     "value": "6",
+     "meaning": "map units: close enough to a run-up spot, or under a rope"
+    },
+    {
+     "name": "ROPE_TOLERANCE",
+     "value": "6",
+     "meaning": "screen px (at 1920x1080): close enough to a rope's top"
+    },
+    {
+     "name": "ROPE_SEARCH_PX",
+     "value": "70",
+     "meaning": "px: a rope seen this close to where the map puts it is the one"
+    },
+    {
+     "name": "GRAB_MARGIN",
+     "value": "8",
+     "meaning": "units of rope reach kept spare when jumping at a rope"
+    },
+    {
+     "name": "MIN_RUN",
+     "value": "15",
+     "meaning": "the shortest run-up before a jump or walk-off (keyed 155 ms in: full speed)"
+    },
+    {
+     "name": "RUN_UP_SPARE",
+     "value": "10",
+     "meaning": "a back-off for a run-up goes this much further"
+    },
+    {
+     "name": "CLIMB_EXTRA_MS",
+     "value": "500",
+     "meaning": "up or down held this much longer than the climb takes"
+    },
+    {
+     "name": "PORTAL_UP_MS",
+     "value": "100",
+     "meaning": "by a portal, up pressed this long after the jump key"
+    },
+    {
+     "name": "HANG_TOLERANCE",
+     "value": "15",
+     "meaning": "units off a rope jump's height before she climbs to it"
+    },
+    {
+     "name": "ON_ROPE_X",
+     "value": "25",
+     "meaning": "units from a rope's x her dot counts as on it"
+    },
+    {
+     "name": "ROPE_JUMP_KEY_MS",
+     "value": "40",
+     "meaning": "ms after the arrow that a rope jump's jump key goes"
+    },
+    {
+     "name": "STILL",
+     "value": "0.6",
+     "meaning": "minimap px: her dot hasn't moved from where a move began"
+    },
+    {
+     "name": "DROP_AT_SPOT",
+     "value": "True",
+     "meaning": "a drop not clear where she stands walks to the move's own spot exactly"
+    },
+    {
+     "name": "DROP_DOWN_UP_MS",
+     "value": "200",
+     "meaning": "a drop's down let go this long after it (its jump at 120)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-21",
+     "what": "MIN_RUN 15 (was 12): the shortest run-up is keyed 155 ms after the arrow",
+     "why": "the jump sweeps: 3 of the 4 jumps keyed 120 ms after the arrow left at 126 units/s, three of the game's 30 ms steps into the run"
+    },
+    {
+     "date": "2026-10-29",
+     "what": "DROP_AT_SPOT: an unclear drop walks to the move's own spot",
+     "why": "Tree Dungeon's drop from 18 onto 19 by the rope at 111 grabbed the rope 11 times in a minute from x 104-110"
+    },
+    {
+     "date": "2026-10-31",
+     "what": "A drop's down let go 200 ms after it (DROP_DOWN_UP_MS)",
+     "why": "held to 320 ms, a key's lag had her land still holding it and, by a rope's top, climb onto the rope"
+    },
+    {
+     "date": "2026-11-02",
+     "what": "walk_to keeps its walks (units asked, hold ms) for the navigator's 'trip' record",
+     "why": "so an 'arrived' trip that ended off its platform's end shows in the 'trip' record (P02 of the recordings' analysis)"
+    },
+    {
+     "date": "",
+     "what": "_run_and_jump lets go of the arrow just before she lands",
+     "why": "held through a level jump's air time and 150 ms more, it ran her 59 units on past a landing 60 up"
+    }
+   ],
+   "gotchas": [
+    "Every move clears Actions.facing (moves turn her): the next throw taps the arrow to turn her to its target.",
+    "A climb that backs off and lands under the rope climbs from there directly: calling _climb again recursed forever when the walk stopped 5-6 units off.",
+    "Whether the game takes a portal mid-air isn't known: PORTAL_UP_MS only helps if it takes portals on the ground alone; no rope on the three maps hangs by one.",
+    "line_up_rope fine-tunes on screen only while her name tag is seen.",
+    "A walk-off from 0.4 units in once left at 35 units/s, came down past 34's end and fell out of the map: hence the MIN_RUN back-off."
+   ],
+   "tests": [
+    "tests/test_control.py",
+    "tests/test_evade.py",
+    "tests/test_feed.py",
+    "tests/test_harness.py",
+    "tests/test_navigation.py",
+    "tests/test_panel_speed.py",
+    "tests/test_rope_hang.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/actions.py",
+   "title": "Actions",
+   "tagline": "Her actions as key plans: throws, jump throws, jump backs, walks, pick-ups, potions.",
+   "summary": "Turns one action of hers at a time into a key plan and blocks until the player has played it. It never decides anything (attack and behavior do). It keeps the timing every plan must respect (her 730 ms attack lock, the 0.8 s arrow lock after an attack key) and which way she faces, by her keys and by the frame, which decides whether a throw taps the arrow to turn her first.",
+   "details_md": "**Plans.** `tap(t, key)` is a press at t ms and a release `TAP_MS` (40 ms) later. `play(events, name)` holds the plan\nback (`hold_back`), asks `before_play` (the hunter's stop check: `gamelab stop` since the look), then\n`client.submit(events, lead_ms=0, focus=True)` and waits for the result; `ended()` then records when her last key went,\nso the next look waits for its effect.\n\n**Locks.** In the game a regular attack ignores jump and attack keys for 730 ms (`COMBAT.attack_lock_ms`), and an arrow\npressed within about 0.62 s of an attack key moves her only from about 0.79 s after it. `hold_back(events)` sleeps just\nlong enough that no jump or attack key in the plan comes before `lock_until`, and no arrow before `arrow_until`\n(`ARROW_LOCK_MS` = 800 ms after the attack key). Every plan that can press them goes through it: Actions' own, the\nmover's and the navigator's chains. A throw sets `lock_until` to 730 + 60 ms from the plan's end\n(`THROW_LOCK_EXTRA_MS`), a jump throw or jump back 730 + 160 (`JUMP_THROW_LOCK_EXTRA_MS`).\n\n**Throws.**\n- `throw(direction)`: wait out the lock (or `lock_watch`, which can call the attack off frame by frame), ask\n  `still(direction)` (a kill shown since the decision drops it), tap the arrow unless `faces(direction)`, then tap the\n  attack key `_attack_key` picks: the regular attack, Lucky Seven or Magic Claw with `skill`, or what `choose` says\n  (behavior.attacks).\n- `jump_throw(direction, key_ms, way)`: in the air the attack throws a star even point-blank, where on the ground the\n  claw only swipes (9-11 damage against 30-70). The attack key comes `key_ms` after the jump key (40 ms by default).\n  Turning, she taps the arrow in the air 60 ms after the jump key and attacks 120 ms after it at the soonest; with\n  `air_turn=False` the tap goes first and the jump waits until 205 ms into the plan (`physics.JUMP_THROW_TURN_MS`)\n  for the tap's walk to stop. `way` ±1 jumps forward (the arrow\n  held, the jump 40 ms on, the arrow let go 100 ms after the jump key). The magician (`ground_only`) throws from the\n  ground instead.\n- `jump_back(direction)`: at a monster too close, run away `JB_RUN_MS` (150 ms, past the kick's blind spot), jump, tap\n  toward it in mid-air at 210 ms and attack at 270 ms, so the star (about 520 ms after the key) leaves as she lands\n  about 90 units away. Never dropped.\n\n**Facing.** Her keys (`facing`: the way her last plan's arrow or throw turned her; None after any move) and the frame\n(`see`, given perception.heading's reading after every look). `heading` is the frame's when it's newer than her last\narrow, else her keys'. A frame isn't believed within `HEADING_SETTLE_S` (0.2 s) of her last arrow, while a navigator\nchain plays (its arrows aren't known here: `sent_at` blinds it until the navigator sets `facing`), or during her attack\nunless it's strong. `faces` lets a throw skip the turn tap only by her keys or a strong frame: a weak frame can add a tap\nbut never take one away (every frame read the wrong way on 2026-10-24 was weak, and a star the wrong way costs more\nthan a tap). A hit with no frame telling makes her heading unknown, so the next throw taps. `retap()` forces a tap after\nher throws stop landing. `keys_say(t)` tells perception.heading which way her keys say beyond doubt she faces in a\nframe (her last arrow `LEARN_AFTER_S`, 0.25 s, or more before it, no hit, no chain playing), so it can learn her\npictures; `ended()` records when her last key went (the looks wait for its effect), on the `moves_only` copy's parent too.\n\n**The rest.** `walk(direction, units)` holds the arrow `hold_ms(units)` with pick-up tapped every 150 ms and 200 ms\npast the release; `pick_here()` presses pick-up 4 times 120 ms apart (one item a press; a pig drops several);\n`drink()`, `feed_pet()` (kind `pet_food`, allowed with the alarm up), `nudge_mouse()` (the pointer moved inside the\ngame, never a click: a tooltip once hid the minimap). `moves_only()` makes her Lie Detector retreat's copy: arrows, jump,\nup and down only, every plan of kind `retreat`, the locks shared, her last key told to both.\n",
+   "lines": 655,
+   "key_items": [
+    {
+     "name": "Actions",
+     "kind": "class",
+     "line": 150,
+     "signature": "class Actions: def __init__(self, keys: GameKeys, skill: bool = False, kind: str | None = None)",
+     "summary": "Her actions as key plans, one at a time; holds her keys, locks, facing and the callbacks behavior plugs in (choose, still, lock_watch, before_play, throw_listeners).",
+     "details_md": "Callbacks set by behavior: `choose(way) -> key` (the attack choice), `still(way) -> bool` (a last look before the key), `lock_watch()` (behavior.targeting's frame-by-frame lock wait), `before_play()` (raises on `gamelab stop`), `throw_listeners` (the kill ledger hears each attack key's time). `of` links a `moves_only` copy back to the hunter's Actions."
+    },
+    {
+     "name": "Actions.play",
+     "kind": "method",
+     "line": 266,
+     "signature": "def play(self, events: list, name: str, kind: str | None = None) -> None",
+     "summary": "Holds a plan back for her locks, asks before_play, sends it with client.submit and waits."
+    },
+    {
+     "name": "Actions.hold_back",
+     "kind": "method",
+     "line": 308,
+     "signature": "def hold_back(self, events: list) -> None",
+     "summary": "Sleeps until no jump or attack key falls inside her attack lock and no arrow inside the arrow lock; records when the plan's last arrow goes (arrows_at)."
+    },
+    {
+     "name": "Actions.throw",
+     "kind": "method",
+     "line": 397,
+     "signature": "def throw(self, direction: str) -> bool",
+     "summary": "Turn if needed, then one attack from the ground; False if dropped or no attack key."
+    },
+    {
+     "name": "Actions.jump_throw",
+     "kind": "method",
+     "line": 417,
+     "signature": "def jump_throw(self, direction: str, key_ms: int | None = None, way: int = 0, air_turn: bool = True, turn_key: int = AIR_TURN_ATTACK_MS) -> bool",
+     "summary": "Jump and attack in mid-air (a star even point-blank), turning in the air if needed; or a jump forward."
+    },
+    {
+     "name": "Actions.jump_back",
+     "kind": "method",
+     "line": 469,
+     "signature": "def jump_back(self, direction: str, key_ms: int | None = None) -> bool",
+     "summary": "Run away, jump, turn in mid-air and throw so the star leaves as she lands about 90 units away."
+    },
+    {
+     "name": "Actions.see",
+     "kind": "method",
+     "line": 333,
+     "signature": "def see(self, side: str | None, t: float, hit_at: float | None = None, strong: bool = False) -> str | None",
+     "summary": "What a look's frame says of her facing, filtered by timing (settle after an arrow, chains playing, her attack playing)."
+    },
+    {
+     "name": "Actions.heading",
+     "kind": "method",
+     "line": 228,
+     "summary": "A property: which way she faces as best known, the frame's (`seen`) where it is newer than her last arrow, else her keys' (`facing`); None when unknown.",
+     "signature": "def heading(self) -> str | None"
+    },
+    {
+     "name": "Actions.faces",
+     "kind": "method",
+     "line": 553,
+     "signature": "def faces(self, direction: str) -> bool",
+     "summary": "Whether a throw may skip the turn tap: her keys say so, or a strong frame does."
+    },
+    {
+     "name": "Actions.walk",
+     "kind": "method",
+     "line": 585,
+     "signature": "def walk(self, direction: str, units: float) -> None",
+     "summary": "Walk that far with pick-up pressed all the way, then wait out her slide."
+    },
+    {
+     "name": "Actions.feed_pet",
+     "kind": "method",
+     "line": 620,
+     "signature": "def feed_pet(self) -> bool",
+     "summary": "One tap of the pet food key as plan kind pet_food (allowed with the Lie Detector alarm up)."
+    },
+    {
+     "name": "Actions.moves_only",
+     "kind": "method",
+     "line": 640,
+     "signature": "def moves_only(self) -> \"Actions\"",
+     "summary": "A copy for the Lie Detector retreat: move keys only, every plan of kind retreat, locks shared."
+    },
+    {
+     "name": "ARROW_LOCK_MS",
+     "kind": "constant",
+     "line": 65,
+     "summary": "800: no plan's first arrow before 0.8 s after the last attack key (an earlier one moved her late, and jumps right after a throw fell short)."
+    },
+    {
+     "name": "JB_RUN_MS",
+     "kind": "constant",
+     "line": 80,
+     "summary": "The jump back's run before its jump: physics.BLIND_ENDS_MS (150 ms), or 52 with KICK_JUMPS."
+    },
+    {
+     "name": "tap",
+     "kind": "function",
+     "line": 145,
+     "signature": "def tap(t: int, key: str) -> list[list]",
+     "summary": "A key tap at t ms: down, and up TAP_MS (40 ms) later."
+    }
+   ],
+   "inputs": [
+    "what to do, from attack.stance and behavior (which throw, which way, key_ms)",
+    "her keys (GameKeys from config.toml, the profile or keymap.follow)",
+    "the frame's heading (perception.heading via the hunter's see calls)",
+    "callbacks: the attack choice, a last look before the key, the lock watch, the stop check"
+   ],
+   "outputs": [
+    "key plans to the player via client.submit (blocking)",
+    "lock_until, arrow_until, arrows_at, last_key and sent_at for the Mover, the Navigator and Senses",
+    "each attack key's time to the throw listeners (the kill ledger)",
+    "facing / heading for attack.stance and the hunter's logs"
+   ],
+   "uses": [
+    "gamelab/directions.py",
+    "gamelab/motion/physics.py",
+    "gamelab/screen.py",
+    "gamelab/control/client.py",
+    "gamelab/control/alarm.py",
+    "maplehelper/config.py",
+    "maplehelper/engine.py",
+    "maplehelper/game.py"
+   ],
+   "files_io": [],
+   "concurrency": "Blocking: each plan waits for the player's result on the caller's thread; hold_back and wait_lock sleep. No threads of its own.",
+   "tunables": [
+    {
+     "name": "TAP_MS",
+     "value": "40",
+     "meaning": "ms a tapped key is held"
+    },
+    {
+     "name": "TURN_SETTLE_MS",
+     "value": "30",
+     "meaning": "ms after the turn's arrow tap before the next key"
+    },
+    {
+     "name": "HEADING_SETTLE_S",
+     "value": "0.2",
+     "meaning": "s after her last arrow before a frame can show her facing"
+    },
+    {
+     "name": "LEARN_AFTER_S",
+     "value": "0.25",
+     "meaning": "s after her last arrow before her keys teach her heading pictures"
+    },
+    {
+     "name": "THROW_LOCK_EXTRA_MS",
+     "value": "60",
+     "meaning": "margin past the 730 ms attack lock after a throw"
+    },
+    {
+     "name": "JUMP_THROW_LOCK_EXTRA_MS",
+     "value": "160",
+     "meaning": "the same after a jump throw or jump back"
+    },
+    {
+     "name": "ARROW_LOCK_MS",
+     "value": "800",
+     "meaning": "a plan's first arrow at least this long after the last attack key"
+    },
+    {
+     "name": "JB_RUN_MS",
+     "value": "150 (52 with KICK_JUMPS)",
+     "meaning": "the jump back's run before its jump key"
+    },
+    {
+     "name": "STAR_DELAY_MS",
+     "value": "520",
+     "meaning": "a star leaves this long after the attack key"
+    },
+    {
+     "name": "DAMAGE_SHOWS_MS",
+     "value": "290",
+     "meaning": "ms after its key a throw's damage shows (live: a kill's EXP gain 0.15-0.46 s after, median 0.29-0.33)"
+    },
+    {
+     "name": "FORWARD_HOLD_MS",
+     "value": "100",
+     "meaning": "a jump forward's arrow let go this long after the jump key"
+    },
+    {
+     "name": "AIR_TURN",
+     "value": "True",
+     "meaning": "a jump throw that turns her taps the arrow in the air"
+    },
+    {
+     "name": "PILE_PRESSES",
+     "value": "4",
+     "meaning": "pick-up presses standing on a kill's drops"
+    },
+    {
+     "name": "PILE_EVERY_MS",
+     "value": "120",
+     "meaning": "ms between those presses"
+    },
+    {
+     "name": "WALK_PICK_EVERY_MS",
+     "value": "150",
+     "meaning": "ms between pick-up presses while she walks"
+    },
+    {
+     "name": "WALK_PICK_AFTER_MS",
+     "value": "200",
+     "meaning": "pick-up kept on this long after the arrow is let go"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-21",
+     "what": "A plan's first arrow waits until 0.8 s after the last attack key (ARROW_LOCK_MS; 0.6 s first)",
+     "why": "in game, arrows pressed sooner moved her late: 8 of 10 jumps from 16 up onto 14 right after a throw fell short"
+    },
+    {
+     "date": "2026-10-21",
+     "what": "The jump back's jump keyed at physics.BLIND_ENDS_MS (150 ms) after the arrow",
+     "why": "the jump sweeps: keyed at 80 ms three of five left short (121-127 units/s), at 130 up to a quarter still did; from 150 ms at most 5%"
+    },
+    {
+     "date": "2026-10-24",
+     "what": "Facing read off the frame; a frame takes a turn tap away only when strong",
+     "why": "every frame read the wrong way that day was weak; a star the wrong way costs more than a tap"
+    },
+    {
+     "date": "2026-10-25",
+     "what": "The jump back's lock counted from the plan's end",
+     "why": "it counted the attack key's time again: 235 ms more (up to 630) before her next jump or attack"
+    },
+    {
+     "date": "2026-10-26",
+     "what": "The air turn's attack 120 ms after the jump key (was 85); the jump back's at 270 ms (was 235)",
+     "why": "36% of air turns went the wrong way live, and both live jump backs of 2026-10-25 threw the wrong way: the attack picks its target as it starts"
+    },
+    {
+     "date": "2026-10-27",
+     "what": "ground_only: the magician's Magic Claw is never cast mid-jump",
+     "why": "the user"
+    },
+    {
+     "date": "2026-11-04",
+     "what": "retap: the next throw taps the arrow once her throws aren't landing",
+     "why": "a wrong strong frame sent 85 attacks into the wall behind her over 71 s"
+    }
+   ],
+   "gotchas": [
+    "Tapping the arrow before every throw walked her off the end of a platform after nine throws the same way: she taps only when she doesn't surely face the target.",
+    "Decisions (the side she works, the close monster) go by her keys' facing, not the frame's: going by the frame too, the simulator's hunt loop made 12% less EXP a minute.",
+    "throw and jump_throw return False with no key sent when still() drops them or no attack key is chosen; jump_back always goes.",
+    "nudge_mouse does nothing in a retreat: whoever is at the PC may be answering the Lie Detector with the mouse.",
+    "A 50 ms turn tap is bimodal in game (two of three didn't move her), so the 205 ms wait before a ground-turned jump may be for nothing.",
+    "JB_RUN_MS, JB_TURN_MS and JB_THROW_MS are recomputed when her walk speed is set (`_follow`, registered with `physics.follows`): BLIND_ENDS_MS is 150 for any walk from 134 to 168."
+   ],
+   "tests": [
+    "tests/test_character.py",
+    "tests/test_choice.py",
+    "tests/test_control.py",
+    "tests/test_feed.py",
+    "tests/test_guard.py",
+    "tests/test_heading.py",
+    "tests/test_jump_reach.py",
+    "tests/test_keycheck.py",
+    "tests/test_keymap.py",
+    "tests/test_magician_hunt.py",
+    "tests/test_misses.py",
+    "tests/test_navigation.py",
+    "tests/test_panel_speed.py",
+    "tests/test_pet.py",
+    "tests/test_presence.py",
+    "tests/test_retreat.py",
+    "tests/test_sim.py",
+    "tests/test_stance_aside.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/client.py",
+   "title": "Client",
+   "tagline": "Mails key plans to the elevated player through lab/inbox; reads answers in lab/outbox.",
+   "summary": "The only way the unelevated stack gets keys into the game. `send` writes a plan as JSON into lab/inbox/<id>.json; the player claims it (renames it .running), plays it and writes lab/outbox/<id>.json; `wait` polls for that file every 10 ms. It also cuts plans short or withdraws them (`cancel`), hands over a replacement mid-play (`splice`), and sends nothing but four allowed plan kinds while the Lie Detector alarm is up.",
+   "details_md": "**The mailbox.** Everything is a file in `gamelab/lab/` (`paths.INBOX`, `paths.OUTBOX`), written atomically: a `.tmp`\nbeside the target, then `replace`.\n\n| File | Written by | Meaning |\n|---|---|---|\n| `inbox/<id>.json` | `send` | a plan waiting for the player |\n| `inbox/<id>.running` | the player | claimed (renamed): it can't be withdrawn now, only cut short |\n| `inbox/<id>.cancel` | `cancel`, `cut_running` | stop pressing now and let go of every key |\n| `inbox/<running id>.splice` | `splice` | a plan to take over from the running one at its `at_ms` |\n| `outbox/<id>.json` | the player | the result: `sent` (each key as pressed, ms into the plan), `problems`, `error`, `trail` |\n| `outbox/<id>.npz` | the player | recorded frames and their times, if the plan asked for capture |\n\nA plan id is `HHMMSS_<name>_<4 hex>` (64 characters at most), its name cut to letters, digits, `-` and `_`, because the\nplayer keeps only those of the file name: a plan named \"pet food\" was answered as \"petfood\" and its result never found.\n\n**send, wait, submit.** `send` writes `{events, capture: {fps, duration_ms, scale, lead_ms[, crop]}, focus[, end_ms,\nwindow_client, kind]}` and returns the id at once. `end_ms` makes the plan last that long even past its last key: the\nnavigator queues its next chain this way, to start the moment the running one ends. `wait(id, timeout=120)` polls every\n`POLL_S` (10 ms); reads the result with up to 50 tries 20 ms apart (Windows can still hold a file just moved into place:\na sweep once crashed on PermissionError); deletes it and any cancel file left over; loads frames from the `.npz`; and\nraises `PlayerError` on an `error` (`LieDetectorAlarm` when it's the Lie Detector's). On timeout it deletes the\nunclaimed plan and says how to start the player (`python -m gamelab player --elevate`). `submit` is `send` then `wait`.\n\n**Cutting short.** `cancel(id)`: a plan still `.json` is deleted (withdrawn: True, no result will come); a `.running`\none gets a `.cancel` file and the player lets go of everything (False: wait for its result). A plan already over gets no\ncancel file, since one made then was never read and stayed in the inbox. `cut_running()` (from `gamelab stop`) touches a\ncancel for every plan in the inbox, whoever sent it. Cancelling a splice the player hasn't taken yet withdraws the\n`.splice` file and cuts the plan it was meant to take over from. `busy()` says whether any plan is waiting or playing.\nSmall helpers for other modules: `player_up()` (a player's pid in `lab/player.json` is alive), `started(pid)` (a\nprocess's creation time, so a reused pid isn't taken for the same process), `alarm_up()` and `alarm_age()`.\n\n**Splices** (the navigator's replans, from 2026-10-30). `splice(running_id, events, at_ms, held, end_ms)` writes\n`<running_id>.splice`, not a `.json`, so the player never takes it as a plan of its own; a later splice into the same\nplan replaces one not taken yet. At `at_ms` on the running plan's clock the player drops the old plan's remaining keys,\nlets go of held keys not in `held`, presses those in `held` not held, and plays the new events; the old plan's result\ngets the problem `spliced`. `taken(id)` answers True, False (the old plan ended first: the splice is withdrawn) or None\n(not known yet). `can_splice()` reads `lab/player.json`, which the player writes as it starts (`splice: 1`, its pid), and\nchecks the pid is alive with `OpenProcess` and `GetExitCodeProcess` (never Windows' `os.kill`, which ends a process). A\nplayer started before splices existed writes none, and the navigator cuts and resends instead.\n\n**The Lie Detector.** `send` and `splice` call `check_alarm()` (raises while `lab/ALARM.json` exists) unless the plan\nhas a `kind` from `alarm.PLAN_KINDS`: `pet_food`, `retreat`, `lie_cursor`, `lie_ok`, which the player takes or refuses\nby its own rules. `wait` withdraws a waiting plan without a kind as soon as the alarm appears. `move_lie_cursor`,\n`click_lie_answer` and `click_lie_ok` build the mouse-only plans for the mini-game, Violetta's quiz and the pass's OK\nbutton (a move, the left button down at 1,000 ms and up 80 ms later), withdrawing them if the round ends first. Retreat\nplans never bring the game to the front (`focus` False).\n",
+   "lines": 411,
+   "key_items": [
+    {
+     "name": "send",
+     "kind": "function",
+     "line": 71,
+     "signature": "def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100, name=\"plan\", end_ms: int | None = None, window_client=None, kind: str | None = None) -> str",
+     "summary": "Writes a plan into lab/inbox and returns its id without waiting; refused with the Lie Detector alarm up unless it has an allowed kind."
+    },
+    {
+     "name": "wait",
+     "kind": "function",
+     "line": 366,
+     "signature": "def wait(plan_id: str, timeout: float = 120) -> dict",
+     "summary": "Polls lab/outbox every 10 ms for the result, cleans up, loads recorded frames, raises PlayerError or LieDetectorAlarm on an error."
+    },
+    {
+     "name": "submit",
+     "kind": "function",
+     "line": 62,
+     "signature": "def submit(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100, name=\"plan\", timeout=120, window_client=None, kind: str | None = None) -> dict",
+     "summary": "send then wait: what Actions.play uses for every blocking plan."
+    },
+    {
+     "name": "cancel",
+     "kind": "function",
+     "line": 333,
+     "signature": "def cancel(plan_id: str) -> bool",
+     "summary": "Withdraws a plan not yet taken (True) or makes the player stop and let go of every key (False: a result will still come)."
+    },
+    {
+     "name": "splice",
+     "kind": "function",
+     "line": 255,
+     "signature": "def splice(running_id: str, events=(), at_ms: int = 0, held=(), *, end_ms: int | None = None, name: str = \"plan\", kind: str | None = None) -> str",
+     "summary": "Hands the player a plan that takes over from the running one at `at_ms` of its clock, the keys in `held` kept down."
+    },
+    {
+     "name": "taken",
+     "kind": "function",
+     "line": 290,
+     "signature": "def taken(plan_id: str) -> bool | None",
+     "summary": "Whether a splice was taken (True), never will be (False, withdrawn), or isn't known yet (None)."
+    },
+    {
+     "name": "can_splice",
+     "kind": "function",
+     "line": 186,
+     "signature": "def can_splice() -> bool",
+     "summary": "Whether the running player takes splices: lab/player.json says so and its process is alive (re-read when the file changes)."
+    },
+    {
+     "name": "cut_running",
+     "kind": "function",
+     "line": 358,
+     "signature": "def cut_running() -> None",
+     "summary": "`gamelab stop`: a cancel file for every plan in the inbox, from any process."
+    },
+    {
+     "name": "check_alarm",
+     "kind": "function",
+     "line": 38,
+     "signature": "def check_alarm() -> None",
+     "summary": "Raises LieDetectorAlarm while lab/ALARM.json exists."
+    },
+    {
+     "name": "PlayerError",
+     "kind": "class",
+     "line": 30,
+     "summary": "The player refused or failed a plan, or never answered it."
+    },
+    {
+     "name": "LieDetectorAlarm",
+     "kind": "class",
+     "line": 34,
+     "summary": "The Lie Detector was seen: no input goes out until the alarm is cleared."
+    },
+    {
+     "name": "move_lie_cursor",
+     "kind": "function",
+     "line": 105,
+     "signature": "def move_lie_cursor(x: int, y: int, active, trail: list | None = None) -> bool",
+     "summary": "A move-only mouse plan for the Lie Detector mini-game, withdrawn or cancelled once the round ends."
+    },
+    {
+     "name": "click_lie_ok",
+     "kind": "function",
+     "line": 149,
+     "signature": "def click_lie_ok(x: int, y: int, timeout: float = 10.0) -> bool",
+     "summary": "Clicks the pass dialog's OK button: a move, left button down at 1,000 ms, up 80 ms later."
+    },
+    {
+     "name": "_read_result",
+     "kind": "function",
+     "line": 402,
+     "signature": "def _read_result(path, tries: int = 50) -> dict",
+     "summary": "Reads a result file, retried for about 1 s because Windows can hold a just-moved file locked."
+    },
+    {
+     "name": "_plan_id",
+     "kind": "function",
+     "line": 179,
+     "signature": "def _plan_id(name: str) -> str",
+     "summary": "A new plan id: time, the sanitized name, a random tail; at most 64 characters."
+    }
+   ],
+   "inputs": [
+    "key events from Actions, the Mover, the Navigator and behavior (pet care, the retreat, the Lie Detector's cursor)",
+    "results the elevated player writes into lab/outbox",
+    "lab/ALARM.json (the Lie Detector alarm) and lab/player.json (what the running player can do)"
+   ],
+   "outputs": [
+    "plan, splice and cancel files in lab/inbox for control.player",
+    "result dicts (sent keys with their real times, problems, frames) back to the callers",
+    "PlayerError / LieDetectorAlarm exceptions"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/control/alarm.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/inbox/<plan id>.json",
+     "mode": "write",
+     "what": "a plan for the player (via <id>.tmp)"
+    },
+    {
+     "path": "lab/inbox/<running id>.splice",
+     "mode": "write",
+     "what": "a plan to take over from the running one"
+    },
+    {
+     "path": "lab/inbox/<plan id>.cancel",
+     "mode": "write",
+     "what": "cut a running plan short"
+    },
+    {
+     "path": "lab/outbox/<plan id>.json",
+     "mode": "read",
+     "what": "the player's result (deleted once read)"
+    },
+    {
+     "path": "lab/outbox/<plan id>.npz",
+     "mode": "read",
+     "what": "frames recorded while the plan ran (deleted once read)"
+    },
+    {
+     "path": "lab/ALARM.json",
+     "mode": "read",
+     "what": "the Lie Detector alarm: no plan without an allowed kind"
+    },
+    {
+     "path": "lab/player.json",
+     "mode": "read",
+     "what": "the running player's pid and whether it takes splices"
+    }
+   ],
+   "concurrency": "No threads. It polls files every POLL_S (10 ms) on the caller's thread; module-level dicts remember plans sent with a kind and splices not yet known taken, per process. The other side is a separate, elevated process (control.player) polling the inbox every 10 ms.",
+   "tunables": [
+    {
+     "name": "POLL_S",
+     "value": "0.01",
+     "meaning": "how often wait (and the Lie Detector clickers) look for a result"
+    },
+    {
+     "name": "LIE_CLICK_DOWN_AT",
+     "value": "1000",
+     "meaning": "ms into a Lie Detector click plan the left button goes down"
+    },
+    {
+     "name": "LIE_CLICK_HOLD",
+     "value": "80",
+     "meaning": "ms the left button is held for that click"
+    },
+    {
+     "name": "wait(timeout)",
+     "value": "120",
+     "meaning": "s before a plan with no answer is withdrawn and PlayerError raised"
+    },
+    {
+     "name": "_read_result(tries)",
+     "value": "50 (20 ms apart)",
+     "meaning": "retries reading a result Windows still holds locked"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-30",
+     "what": "splice, taken, unsplice and can_splice: a plan that takes over from the running one",
+     "why": "the navigator's replans at every perception state (REPLAN), without letting go of the arrow held"
+    },
+    {
+     "date": "",
+     "what": "Plan ids keep only letters, digits, - and _ of the name",
+     "why": "the player keeps only those of a file's name: a plan named 'pet food' was answered as 'petfood' and never found"
+    },
+    {
+     "date": "",
+     "what": "No cancel file for a plan that is over",
+     "why": "a cancel made then was never read and stayed in the inbox"
+    },
+    {
+     "date": "",
+     "what": "Results read with retries",
+     "why": "just after the player moves a result into place Windows can hold it locked; a sweep crashed on PermissionError"
+    }
+   ],
+   "gotchas": [
+    "cancel's return value means different things: True = withdrawn, no result will come; False = the player is stopping it, so wait for its result.",
+    "wait withdraws a not-yet-taken plan as soon as lab/ALARM.json appears, unless it was sent with a kind.",
+    "Plans of kind 'retreat' never bring the game window forward (focus False): the player refuses them while another window is in front.",
+    "The splice bookkeeping (_SPLICES, _NEVER) lives in module globals: only the process that spliced can ask taken()."
+   ],
+   "tests": [
+    "tests/conftest.py",
+    "tests/test_alarm.py",
+    "tests/test_chatbox.py",
+    "tests/test_disk.py",
+    "tests/test_feed.py",
+    "tests/test_gamelab.py",
+    "tests/test_guard.py",
+    "tests/test_keycheck.py",
+    "tests/test_lie_recording.py",
+    "tests/test_lie_tracking.py",
+    "tests/test_pet.py",
+    "tests/test_player_splice.py",
+    "tests/test_probe.py",
+    "tests/test_retreat.py",
+    "tests/test_rope_hang.py",
+    "tests/test_service.py",
+    "tests/test_sim.py",
+    "tests/test_statcheck.py",
+    "tests/test_violetta.py",
+    "tests/test_window_size.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/keymap.py",
+   "title": "Keymap",
+   "tagline": "Her keys followed to where the game's Key Bindings window puts them, and remembered.",
+   "summary": "When the game's KEY BINDINGS window is read (behavior.keycheck, `gamelab keys --read`), `follow` moves each of her keys to wherever the window shows its function, or turns it off, and says when the hunt must stop. The result is remembered per character and becomes the next command's starting keys (`at_start`), and her moves' and pet food's keys are published for the elevated player's Lie Detector allowance.",
+   "details_md": "**Why.** On 2026-10-28 the user, asked whether keys moved in the game should stop the hunt or be followed, answered\n\"Follow them\", and whether the binding read should be kept, \"Remember it\". Until then the hunt pressed `config.toml`'s\n`[keys]` whatever the game had.\n\n**`follow(keys, fn, illegible)`.** `fn` is the window reader's map (`perception.keybindings.Reader.functions`): key ->\nthe function drawn on it, a picture's name, or None. For each bound field of her `GameKeys` it looks up the function\nthe window should show (`FUNCTION_OF`: attack -> ATTACK, jump -> JUMP, the arrows -> MOVE LEFT/RIGHT/UP/DOWN, pick_up\n-> PICK UP, sit -> SIT, plus the pictures the reader knows: Lucky Seven, pet food, her chair, the magician's skills),\nand then:\n\n- the function is on her key still: kept;\n- it's on another key she may press: moved there (`moved`);\n- the window can't tell (her key's cell illegible, not drawn, or a picture the reader doesn't know): kept, in `unknown`;\n- it's on no key she may press: `off`. Keys never followed onto are `NEVER` (Esc, the backslash that opens the window,\n  F1-F4, F12) plus config.toml's `[hotkeys]` and `[control]` keys (`never()`); her moves and pet food also avoid the alarm's unsafe keys (`ALARM_UNSAFE`).\n  A field in `NEEDED` (her five moves, Lucky Seven, pet food, Magic Claw) sets `stop`: the hunt can't go on without it.\n  Her regular attack stays bound (behavior.keycheck turns it off for the run); other fields become None.\n\nThe game binds one function per key, so a key kept as \"unknown\" that another of her functions moved onto is turned off\ntoo, and said.\n\n**Remembered** (`lab/keybindings-<character>.json`). `remember` writes the keys with when and off which saved frame\nthey were read, the preset, the whole function map, config.toml's keys then and whether the game had Attack on no key;\nwritten whole (a `.tmp`, then `os.replace`). `at_start(config_keys)` reads it back and returns a `Start`: no file ->\nconfig.toml's keys; unreadable, or failing `problem` (unknown fields, a name config.toml can't name, arrows, jump or\nattack unbound, two functions on one key, a NEVER key, or alarm keys the allowance can't take) -> config.toml's, with the\nreason in `source`. A file marked by `suspect` (a doubt about a key that the run couldn't check:\nbehavior.hunter.Hunter.keys_doubted) is also left out until a new read writes it: the review of 2026-10-28 found a\nstale MOVE RIGHT on E coming back at every start. A remembered \"Attack on no key\" is said but not kept: the regular\nattack is tried again (5 presses without effect doubt it). `forget` deletes the file (`gamelab keys --forget`).\n\n**Published** (`lab/alarm_keys.json`). With the Lie Detector alarm up the only key plans the player lets through are her\nretreat's moves and her pet food (besides the mouse-only Lie Detector plans), and it must know which keys those are. `publish(keys)` writes the `ALARM_FIELDS` (left, right, jump, up, down,\npet_food) at each command's start and whenever the hunt follows a key, so the player picks them up without being\nstarted again (which costs the user a UAC click).\n",
+   "lines": 336,
+   "key_items": [
+    {
+     "name": "follow",
+     "kind": "function",
+     "line": 119,
+     "signature": "def follow(keys: GameKeys, fn: dict[str, str | None], illegible=(), never_keys: tuple[str, ...] | None = None, unsafe: tuple[str, ...] = ALARM_UNSAFE) -> Followed",
+     "summary": "Her keys moved to where the window shows their functions, turned off where it shows them on no key she may press, and why the hunt must stop if a needed one is off."
+    },
+    {
+     "name": "Followed",
+     "kind": "dataclass",
+     "line": 99,
+     "summary": "What follow made of a window read: the new keys, those moved, off, unknown, the stop reason and lines to log."
+    },
+    {
+     "name": "at_start",
+     "kind": "function",
+     "line": 278,
+     "signature": "def at_start(config_keys: GameKeys, character: str | None = None) -> Start",
+     "summary": "A command's starting keys: the remembered binding's if it's sound and not suspect, else config.toml's, with where they came from in words."
+    },
+    {
+     "name": "Start",
+     "kind": "dataclass",
+     "line": 269,
+     "summary": "A command's keys at its start, their source for the log, any 'attack on no key' note and the remembered file's data."
+    },
+    {
+     "name": "remember",
+     "kind": "function",
+     "line": 196,
+     "signature": "def remember(keys: GameKeys, character: str | None = None, *, config_keys: GameKeys | None = None, frame=None, preset: int | None = None, functions: dict | None = None, attack_off: str | None = None, why: str = \"\") -> object",
+     "summary": "Saves the followed binding per character, atomically, with when and off what frame it was read."
+    },
+    {
+     "name": "publish",
+     "kind": "function",
+     "line": 322,
+     "signature": "def publish(keys: GameKeys, why: str = \"\", character: str | None = None) -> bool",
+     "summary": "Writes her moves' and pet food's keys to lab/alarm_keys.json for the player's Lie Detector allowance; refuses keys the allowance can't take."
+    },
+    {
+     "name": "suspect",
+     "kind": "function",
+     "line": 229,
+     "signature": "def suspect(why: str, character: str | None = None) -> bool",
+     "summary": "Marks the remembered binding doubted and unchecked: the next start uses config.toml's keys."
+    },
+    {
+     "name": "problem",
+     "kind": "function",
+     "line": 246,
+     "signature": "def problem(table: dict, never_keys: tuple[str, ...] | None = None) -> str | None",
+     "summary": "Why a remembered key table can't be keys as they can be (or None)."
+    },
+    {
+     "name": "FUNCTION_OF",
+     "kind": "constant",
+     "line": 47,
+     "summary": "Each GameKeys field -> the function name the window shows for it (and the known pictures)."
+    },
+    {
+     "name": "NEEDED",
+     "kind": "constant",
+     "line": 54,
+     "summary": "Fields whose loss stops the hunt: her moves, Lucky Seven, pet food, Magic Claw."
+    },
+    {
+     "name": "NEVER",
+     "kind": "constant",
+     "line": 58,
+     "summary": "Keys none of hers is ever followed onto: Esc, backslash, F1-F4, F12 (plus config.toml's hotkeys via never())."
+    },
+    {
+     "name": "forget",
+     "kind": "function",
+     "line": 311,
+     "signature": "def forget(character: str | None = None) -> bool",
+     "summary": "Drops the remembered binding (`gamelab keys --forget`)."
+    },
+    {
+     "name": "changes",
+     "kind": "function",
+     "line": 86,
+     "signature": "def changes(a: GameKeys, b: GameKeys) -> list[tuple[str, str | None, str | None]]",
+     "summary": "The fields whose key differs between two key sets (used for logging and for publishing only on a change)."
+    }
+   ],
+   "inputs": [
+    "the KEY BINDINGS window as read by perception.keybindings (through behavior.keycheck or `gamelab keys --read`): key -> function map and illegible cells",
+    "her current GameKeys (config.toml's, or the profile's)",
+    "control.alarm's ALARM_FIELDS, ALARM_UNSAFE and alarm_keys_problem"
+   ],
+   "outputs": [
+    "Followed: her keys as the game has them, for Actions.follow (behavior.keycheck, Hunter)",
+    "Start: a command's starting keys (timeline.her_setup, gamelab.__main__)",
+    "lab/keybindings-<character>.json for the next runs",
+    "lab/alarm_keys.json for the elevated player (control.alarm.AlarmKeys)"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/perception/keybindings.py",
+    "gamelab/control/alarm.py",
+    "gamelab/character.py",
+    "maplehelper/config.py",
+    "maplehelper/keys.py",
+    "maplehelper/combos.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/keybindings-<character>.json",
+     "mode": "read-write",
+     "what": "the binding last read off the game's window, per character (written whole via a .tmp)"
+    },
+    {
+     "path": "lab/alarm_keys.json",
+     "mode": "write",
+     "what": "her moves' and pet food's keys for the player's Lie Detector allowance"
+    },
+    {
+     "path": "config.toml",
+     "mode": "read",
+     "what": "hotkeys and control keys added to NEVER"
+    }
+   ],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "NEVER",
+     "value": "('esc', '\\\\', 'f1', 'f2', 'f3', 'f4', 'f12')",
+     "meaning": "keys never followed onto: maplehelper's abort, the window's own key, maplehelper's hotkeys"
+    },
+    {
+     "name": "NEEDED",
+     "value": "left, right, jump, up, down, lucky_seven, pet_food, magic_claw",
+     "meaning": "one of these on no key she may press stops the hunt"
+    },
+    {
+     "name": "MOVES",
+     "value": "('left', 'right', 'jump', 'up', 'down')",
+     "meaning": "her moves"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-28",
+     "what": "Her keys followed to where the game has them, and the binding remembered per character",
+     "why": "the user: \"Follow them\" and \"Remember it\"; before, a moved jump or arrow stopped the hunt"
+    },
+    {
+     "date": "2026-10-28",
+     "what": "A remembered binding whose doubt wasn't checked is marked suspect and left out at the next start",
+     "why": "the review found a stale MOVE RIGHT on E coming back at every start"
+    },
+    {
+     "date": "2026-10-28",
+     "what": "The game's Attack on no key, when remembered, is said at the next start, not kept",
+     "why": "the regular attack is tried again (5 presses without effect doubt it)"
+    }
+   ],
+   "gotchas": [
+    "Her potions have no known picture (FUNCTION_OF lacks them): they're kept as they were, 'not read off the window'.",
+    "publish returns False without writing when the keys fail alarm_keys_problem: the player keeps the last allowance.",
+    "Right-hand Ctrl/Shift/Alt count as the left ones (perception.keybindings.SAME_KEY)."
+   ],
+   "tests": [
+    "tests/test_keymap.py",
+    "tests/test_keycheck.py",
+    "tests/test_magician_hunt.py",
+    "tests/test_alarm.py",
+    "tests/test_statcheck.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/timeline.py",
+   "title": "Timeline",
+   "tagline": "MapleHelper's combo code run on a virtual clock; her keys and timing loaded.",
+   "summary": "Turns MapleHelper's own combos and actions into exact key timelines by running them against a fake engine context whose `wait` only advances a clock, so tests and the `combo` and `do` commands play exactly what the helper plays. It also loads her setup: `config.toml` with her keys as last read off the game (`keymap.at_start`), and the simulator's fixed key sets.",
+   "details_md": "**The virtual clock.** maplehelper's combo scripts are written against an engine context, `maplehelper.engine.Ctx`,\nwhich presses keys through a `send(key, down)` callback and sleeps with `wait(ms)`. `_Clock` subclasses `Ctx`: its\nsend (`_record`) appends `[round(now), key.name, \"down\" | \"up\"]` to a list, and its `wait` adds the milliseconds to\n`now` instead of sleeping. Display output goes to maplehelper's `_Silent`, `slow=False`. Running a combo's\n`script(clock)` therefore yields, with no real time passing, the exact key timeline the live helper would send.\n\n- `combo_events(name, facing, start_ms, keys, timing)` runs one combo of `maplehelper.combos.COMBOS` from `start_ms`.\n  It first records both arrows released (the helper's runner starts clean), ends with `release_all()`, and returns the\n  events and the end time.\n- `action_events(fn, args, facing, keys, timing)` does the same for one `maplehelper.actions` move from 0 (the\n  `gamelab do` command).\n- `chain(name, facing, count, keys, timing)` plays `count` copies back to back, the way the helper runs a queued press,\n  and returns each copy's start too (`gamelab combo --chain`).\n\n**Her setup.** `her_setup(regular_attack=False, remembered=True)` loads `config.toml` (`paths.CONFIG`). Where the\ncharacter this process plays (`gamelab.character.active()`) isn't the thief and has keys in her profile, those replace\n`[keys]` (the magician's Magic Claw on her own key). With `remembered`, the keys returned are those last read off the\ngame's KEY BINDINGS window (`keymap.at_start`), else `config.toml`'s; `cfg.keys` stays `config.toml`'s either way.\n`regular_attack=True` clears Lucky Seven and Magic Claw so throws use the plain attack key (no MP). It returns\n`(config, keys, timing)`; gamelab's commands (`gamelab/__main__.py`) take their setup from it.\n\n**The simulator's keys.** `SIM_KEYS` (her bindings up to 2026-10-22: attack f, Lucky Seven g, potions r and t, no pet),\n`SIM_KEYS_PET` (from 2026-10-23, West Rocky Mountain II: attack ctrl, Lucky Seven shift, no potion keys because her pet\ndrinks them, pet food u) and `SIM_KEYS_MAGE` (from 2026-11-02: the magician's Magic Claw on shift, no Lucky Seven) are\nfixed on purpose: the golden traces name keys, and a change to her live bindings must not change what the simulator\nrecords. In the simulator they are names only: it acts on what each is bound to.\n",
+   "lines": 103,
+   "key_items": [
+    {
+     "name": "her_setup",
+     "kind": "function",
+     "line": 37,
+     "signature": "def her_setup(regular_attack: bool = False, remembered: bool = True) -> tuple[config.Config, GameKeys, Timing]",
+     "summary": "config.toml, her keys as last read off the game's window (else config.toml's or her profile's), and her timing: what gamelab's commands start from."
+    },
+    {
+     "name": "_Clock",
+     "kind": "class",
+     "line": 62,
+     "signature": "class _Clock(Ctx)",
+     "summary": "maplehelper's engine context with key presses recorded into a list and `wait` advancing a virtual clock instead of sleeping."
+    },
+    {
+     "name": "_Clock.wait",
+     "kind": "method",
+     "line": 74,
+     "signature": "def wait(self, ms: int) -> None",
+     "summary": "Adds `ms` to the virtual clock: the whole trick that makes a combo run instantly."
+    },
+    {
+     "name": "combo_events",
+     "kind": "function",
+     "line": 78,
+     "signature": "def combo_events(name: str, facing: str, start_ms: int, keys: GameKeys, timing: Timing) -> tuple[list, int]",
+     "summary": "One named combo's key events from `start_ms`, both arrows released first, every key let go at the end; and its end time."
+    },
+    {
+     "name": "action_events",
+     "kind": "function",
+     "line": 88,
+     "signature": "def action_events(fn, args, facing: str, keys: GameKeys, timing: Timing) -> tuple[list, int]",
+     "summary": "One maplehelper.actions move as key events from 0 (used by `gamelab do`)."
+    },
+    {
+     "name": "chain",
+     "kind": "function",
+     "line": 96,
+     "signature": "def chain(name: str, facing: str, count: int, keys: GameKeys, timing: Timing) -> tuple[list, list[int], int]",
+     "summary": "`count` copies of a combo back to back, as the helper runs a queued press; the events, each copy's start and the end."
+    },
+    {
+     "name": "SIM_KEYS",
+     "kind": "constant",
+     "line": 20,
+     "summary": "The simulator's fixed keys (her bindings up to 2026-10-22), so golden traces don't follow her live config."
+    },
+    {
+     "name": "SIM_KEYS_PET",
+     "kind": "constant",
+     "line": 25,
+     "summary": "Her bindings from 2026-10-23: attack ctrl, Lucky Seven shift, no potions (her pet drinks them), pet food u."
+    },
+    {
+     "name": "SIM_KEYS_MAGE",
+     "kind": "constant",
+     "line": 29,
+     "summary": "The magician as the simulator plays her (from 2026-11-02): Magic Claw on shift, no Lucky Seven."
+    },
+    {
+     "name": "sim_setup",
+     "kind": "function",
+     "line": 32,
+     "signature": "def sim_setup() -> tuple[GameKeys, Timing]",
+     "summary": "SIM_KEYS with config.toml's timing."
+    },
+    {
+     "name": "_profile_keys",
+     "kind": "function",
+     "line": 54,
+     "signature": "def _profile_keys() -> GameKeys | None",
+     "summary": "The playing character's own keys where she isn't the thief (her profile), else None."
+    }
+   ],
+   "inputs": [
+    "config.toml (keys, timing) via maplehelper.config.load",
+    "the remembered key binding via control.keymap.at_start",
+    "maplehelper.combos.COMBOS: the helper's combo scripts",
+    "the active character's profile (gamelab.character)"
+   ],
+   "outputs": [
+    "exact key timelines ([ms, key, down/up]) for the `combo` and `do` commands and the tests",
+    "(config, keys, timing) for every gamelab command's start",
+    "SIM_KEYS / SIM_KEYS_PET / SIM_KEYS_MAGE for sim.scenarios and sim.soak"
+   ],
+   "uses": [
+    "maplehelper/config.py",
+    "maplehelper/combos.py",
+    "maplehelper/engine.py",
+    "maplehelper/keys.py",
+    "gamelab/paths.py",
+    "gamelab/control/keymap.py",
+    "gamelab/character.py"
+   ],
+   "files_io": [
+    {
+     "path": "config.toml",
+     "mode": "read",
+     "what": "her keys, timing and the rest of the helper's setup"
+    },
+    {
+     "path": "lab/keybindings-<character>.json",
+     "mode": "read",
+     "what": "her keys as last read off the game (through keymap.at_start)"
+    }
+   ],
+   "concurrency": "None: a threading.Event is made only because Ctx wants an abort flag; nothing waits on it.",
+   "tunables": [],
+   "decisions": [
+    {
+     "date": "2026-10-23",
+     "what": "SIM_KEYS_PET added: attack ctrl, Lucky Seven shift, no potion keys, pet food u",
+     "why": "her bindings changed on West Rocky Mountain II; the simulator plays her with them there while the older traces keep SIM_KEYS"
+    },
+    {
+     "date": "2026-11-02",
+     "what": "SIM_KEYS_MAGE: the magician with Magic Claw on shift",
+     "why": "the simulator plays the magician from then (sim.scenarios.HERS)"
+    }
+   ],
+   "gotchas": [
+    "her_setup(remembered=True) can return keys that differ from config.toml's [keys]; cfg.keys is always config.toml's (or the profile's).",
+    "The simulator's key sets are fixed on purpose: changing them changes every golden trace that names a key."
+   ],
+   "tests": [
+    "tests/test_gamelab.py",
+    "tests/test_guard.py",
+    "tests/test_keymap.py",
+    "tests/test_magician_hunt.py",
+    "tests/test_retreat.py",
+    "tests/test_sim_her.py",
+    "tests/test_sim_magic.py",
+    "tests/test_sim_tree.py"
+   ]
+  }
+ ],
+ "data_types": [
+  {
+   "name": "plan (inbox JSON)",
+   "module": "gamelab/control/client.py",
+   "line": 91,
+   "summary": "One key plan for the elevated player, written by client.send as lab/inbox/<id>.json. Made by Actions, the Mover, the Navigator and behavior; consumed by control.player.",
+   "fields": [
+    {
+     "name": "events",
+     "type": "list[list]",
+     "meaning": "[ms into the plan, key name, 'down' | 'up'] sorted by time, at most 400 of them (player.MAX_EVENTS), within 0-20,000 ms (player.MAX_PLAN_MS); mouse plans use [ms, 'mouse', x, y] and 'lbutton' / 'rbutton' events. The player refuses keys config.toml can't name"
+    },
+    {
+     "name": "capture",
+     "type": "dict",
+     "meaning": "fps (0-60), duration_ms, scale, lead_ms (and crop): what to record while it plays; fps 0 records nothing"
+    },
+    {
+     "name": "focus",
+     "type": "bool",
+     "meaning": "bring the game to the front first (never for her retreat's moves)"
+    },
+    {
+     "name": "end_ms",
+     "type": "int | None",
+     "meaning": "the plan lasts this long even past its last key (at most 20,000 ms); the next plan starts then"
+    },
+    {
+     "name": "window_client",
+     "type": "[w, h] | None",
+     "meaning": "resize the game's client area first (window.CLIENT_SIZES)"
+    },
+    {
+     "name": "kind",
+     "type": "str | None",
+     "meaning": "one of alarm.PLAN_KINDS (pet_food, retreat, lie_cursor, lie_ok): allowed with the Lie Detector alarm up"
+    }
+   ]
+  },
+  {
+   "name": "splice (inbox JSON)",
+   "module": "gamelab/control/client.py",
+   "line": 255,
+   "summary": "A plan that takes over from a running one, written by client.splice as lab/inbox/<running id>.splice for the navigator's replans; the player claims it and switches at at_ms.",
+   "fields": [
+    {
+     "name": "id",
+     "type": "str",
+     "meaning": "the new plan's own id (its result comes under it)"
+    },
+    {
+     "name": "events",
+     "type": "list[list]",
+     "meaning": "its key events, times from its own start"
+    },
+    {
+     "name": "at_ms",
+     "type": "int",
+     "meaning": "when on the running plan's clock it takes over (at once if gone by)"
+    },
+    {
+     "name": "held",
+     "type": "list[str]",
+     "meaning": "keys to have down as it starts: held ones kept, others let go"
+    },
+    {
+     "name": "end_ms",
+     "type": "int | None",
+     "meaning": "as a plan's"
+    },
+    {
+     "name": "kind",
+     "type": "str | None",
+     "meaning": "as a plan's"
+    }
+   ]
+  },
+  {
+   "name": "result (outbox JSON)",
+   "module": "gamelab/control/client.py",
+   "line": 383,
+   "summary": "The player's answer, read and deleted by client.wait (frames loaded from the .npz beside it).",
+   "fields": [
+    {
+     "name": "sent",
+     "type": "list[list]",
+     "meaning": "each key as the player pressed it: [ms into the plan, key, ...]"
+    },
+    {
+     "name": "problems",
+     "type": "list[str]",
+     "meaning": "e.g. 'cancelled', or 'spliced' when another plan took over"
+    },
+    {
+     "name": "spliced",
+     "type": "dict",
+     "meaning": "for a plan spliced away: {to, at_ms, late_ms}"
+    },
+    {
+     "name": "error",
+     "type": "str",
+     "meaning": "refused or failed (the Lie Detector's own message when that's why)"
+    },
+    {
+     "name": "region / scale / client",
+     "type": "",
+     "meaning": "where and how frames were captured"
+    },
+    {
+     "name": "trail",
+     "type": "list",
+     "meaning": "for the Lie Detector cursor: [clock s, client x, client y] of the pointer"
+    },
+    {
+     "name": "frames / times",
+     "type": "ndarray",
+     "meaning": "recorded frames and their times (from <id>.npz)"
+    }
+   ]
+  },
+  {
+   "name": "TripState",
+   "module": "gamelab/control/navigator.py",
+   "line": 936,
+   "summary": "A trip in progress (Navigator.begin, then step until over): where it goes, how it treats monsters, and what it carries from one look to the next. The hunt loop holds one per objective.",
+   "fields": [
+    {
+     "name": "dst / x",
+     "type": "int / float | None",
+     "meaning": "the platform to reach and the x on it"
+    },
+    {
+     "name": "deadline / max_misses",
+     "type": "float / int",
+     "meaning": "time.monotonic it times out at; misses allowed (6)"
+    },
+    {
+     "name": "until / health",
+     "type": "callables",
+     "meaning": "asked at each pass: end 'in position'; potions and the safety stop"
+    },
+    {
+     "name": "mode",
+     "type": "str",
+     "meaning": "avoid, hunt or transit"
+    },
+    {
+     "name": "trip",
+     "type": "Trip",
+     "meaning": "how it's going (returned at the end)"
+    },
+    {
+     "name": "weights / choice",
+     "type": "dict / Choice",
+     "meaning": "its random move weights and the way it chose, kept through replans"
+    },
+    {
+     "name": "avoid / cannot / refused",
+     "type": "dict / set / dict",
+     "meaning": "moves a monster blocked (AVOID_SECONDS), the mover couldn't do (CANNOT_S), or refused for a monster"
+    },
+    {
+     "name": "post_hit_until",
+     "type": "float",
+     "meaning": "end of her invulnerability after a touch: no fights, no `until` before it"
+    },
+    {
+     "name": "fresh / last",
+     "type": "Scene | None",
+     "meaning": "a look kept for the next pass; the last pass's look"
+    },
+    {
+     "name": "blocked / shots / waited",
+     "type": "float | None / int / int",
+     "meaning": "since when chains stopped short of monsters (MEET_S); shots and waits in a row"
+    },
+    {
+     "name": "evade_since / refuges / refuge",
+     "type": "",
+     "meaning": "the evade step's budget, refuges taken, and the current one"
+    },
+    {
+     "name": "through / stops / ran",
+     "type": "",
+     "meaning": "the loot chain's way through her drops, and the ground it ran over"
+    }
+   ]
+  },
+  {
+   "name": "Trip",
+   "module": "gamelab/control/navigator.py",
+   "line": 856,
+   "summary": "How a trip went, returned by Navigator.go / step to behavior and recorded as a 'trip' telemetry event.",
+   "fields": [
+    {
+     "name": "result",
+     "type": "str",
+     "meaning": "'arrived', 'in position', or why not ('timeout', 'too many misses', 'lost: ...', 'no route ...')"
+    },
+    {
+     "name": "moves",
+     "type": "list[str]",
+     "meaning": "each move made and where it landed"
+    },
+    {
+     "name": "misses / hits / kills",
+     "type": "int",
+     "meaning": "moves that landed elsewhere (not counting hits), moves where she was hit, monsters shot on the way"
+    },
+    {
+     "name": "chains / waits / replans",
+     "type": "int",
+     "meaning": "key plans that did several moves, looks spent waiting, chains replanned in flight"
+    },
+    {
+     "name": "time",
+     "type": "dict",
+     "meaning": "s spent looking, thinking and moving"
+    },
+    {
+     "name": "short",
+     "type": "str",
+     "meaning": "arrived short of x, and why (ARRIVE_STAND)"
+    }
+   ]
+  },
+  {
+   "name": "_Running",
+   "module": "gamelab/control/navigator.py",
+   "line": 893,
+   "summary": "A chain's key plan as sent to the player (running, or queued to start when the one before ends), as the watch loop tracks it.",
+   "fields": [
+    {
+     "name": "plan_id",
+     "type": "str",
+     "meaning": "the client's id for it"
+    },
+    {
+     "name": "legs",
+     "type": "list[flow.Leg]",
+     "meaning": "the chain's legs, times from its start"
+    },
+    {
+     "name": "start",
+     "type": "float",
+     "meaning": "when it starts (time.monotonic)"
+    },
+    {
+     "name": "more / tail",
+     "type": "bool / float",
+     "meaning": "whether another chain may follow on, and how long it runs on past its last leg"
+    },
+    {
+     "name": "length",
+     "type": "float | None",
+     "meaning": "how long the plan lasts as sent"
+    },
+    {
+     "name": "known",
+     "type": "tuple[MonsterTrack]",
+     "meaning": "the monsters the look it was planned from had (REACT reacts to others)"
+    },
+    {
+     "name": "parent",
+     "type": "str | None",
+     "meaning": "spliced in: the plan it takes over from, until the player has taken it"
+    },
+    {
+     "name": "why",
+     "type": "str",
+     "meaning": "why its chain ended: 'done', 'monster', 'long', 'unpredictable'"
+    },
+    {
+     "name": "arrows",
+     "type": "tuple",
+     "meaning": "its arrow events (ms, -1/+1, down): which arrow is held when (for splices)"
+    }
+   ]
+  },
+  {
+   "name": "_Ahead",
+   "module": "gamelab/control/navigator.py",
+   "line": 913,
+   "summary": "The look around late in a running chain, for the chain that may follow it (_look_ahead -> _queue_next).",
+   "fields": [
+    {
+     "name": "scene",
+     "type": "Scene",
+     "meaning": "the look, with her put where the running chain ends"
+    },
+    {
+     "name": "tracks",
+     "type": "tuple",
+     "meaning": "the monsters the next chain keeps clear of"
+    },
+    {
+     "name": "watch",
+     "type": "tuple",
+     "meaning": "with an escort, every monster it mustn't come near"
+    }
+   ]
+  },
+  {
+   "name": "Choice",
+   "module": "gamelab/control/navigator.py",
+   "line": 921,
+   "summary": "Which of the planner's ways a trip takes (route.choose at its first plan), kept through replans until she has set off on its move, is past it, or it got too dear.",
+   "fields": [
+    {
+     "name": "made",
+     "type": "bool",
+     "meaning": "chosen already"
+    },
+    {
+     "name": "via",
+     "type": "Move | None",
+     "meaning": "the move the way goes through (None: the quickest)"
+    },
+    {
+     "name": "leeway",
+     "type": "float",
+     "meaning": "s dearer than the quickest it may get (route.STRETCH of the quickest)"
+    },
+    {
+     "name": "beyond / left",
+     "type": "frozenset / set",
+     "meaning": "platforms past the move; platforms she has set off from since"
+    }
+   ]
+  },
+  {
+   "name": "Escort",
+   "module": "gamelab/control/navigator.py",
+   "line": 778,
+   "summary": "The protocol the fights on the way (behavior.fight.FightOnTheWay) implement for the navigator: what's in reach, what's in the way, which kinds count, shooting from here or along her platform, landing prices.",
+   "fields": [
+    {
+     "name": "target / shoot",
+     "type": "methods",
+     "meaning": "a monster in reach from here; fight it for a moment (kills)"
+    },
+    {
+     "name": "in_way / clear_way",
+     "type": "methods",
+     "meaning": "a monster on her platform in her way to x; shoot it"
+    },
+    {
+     "name": "threat",
+     "type": "method",
+     "meaning": "whether a kind's touch counts (chains keep clear of it)"
+    },
+    {
+     "name": "clear_for / shoot_from / shot_place",
+     "type": "methods",
+     "meaning": "shoot a given monster from here, from along her platform, or say where from"
+    },
+    {
+     "name": "throws / wont_have",
+     "type": "methods",
+     "meaning": "her throws so far; whether no fight would take a monster"
+    },
+    {
+     "name": "landings",
+     "type": "method",
+     "meaning": "how a leg's landing is priced against the chain's monsters (s)"
+    }
+   ]
+  },
+  {
+   "name": "TopPrice",
+   "module": "gamelab/control/navigator.py",
+   "line": 826,
+   "summary": "What her time up a rope is worth and what a touch at its top costs (Hunter.top_price), for HANG_TAKE's choice between waiting and taking the touch.",
+   "fields": [
+    {
+     "name": "rate",
+     "type": "float",
+     "meaning": "EXP a second her time there is worth"
+    },
+    {
+     "name": "touch",
+     "type": "float",
+     "meaning": "EXP a touch of the kind costs (its HP in potions, times the share of touches that hurt)"
+    },
+    {
+     "name": "margin",
+     "type": "float | None",
+     "meaning": "her HP as last read over the safety stop's reserve"
+    },
+    {
+     "name": "hp / largest / read",
+     "type": "float / float / float | None",
+     "meaning": "HP a touch of the kind takes; the map's largest; when her HP was read"
+    },
+    {
+     "name": "words",
+     "type": "str",
+     "meaning": "where the rate comes from, for the log"
+    }
+   ]
+  },
+  {
+   "name": "KeyNames",
+   "module": "gamelab/control/navigator.py",
+   "line": 871,
+   "summary": "A live mapping from flow's key roles to her current key names, read from Actions at every ask, so keys followed to where the game has them reach the next chain.",
+   "fields": [
+    {
+     "name": "FIELDS",
+     "type": "dict",
+     "meaning": "left, right, jump, up, down, and 'pick' -> GameKeys.pick_up"
+    }
+   ]
+  },
+  {
+   "name": "Followed",
+   "module": "gamelab/control/keymap.py",
+   "line": 99,
+   "summary": "What keymap.follow made of a read of the game's KEY BINDINGS window, for behavior.keycheck and the hunter.",
+   "fields": [
+    {
+     "name": "keys",
+     "type": "GameKeys",
+     "meaning": "her keys as the game has them"
+    },
+    {
+     "name": "moved",
+     "type": "dict[str, (str, str)]",
+     "meaning": "field -> (was, now)"
+    },
+    {
+     "name": "off",
+     "type": "dict[str, str]",
+     "meaning": "fields on no key she may press, and where the window has them"
+    },
+    {
+     "name": "stop",
+     "type": "str | None",
+     "meaning": "why the hunt stops (a NEEDED field off)"
+    },
+    {
+     "name": "unknown",
+     "type": "dict[str, str]",
+     "meaning": "fields the window can't tell (kept)"
+    },
+    {
+     "name": "said",
+     "type": "list[str]",
+     "meaning": "lines for the log"
+    }
+   ]
+  },
+  {
+   "name": "Start",
+   "module": "gamelab/control/keymap.py",
+   "line": 269,
+   "summary": "A command's keys at its start (keymap.at_start): the remembered binding's or config.toml's.",
+   "fields": [
+    {
+     "name": "keys",
+     "type": "GameKeys",
+     "meaning": "the keys to start with"
+    },
+    {
+     "name": "source",
+     "type": "str",
+     "meaning": "where they come from, in words (why a remembered file was left out)"
+    },
+    {
+     "name": "attack_off",
+     "type": "str | None",
+     "meaning": "the game had Attack on no key when read"
+    },
+    {
+     "name": "data",
+     "type": "dict | None",
+     "meaning": "the remembered file's contents, if used"
+    }
+   ]
+  }
+ ],
+ "flows": [
+  {
+   "id": "trip-pass",
+   "title": "One pass of a trip",
+   "summary": "How the navigator gets from a look to keys: plan the route, pick the monsters, chain the moves, deal with what blocks them, carry the chain out, then look again.",
+   "trigger": "behavior calls Navigator.go (the tour, the retreat) or begin then step (the hunt loop) with a platform to reach",
+   "steps": [
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator.go",
+     "text": "begin makes a TripState (180 s by default, a mode from the escort); step runs one pass at a time until it's over. A LookLost has her stand still until looks work again, the trip's clocks paused.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._pass",
+     "text": "Deadline, misses and the Lie Detector alarm checked; a look with the monsters (or the one the last chain left); her potions and the safety stop; `until` may end the trip 'in position'.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/mover.py",
+     "symbol": "Mover.locate",
+     "text": "The look: Senses.look until it places her; in the air or on a rope, the navigator waits for her to land or gets her off first.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._route",
+     "text": "The route from motion.route.Planner, each move weighed by the trip's random weights, with extra cost for moves a monster blocked, keep-off platforms and moves the mover couldn't do.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._chain_monsters",
+     "text": "The monsters the chain keeps clear of: the whole state's, walking as perception has them head at their kind's speed, plus those her memory and the feed know but the look missed.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/motion/flow.py",
+     "symbol": "Flow.chain",
+     "text": "As many moves as can be predicted, chained into one key timeline from where she stands, stopping short of a leg a monster could touch her on.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._meet",
+     "text": "A monster blocking the first move: with an escort shoot it, go around, hop, wait, evade, or pass it regardless (and, nothing to meet, _clear_landing for a monster by the last landing); without, _wait_for_monster then the evade step.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._carry_out_chain",
+     "text": "The chain goes out and is watched (follow); with nothing chained, the first move alone goes to the Mover, watched.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._note_landing",
+     "text": "Where she ended against where the chain should have: elsewhere with no touch and no deliberate stop is a miss. The next pass plans from where she is.",
+     "process": "hunt"
+    }
+   ]
+  },
+  {
+   "id": "chain-watch",
+   "title": "A chain running: glances, cut-offs and the next chain queued",
+   "summary": "While a chain's plan plays, the navigator glances at her about 15 times a second, cuts the plan on a touch or when she's off its path, and plans the next chain late in this one so she runs on without stopping.",
+   "trigger": "Navigator.follow sends a chain's plan",
+   "steps": [
+    {
+     "module": "gamelab/control/actions.py",
+     "symbol": "Actions.hold_back",
+     "text": "The chain waits just long enough that no jump or attack key falls in her attack lock and no arrow in the arrow lock.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/client.py",
+     "symbol": "send",
+     "text": "The plan goes into lab/inbox with end_ms (its predicted landing plus any tail), not waited for.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "serve",
+     "text": "The elevated player claims the plan (renames it .running), brings the game to the front if the plan asks (`focus`), refuses it if the game still isn't in front, and presses its keys on time.",
+     "process": "player"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._watching",
+     "text": "Each glance: a touch told since the look or HP down by 0.4% cuts it; off the planned path for 0.109 s cuts it; a monster coming into a leg ahead has it replanned.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._look_ahead",
+     "text": "0.9 s before the last landing a look around: with an escort, a reason to stop where it ends (the trip's until, a target in reach) means no follow-on.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._queue_next",
+     "text": "Once she's back on the ground, a look places her standing on the platform; the next chain is planned from there (about 5 ms) and sent to start the moment this plan ends.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/client.py",
+     "symbol": "cancel",
+     "text": "On a cut, the running and queued plans are cancelled: the player stops and lets go of every key.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._after_chain",
+     "text": "After a cut, a look once she has stopped (or, after a touch, the first state with her landed); after a clean end, the look the next pass will use.",
+     "process": "hunt"
+    }
+   ]
+  },
+  {
+   "id": "replan-splice",
+   "title": "Replanning mid-chain with a splice",
+   "summary": "A monster the plan didn't know comes into a leg still to come: the chain is replanned from where she'll be 40 ms on and handed to the player to take over from the running plan, the arrow held kept held.",
+   "trigger": "a glance's state shows a monster meeting a leg ahead (REACT), or BETTER_EVERY_S has passed",
+   "steps": [
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._coming",
+     "text": "The newest state's monster tracks the plan didn't know, checked with flow.danger against the legs from REACT_LEAD_S (0.25 s) on.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._splice_point",
+     "text": "Where the running plan can be taken over SPLICE_LEAD_S (40 ms) from now: on the ground there; in or about to start a flight, not yet.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._switch",
+     "text": "Only where the state has her within 20 units of where the plan does; replanned against the whole state, the arrow held carried into the new chain; dropped if done too late.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator._take_over",
+     "text": "Spliced if the player takes splices, else the running plan is cut and the new one sent at once.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/client.py",
+     "symbol": "splice",
+     "text": "Writes lab/inbox/<running id>.splice with the new events, at_ms and the keys to keep held.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "Player.run",
+     "text": "At at_ms of the running plan's clock the player drops its remaining keys, keeps the held arrow down and plays the new events; the old plan's result says 'spliced'.",
+     "process": "player"
+    },
+    {
+     "module": "gamelab/control/client.py",
+     "symbol": "taken",
+     "text": "The watch learns the splice was taken (or not: the old plan ended first, and she stops).",
+     "process": "hunt"
+    }
+   ]
+  },
+  {
+   "id": "action-plan",
+   "title": "A throw, from decision to the game",
+   "summary": "How one action becomes keys: locks waited out, a turn tap only if needed, the attack key chosen, the plan mailed to the player and waited for, then the locks set for the next one.",
+   "trigger": "attack.stance / behavior.fight decides a throw at a monster",
+   "steps": [
+    {
+     "module": "gamelab/control/actions.py",
+     "symbol": "Actions.throw",
+     "text": "Waits out her attack lock (or behavior.targeting's frame-by-frame watch), then asks `still`: a kill shown since the decision drops the throw.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/actions.py",
+     "symbol": "Actions.faces",
+     "text": "A turn tap (50 ms, then 30 ms to settle) only if she doesn't surely face the target by her keys or a strong frame.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/actions.py",
+     "symbol": "Actions._attack_key",
+     "text": "The regular attack, her skill (Lucky Seven, Magic Claw), or what the attack choice says; none: no throw.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/actions.py",
+     "symbol": "Actions._thrown",
+     "text": "The throw listeners (the kill ledger) hear when the attack key will go down.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/actions.py",
+     "symbol": "Actions.play",
+     "text": "hold_back, the stop check, then client.submit: the plan is written and waited for.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/client.py",
+     "symbol": "wait",
+     "text": "Polls lab/outbox every 10 ms; reads, deletes, and returns the result with each key's real time.",
+     "process": "hunt"
+    },
+    {
+     "module": "gamelab/control/actions.py",
+     "symbol": "Actions.throw",
+     "text": "Sets lock_until to 730 + 60 ms from now and arrow_until to 800 ms after the attack key; her facing is the throw's way.",
+     "process": "hunt"
+    }
+   ]
+  }
+ ],
+ "not_done": [
+  "Whether an arrow pressed from about 0.65 s after an attack key is swallowed isn't measured: plans wait 0.8 s (ARROW_LOCK_MS) until the in-game check the README lists is made.",
+  "physics.KICK_JUMPS stays off: the kick from standing worked in 4 of 4 jumps keyed 40 ms after the arrow and 3 of 4 at 60, not reliable enough to plan on; about 20 more runs in game should confirm it before jump backs are keyed 52 ms after their arrow (motion.physics, actions.JB_RUN_MS).",
+  "A jump throw turned on the ground waits 205 ms after a 50 ms tap; taps that short are bimodal in game, so half these waits may be for nothing: an in-game look at jump throws that turn decides.",
+  "Whether the game takes a portal in mid-air isn't known (mover.PORTAL_UP_MS only helps if it takes them on the ground alone).",
+  "Several navigator numbers are guesses, so labelled in the code: UNSHOT_S, LAND_WAITS, BETTER_EVERY_S, SWITCH_GAIN_S, SWITCH_MIN_S, SHOOT_WALK.",
+  "LAST_SHOT made no difference past the seeds' spread in the simulator; it is on 'to watch', after two live touches after a pass regardless came from a Green Mushroom she had seen.",
+  "HANG_LONGER and HANG_TAKE are on by the user's rule ('keep the rope rule on', 2026-11-02) after being measured worse for her than the plain 2 s hang on the merged world; the code's comments give measurements both ways by world and seed set.",
+  "ARRIVE_CHECK_POST_HIT is a stopgap 'until the per-step planner' (the user, 2026-11-03), on only where the character's profile answers close quarters with 'touch' (the magician).",
+  "Monsters that hop are planned as never leaving their platform (MonsterTrack.reach); no map of hers has a kind that hops and whose touch counts yet (Navigator._threats says so if one does).",
+  "Measured and left off: BLOCK_MEMORY, PASS_AVOID, REFUGE_WORTH, TOUCHER_ALL, SAFE_PASS, QUEUE_SPREAD.",
+  "No harness run has dropped a replan as too late (SPLICE_LATE_S) at 1x or 3x of its computing charged to the clock: only the tests do.",
+  "A chain capped at its length mid-climb can leave her on a rope where the escort keeps throwing at monsters 'in reach' (tour seed 28; README, Found offline, not fixed yet); bounded per platform by ON_WAY_TRIES.",
+  "Her potions' keys aren't read off the Key Bindings window (no picture known for them): keymap keeps them as they were.",
+  "Not settled whether a knock with no arrow held turns her (README, Her heading): after a hit with no frame telling, Actions takes her heading as unknown and the next throw taps."
+ ]
+}

@@ -1,0 +1,2685 @@
+{
+ "id": "behavior-loops",
+ "layer": "behavior",
+ "title": "Behavior: hunt loops, grinding, tours, patrols and looting",
+ "tagline": "The top-level loops that decide, look by look, where she hunts, what she shoots and which drops she takes.",
+ "summary": "The top of the stack: the loops that run for minutes or hours and decide what to do next. `Hunt` (the hunt loop) and its subclass `Grind` (the default) make one decision after every look by an ordered list of rules; `Patrol` and `Tour` hold the map knowledge they choose from; the loot sweep, the loot chain and the `Looter` decide which drops to pick up and how. `bootstrap` reads her max HP, level and DEF from perception, and `walk` is a movement-only test drive.",
+ "details_md": "### Words used here\n\nA **look** is one perception snapshot (a `Scene`): most search the **band** around her (140 units above to 75 below her feet, gamelab/docs/hunt-modes.md), some the **whole screen**. A **ground** is a platform worth hunting; a **spot** is where she stands to shoot it (often a platform above it, out of its monsters' reach). A **pile** is a kill's drops (or drops seen on the ground), kept by the drop store; the **ledger** places each EXP gain on the monster that died (both in behavior/ledger.py, another slice). The **navigator** (control layer) plans and plays chains of jumps, drops, climbs and walks to a platform and x; a **trip** is one such errand.\n\n### Three generations of the same job\n\n| Mode | Command | Module | How it decides |\n|---|---|---|---|\n| tour | `python -m gamelab tour` | `tour.py` | a fixed sweep of hunting platforms; each stop a fight (`Hunter.clear`) then a loot collection |\n| hunt loop (camping) | `tour --loop --camp` | `hunt.py` | one decision per look; stays at a ground until its EXP rate falls below the best other ground's |\n| grinding (default) | `tour --loop` | `grind.py` + `patrol.py` | the hunt loop going round a loop of stops over the map's spawn points, leaving a stop as soon as staying pays less than going on |\n\nAll three are started by `cmd_tour` in `gamelab/__main__.py`, inside `on_alarm(hunter)` (a Lie Detector makes her retreat), and end standing by on a safe platform (the loops then `park`).\n\n### A pass of the hunt loop\n\nEvery pass: **look** (the band around her, the whole screen when needed) -> **book** new kills from the ledger -> **guards** (stuck guard, potions and the safety stop, objective backstop) -> **rules**, first match wins: close quarters and a valuable pile always first; then, travelling, in passing, finish and the loot sweep; at the ground, high ground, shoot, better spot, then stay (sweep or wait) or leave (sweep on the way out, advance) -> **one step**: a throw, a short walk along her platform, a navigator trip, or a stand on a pile. A respawn or a new pile changes the next step within a second or two.\n\nTrips are the navigator's (control layer), in `TRANSIT` mode, and the navigator asks the loop's `_interrupt` before every chain of moves. Control may not import behavior (tests/test_architecture.py), so the loop steers it through that callback. What she's heading for is an `Objective` on a stack: a higher rule suspends it rather than ending it, and its clock (60 s) keeps running.\n\n### Loot\n\nKills placed by the ledger become expected piles in the drop store (behavior/ledger.py, another slice). Each look, the loop turns the store's candidates into pick spots (`Hunt._spots`): their worth (looting's prices), stand time, landing time, survival, the monsters that would meet her there (shot first if she can, else the pile waits), and the seconds each may add to her way (3 s fresh, down to 1 s at 60 s old). `sweep.plan` solves the best itinerary exactly; `Sweeper` keeps it unless another is clearly better. EXP comes first: with anything in reach no pile goes ahead. In grinding with the target-first planner and the whole screen (both on by default), the itinerary's next few piles (4 at most) run as one navigator chain (`lootchain`). `Looter` keeps her inventory tabs and serves the old tour's walk-and-mop-up looting.\n\n### Where to hunt\n\nThe hunt loop picks grounds from the `Tour`'s value map (lab/grounds.json): EXP a visit blended from spawn data and real visits, divided by travel plus visit length. Grinding uses `Patrol`: spawn points, one stop per platform, a `Belief` of each point's monsters (memory, a learned memoryless refill rate, the census of the whole map held to its cap), the loop of 2-12 stops with the best long-run EXP a minute, and the next stop (the loop's, a pile of seen monsters that pays 1.25x the loop over its detour, or a census trip when her view looks starved).\n\n### Design stance\n\nThe fight rules hold measured lessons (high ground, facing, end margins), so they stay rules, not one weighted score; scores are used only where places are compared by time (spots, piles, grounds, stops). Most thresholds are marked \"guess\" in the code: starting values tuned in the simulator harness's A/B runs, with the README recording each change's measured effect. Every choice is logged in words and sent as telemetry ('hunt', 'grind', 'sweep', 'loot_chain', 'summary') for the mini-map and later analysis.",
+ "groups": [
+  {
+   "id": "loops",
+   "title": "The hunt loops",
+   "summary": "The loop that decides after every look (Hunt) and its grinding variant, the default (Grind).",
+   "modules": [
+    "gamelab/behavior/hunt.py",
+    "gamelab/behavior/grind.py"
+   ]
+  },
+  {
+   "id": "where",
+   "title": "Where to hunt: tours, grounds and patrols",
+   "summary": "The map knowledge the loops choose from: the tour's value map and stand-by, and the patrol's spawn-point belief, loop and next stop.",
+   "modules": [
+    "gamelab/behavior/tour.py",
+    "gamelab/behavior/patrol.py"
+   ]
+  },
+  {
+   "id": "loot",
+   "title": "Loot: which piles, in what order, and how",
+   "summary": "The loot sweep's exact itinerary, the loot chain that runs through it, and the Looter with inventory tabs and drop prices.",
+   "modules": [
+    "gamelab/behavior/sweep.py",
+    "gamelab/behavior/lootchain.py",
+    "gamelab/behavior/looting.py"
+   ]
+  },
+  {
+   "id": "support",
+   "title": "Her stats, and a movement-only walk",
+   "summary": "Her max HP, level and DEF bootstrapped from perception for the safety stop and the danger model; and random navigator trips to test movement.",
+   "modules": [
+    "gamelab/behavior/bootstrap.py",
+    "gamelab/behavior/walk.py"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "path": "gamelab/behavior/hunt.py",
+   "title": "The hunt loop (Hunt)",
+   "tagline": "One decision after every look: the first rule that applies picks her next step.",
+   "summary": "`Hunt` is \"hunt mode\" from gamelab/docs/hunt-modes.md. Instead of a tour's fixed stops, loot trips and fights on the way, it takes a look, books new kills, checks her health, and lets the first rule that applies choose one step: a throw, a short walk, a navigator trip toward an objective, or a stand on a pile of drops. On its own it hunts one ground at a time (`tour --loop --camp`) and leaves by a rate rule; `Grind` subclasses it for the default grinding mode.",
+   "details_md": "`Hunt` sits on top of a `Tour` (for the map knowledge: the value map, the kinds worth hunting, the safe platforms and spots) and the tour's `Hunter` and `Navigator`. `run(minutes)` loops `_pass()` until time is up, then walks to a safe platform (`Tour.stand_by` in `TRANSIT` mode) and sums the run into a `HuntReport`.\n\n### One pass (`_pass`)\n\n1. **Look** (`_look`): the band around her plus her platform's drops; the whole screen once a far kill's drops have landed (`FAR_DROPS_LOOK`), and a whole-screen look at most every `WIDE_EVERY` (2 s) when the rules need one (`_wide`).\n2. **Book** (`_book`): new kills from the ledger, credited to the current `Visit` only once she has arrived and only for kills on the ground (or made from it or its spot); a pile seen gone after she went for it counts as progress.\n3. **Guards**: the stuck guard (`_stuck`, 120 s with no kill, pick-up or new ground), `Hunter.health_check` (potions, and the safety stop, which raises), and the objective backstop (`OBJECTIVE_S`, 60 s, suspensions included).\n4. **Rules** (the design's numbers), first match wins: rule 1, then rule 6a; then, travelling (an objective is set): 4, 4b, the sweep, else on with the trip; at the ground: 2, 3, 7, then the rate rule: staying, the sweep's round trip else 9; leaving, the sweep's piles on her way out, then 11.\n\n| # | Rule | In short |\n|---|---|---|\n| 1 | close quarters | a target on (or just beside) her platform too close for her next attack: the stance's answer, no closing in |\n| 6a | valuable pile | a drop worth `valuable` mesos or more within 15 s of travel, only with nothing in reach (EXP before loot) |\n| 4 | in passing | throw at what's in reach, or step at most 150 out from under one above; 15 s per platform per objective |\n| 4b | finish | monsters she hurt and didn't kill, 8 s per objective |\n| S | sweep | the loot sweep's piles on her way, a round trip from her spot, or on her way out |\n| 2 | high ground | on a platform she can't safely stand on (or away from the ground): back to the spot |\n| 3 | shoot | a target in reach from where she can stand: `attack.stance`'s answer |\n| 7 | better spot | another spot reaches 2 more (or 1.5x as many) remembered monsters, within 8 s |\n| 9 | wait | stand still, walk to a safer place along her platform, or hang on a rope |\n| 11 | advance | a trip to the next ground's spot |\n\n5. **One step.** Trips go through the navigator (`_travel`: `Navigator.begin`/`step`), which asks `_interrupt` before each chain of moves, so a monster coming into reach or a pile appearing cuts the trip and the next pass decides.\n\n### Objectives are suspended, not ended\n\n`self.obj` is the current `Objective` (a spot or a pile); a higher rule pushes it onto `self.stack` and pops it back later, keeping its route weights and its clock. The clock runs while it's suspended, which bounds a \"shoot respawns on the way forever\" loop.\n\n### Leaving a ground\n\n`_leaving` is the rate rule: her EXP a second here (with a 20 s prior at the ground's expected rate, times `1 - 2 x danger` of the spot) against the best other ground's EXP a second including travel; she leaves under 0.8 of it, after at least 15 s or 6 throws. The fast exit leaves when looks covering 75% of the ground saw nothing wanted for 3 s and no kill of hers is due back (`RESPAWN` 8 s + 2); that ground is then skipped 120 s. With no other ground to go to, she stays and waits. Leaving, `_leave` first sweeps the piles on her way out (within `DEPART_BUDGETS`), then `_next_ground` picks by value / (travel + visit length), varied by a random 0.75-1.25.\n\nMost numbers are marked \"guess\" in the code: starting values tuned in the simulator's A/B runs (`gamelab.sim.harness`), not measured in game.",
+   "lines": 2669,
+   "key_items": [
+    {
+     "name": "Hunt",
+     "kind": "class",
+     "line": 527,
+     "signature": "class Hunt: def __init__(self, tour, log=print, rng: random.Random | None = None)",
+     "summary": "The hunt loop over a Tour's map knowledge, its hunter and its navigator. Holds the visit, the objective stack, the fight state, the loot sweeper and every clock.",
+     "details_md": "Many small methods (`_through`, `_chain_over`, `_land_near`, `_instead_of_waiting`, `_varies`, `_ends_on_arrival`, `_whole`, `_guards_it`, `_none_landed`, `_fill`, `_among`, `_may_stop_her`, `_home`) return the hunt loop's plain default and exist so `Grind` can override them."
+    },
+    {
+     "name": "Hunt.run",
+     "kind": "method",
+     "line": 586,
+     "signature": "def run(self, minutes: float) -> HuntReport",
+     "summary": "Hunt for `minutes`, then stand by on the nearest safe platform; returns the run's report and emits the telemetry 'summary' record.",
+     "details_md": "Before the loop it installs hooks: `Looter.yield_to = _yields` (picking up stops for what's in reach), `Looter.unseen` and `Attacks.unseen` (monsters a look missed). The loop catches `LookLost` (stand still until `Senses.regain` brings the game back, shifting every clock with `_paused`), `KeyDoubt` (runs `Hunter.check_keys`), and `ChatDue`/`StatsDue` (collapses the chat box or reads the stat window at a quiet moment). After the stand-by trip `_book_after` books the kills made on the way to stand by."
+    },
+    {
+     "name": "Hunt._pass",
+     "kind": "method",
+     "line": 766,
+     "signature": "def _pass(self) -> str | None",
+     "summary": "One look and one step: bookkeeping, the stuck guard and health check, the objective backstop, then rule 1, rule 6a, then `_while_travelling` (an objective is set) or `_at_ground`. Returns \"stop\" to end the hunt."
+    },
+    {
+     "name": "Hunt._at_ground",
+     "kind": "method",
+     "line": 842,
+     "signature": "def _at_ground(self, s: Scene, targets, visible, hidden, now: float) -> str | None",
+     "summary": "At the ground: high ground (2), back to spot, shoot (3), better spot (7), then the rate rule: stay (sweep a round trip, else wait) or leave."
+    },
+    {
+     "name": "Hunt._while_travelling",
+     "kind": "method",
+     "line": 817,
+     "signature": "def _while_travelling(self, s: Scene, targets, visible, hidden, now: float) -> str | None",
+     "summary": "With an objective: a valuable-pile trip goes on or is called off; else in passing (4), finish (4b), the sweep's pile trip or piles on her way, else on with the trip."
+    },
+    {
+     "name": "Hunt._leaving",
+     "kind": "method",
+     "line": 2115,
+     "signature": "def _leaving(self, s: Scene) -> str | None",
+     "summary": "The rate rule: why she leaves now (a string for the log) or None to stay.",
+     "details_md": "Checks in order: `GROUND_S` (600 s backstop); the fast exit (ground covered by `GROUND_SEEN` 75% of the look, nothing wanted in her memory, nothing due back, confirmed for `EMPTY_CONFIRM_S` 3 s; the ground skipped `SKIP_S` 120 s); patience run out with nothing due back (\"nothing came into reach\"); then, past `MIN_STAY`/`MIN_THROWS`, `_rate_here() < LEAVE_MARGIN x _best_rate()`. If `_elsewhere()` says no other ground would be picked, `_stay` turns the reason into waiting (live on 2026-10-24 with one ground the reason fired about once a second for 11 minutes)."
+    },
+    {
+     "name": "Hunt._next_ground",
+     "kind": "method",
+     "line": 2230,
+     "signature": "def _next_ground(self, s: Scene) -> None",
+     "summary": "Records the finished visit, picks the next ground by value / (travel + visit length) x random 0.75-1.25 x rival share x safe share, and sets a new Visit and a spot objective.",
+     "details_md": "With every ground skipped it takes the soonest back. `GROUND_TIE` (off, 0.0) would let grounds within that share of the best take turns."
+    },
+    {
+     "name": "Hunt._travel",
+     "kind": "method",
+     "line": 2284,
+     "signature": "def _travel(self, rule: str) -> None",
+     "summary": "Carries out the objective as one navigator trip: `Navigator.begin(..., until=self._interrupt, mode=TRANSIT)` then `nav.step` until it's over; arrived, stopped 'in position' (next pass decides), or failed (objective dropped).",
+     "details_md": "The trip's seconds are `max(5, OBJECTIVE_S - age)`, its route weights and route choice are the objective's (kept across suspensions), and it starts from the latest look if still fresh. A spot never reached gets its ground skipped and a new ground chosen (`_drop_objective`)."
+    },
+    {
+     "name": "Hunt._interrupt",
+     "kind": "method",
+     "line": 2344,
+     "signature": "def _interrupt(self, s: Scene) -> bool",
+     "summary": "Asked by the navigator before every chain of a trip: whether a rule now calls for her (close quarters, a pile no longer worth it, a valuable pile that goes first, a wound to finish, a target in reach she may shoot, or the sweep has a different pile for her).",
+     "details_md": "This is how behavior steers control without control importing behavior (tests/test_architecture.py's layer rule). Only asks what the next pass would act on: a monster only a jump reaches stopped every trip on its first look in `loop_tree_walls` (107 s held, found 2026-10-25)."
+    },
+    {
+     "name": "Hunt._sweep",
+     "kind": "method",
+     "line": 1454,
+     "signature": "def _sweep(self, s: Scene, dest: tuple[int, float] | None, say: bool = True) -> \"sweep.Stop | None\"",
+     "summary": "The loot sweep's next stop from look `s` on her way to `dest`: builds pick spots (`_spots`), the terms (`_sweep_terms`: lull budget or way-out budget), and calls `sweep.Sweeper.solve`; logs and emits a 'sweep' record when the itinerary changes.",
+     "details_md": "Solved once per look per destination (keyed on the Scene object itself, not its id)."
+    },
+    {
+     "name": "Hunt._spots",
+     "kind": "method",
+     "line": 1569,
+     "signature": "def _spots(self, s: Scene) -> tuple[list[\"sweep.Spot\"], dict]",
+     "summary": "Turns the drop store's candidate piles into `sweep.Spot`s: middle of the drops, worth she can take, stand time, landing time, survival curve, guards, and the seconds each may add to her way (`_allow`).",
+     "details_md": "`_allow` gives `ALLOW_FRESH` (3 s) to piles up to `FRESH_S` old (the ledger's 15 s ownership), falling linearly to `ALLOW_OLD` (1 s) at `OLD_S` (60 s), scaled by the share she can take; a pile `SAFER_MARGIN` (0.05) more dangerous than where she stands gets at most `ALLOW_OLD`. Piles left out are explained in the itinerary's `out` (\"unsafe: a horny-mushroom at x 890 on 23 would meet her there\")."
+    },
+    {
+     "name": "Hunt._guards",
+     "kind": "method",
+     "line": 1672,
+     "signature": "def _guards(self, s: Scene, p: Pile, at: float, stand: float) -> tuple[tuple, str | None]",
+     "summary": "\"No touch for loot\": which monsters would meet her standing on the pile from `at` s for `stand` s plus `sweep.STAND_PAST_S`; those a star from here hits are guards to shoot first, any other leaves the pile out for this look.",
+     "details_md": "Monsters come from `_about`: the look's and the feed's swept ones, plus those the look missed (`_unseen`), of kinds that count as a danger, on the pile's platform or (BESIDE_GUARDS) on one just under or over whose bodies would meet hers; never her own kill dying there. Each walks per `_reach_of` (its heading at its kind's speed, turning at its platform's walk edges) through `sweep.meets`."
+    },
+    {
+     "name": "Hunt._stand",
+     "kind": "method",
+     "line": 1864,
+     "signature": "def _stand(self, s: Scene, pile: Pile) -> None",
+     "summary": "Picks up a pile from beside it: each bunch of seen drops walked to from the nearer end and pressed (one press per drop plus one), or for an unseen kill pile a walk over `SPREAD` (30) units either side.",
+     "details_md": "Only if nothing would meet her there now. A drop still where she stood twice goes to `Looter.cant_pick`; a pile of only full-tab items costs a try and no walk. Counts one of the pile's `PILE_TRIES` (3) and emits a 'pick' event."
+    },
+    {
+     "name": "Hunt._respawn_guard",
+     "kind": "method",
+     "line": 1707,
+     "signature": "def _respawn_guard(self, s: Scene, pile: Pile, t0: float) -> str | None",
+     "summary": "The spawn guard: holds a short trip to a pile whose stand would meet the map's next respawn pass near free spawn points of monsters that hurt, when the expected touches cost more than waiting.",
+     "details_md": "Asked by `_go_for` only for a pile TRIP_AHEAD_S (3 s) away or less, and only once the hunter's spawn clock (`localization.spawnclock`) is sure. Each free point within `RESPAWN_NEAR` (70) is priced at fill x (`NEWBORN_TOUCH` 0.85 - `NEWBORN_SEEN` 0.29) x the share of touches that hurt x the touch's HP in potions; she waits (\"<rule>: the pass\") if going costs more than the wait at her EXP a second, stepping off a point first if she's on one (`_off_points`)."
+    },
+    {
+     "name": "Hunt._wait",
+     "kind": "method",
+     "line": 2430,
+     "signature": "def _wait(self, s: Scene, targets) -> None",
+     "summary": "Rule 9: wait where she is (0.1 s), or step up to `WAIT_STEP` (100) units to a safer place along her platform that keeps the ground's spawn points in reach (`_wait_place`), or hang on a rope (`_refuge`).",
+     "details_md": "A safer place must be `WAIT_GAIN` (0.03 of her HP by `attack.danger`) safer; a rope `ROPE_GAIN` (0.05 of the HP she has left) safer, and she gets off it to shoot, when nothing is due back and another ground waits, or after `HANG_MAX_S` (60 s). Never on a map where nothing counts as a danger."
+    }
+   ],
+   "inputs": [
+    "every look (Scene) from the hunter's Senses: her place, monsters, drops, players, HP",
+    "the ledger's kills and the drop store's piles (behavior/ledger.py, through the hunter)",
+    "the Tour's value map (ground_values, hunting_grounds, stats) and the navigator's route planner times",
+    "attack.danger (the hunter's map danger), attack.spots (spots, spot_for), attack.stance (what to do up close)",
+    "the hunter's memory of monsters, spawn clock, attacks (kill times) and Looter (inventory tabs)"
+   ],
+   "outputs": [
+    "key plans through Actions (throws, walks, pick-up presses) and navigator trips (Navigator.begin/step)",
+    "visits recorded into the value map (Tour.record_visit: gamelab/lab/grounds.json)",
+    "telemetry records 'hunt' (rule, objective, rates, piles), 'tour', 'sweep', 'monsters', 'event' and one 'summary'",
+    "a HuntReport (printed by `tour --loop` as \"hunt done: ...\")"
+   ],
+   "uses": [
+    "gamelab/behavior/tour.py",
+    "gamelab/behavior/hunter.py",
+    "gamelab/behavior/fight.py",
+    "gamelab/behavior/sweep.py",
+    "gamelab/behavior/ledger.py",
+    "gamelab/behavior/looting.py",
+    "gamelab/behavior/keycheck.py",
+    "gamelab/behavior/chatcheck.py",
+    "gamelab/behavior/statcheck.py",
+    "gamelab/behavior/attacks.py",
+    "gamelab/control/navigator.py",
+    "gamelab/control/mover.py",
+    "gamelab/control/actions.py",
+    "gamelab/attack/reach.py",
+    "gamelab/attack/ropes.py",
+    "gamelab/attack/spots.py",
+    "gamelab/attack/danger.py",
+    "gamelab/attack/stance.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/players.py",
+    "gamelab/localization/scene.py",
+    "gamelab/localization/unseen.py",
+    "gamelab/localization/memory.py",
+    "gamelab/localization/spawnclock.py",
+    "gamelab/motion/physics.py",
+    "gamelab/motion/bodies.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/perception/loot.py",
+    "gamelab/perception/mobs.py",
+    "gamelab/telemetry.py",
+    "maplehelper/engine.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamelab/lab/grounds.json",
+     "mode": "read-write",
+     "what": "the value map, through the Tour: each visit's EXP and length (record_visit)"
+    },
+    {
+     "path": "gamelab/lab/telemetry/",
+     "mode": "write",
+     "what": "the run's records through gamelab/telemetry.py ('hunt', 'tour', 'sweep', 'summary', events)"
+    }
+   ],
+   "concurrency": "No threads of its own: it runs on the `tour --loop` command's main thread (or the simulator harness's), blocking on looks and key plans, sleeping 0.1-0.2 s when it waits. Keys reach the game through the separate elevated key player process via the navigator and Actions.",
+   "tunables": [
+    {
+     "name": "OBJECTIVE_S",
+     "value": "60.0",
+     "meaning": "backstop: s on one objective, suspensions included"
+    },
+    {
+     "name": "GROUND_S",
+     "value": "600.0",
+     "meaning": "backstop: s at one ground"
+    },
+    {
+     "name": "STUCK_S",
+     "value": "120.0",
+     "meaning": "s without a kill, a pick-up or a new ground before she stands by (key bindings checked first)"
+    },
+    {
+     "name": "PASSING_S",
+     "value": "15.0",
+     "meaning": "rule 4: s of shooting per platform per objective while passing through"
+    },
+    {
+     "name": "FINISH_S",
+     "value": "8.0",
+     "meaning": "rule 4b: s finishing monsters she hurt, per objective"
+    },
+    {
+     "name": "RESPAWN",
+     "value": "8.0",
+     "meaning": "s from a kill until it's due back (the simulator's; not settled by live telemetry)"
+    },
+    {
+     "name": "PATIENCE",
+     "value": "{ground: 1.0, spot: 2.0, none: 0.4}",
+     "meaning": "rule 9: s idle before 'nothing came into reach'"
+    },
+    {
+     "name": "PRIOR_S",
+     "value": "20.0",
+     "meaning": "the rate rule: the ground's expected rate counts as this many s of hunting there"
+    },
+    {
+     "name": "MIN_STAY, MIN_THROWS",
+     "value": "15.0, 6",
+     "meaning": "the rate rule judges only after this long, or this many throws"
+    },
+    {
+     "name": "LEAVE_MARGIN",
+     "value": "0.8",
+     "meaning": "leave when her rate is under this share of the best other ground's"
+    },
+    {
+     "name": "VISIT_S",
+     "value": "60.0",
+     "meaning": "a visit's length (guess) until timed visits replace it"
+    },
+    {
+     "name": "SKIP_S",
+     "value": "120.0",
+     "meaning": "a ground left empty is skipped this long"
+    },
+    {
+     "name": "EMPTY_CONFIRM_S, GROUND_SEEN",
+     "value": "3.0, 0.75",
+     "meaning": "the fast exit: looks covering 75% of the ground empty for 3 s"
+    },
+    {
+     "name": "GROUND_DANGER",
+     "value": "2.0",
+     "meaning": "a ground's EXP a second counts 1 - 2 x its spot's danger"
+    },
+    {
+     "name": "SPOT_MORE, SPOT_TIMES, SPOT_TRAVEL, SPOT_REST, SPOT_CHANGES",
+     "value": "2, 1.5, 8.0, 10.0, 4",
+     "meaning": "rule 7: another spot must reach 2 more or 1.5x as many, within 8 s, not within 10 s of arriving, 4 changes a visit"
+    },
+    {
+     "name": "VALUABLE",
+     "value": "30.0",
+     "meaning": "rule 6a on the first map: mesos a single drop must be worth (per map: Worth.valuable, twice the bronze coin)"
+    },
+    {
+     "name": "VALUABLE_TRAVEL, VALUABLE_TRIES",
+     "value": "15.0, 2",
+     "meaning": "rule 6a: at most this many s away, this many rushes"
+    },
+    {
+     "name": "PILE_TRIES",
+     "value": "3",
+     "meaning": "stands or trips per pile at most"
+    },
+    {
+     "name": "SURVIVE_MIN",
+     "value": "0.05",
+     "meaning": "a pile less likely than this to still lie there isn't gone for"
+    },
+    {
+     "name": "ALLOW_FRESH, FRESH_S, OLD_S, ALLOW_OLD",
+     "value": "3.0, OWN_S (15 s), 60.0, 1.0",
+     "meaning": "s a pile may add to her way: 3 s while fresh, down to 1 s at 60 s old"
+    },
+    {
+     "name": "SAFER_MARGIN",
+     "value": "0.05",
+     "meaning": "a pile this much more dangerous than where she stands gets ALLOW_OLD at most"
+    },
+    {
+     "name": "DEPART_BUDGETS",
+     "value": "2.0",
+     "meaning": "leaving: the sweep may add 2 x sweep.budget_for(straight way) over the whole way out"
+    },
+    {
+     "name": "WAIT_GAIN, WAIT_STEP",
+     "value": "0.03, 100.0",
+     "meaning": "rule 9: walk to a place this much safer, in steps of 100 units"
+    },
+    {
+     "name": "ROPE_GAIN, HANG_MAX_S, ROPE_AGAIN_S",
+     "value": "0.05, 60.0, 10.0",
+     "meaning": "rule 9 on a rope: margin, longest hang, rest between ropes"
+    },
+    {
+     "name": "MESO_EXP, HP_PER_MESO",
+     "value": "0.5, 2.0",
+     "meaning": "a meso's worth in EXP and HP a meso: a bar of HP costs max_hp / 2 x 0.5 EXP (bar_exp)"
+    },
+    {
+     "name": "RESPAWN_GUARD, TRIP_AHEAD_S, FILL_PRIOR",
+     "value": "True, 3.0, 0.27",
+     "meaning": "the spawn guard: on, trips within 3 s, a free point's fill chance"
+    },
+    {
+     "name": "EXP_FIRST",
+     "value": "True",
+     "meaning": "EXP before loot: no pile goes ahead of what's in reach"
+    },
+    {
+     "name": "PET_LOOT, PLAYER_PILES, PLAYER_DISCOUNT, GROUND_TIE",
+     "value": "False, False, 1.0, 0.0",
+     "meaning": "options measured and left off"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-19",
+     "what": "The hunt loop built behind `tour --loop` in the simulator (hunt-modes.md steps 0-5 and 7).",
+     "why": "A tour's separate trips each had their own budget and idea of when to fight, and none could say \"this has stopped paying, leave\"; in the simulator the loop made 114.2 EXP a minute against the fixed tour's 84.8."
+    },
+    {
+     "date": "2026-10-24",
+     "what": "EXP before loot: no pile goes ahead of shooting what's in reach (`_loot_first`, `Looter.yield_to`).",
+     "why": "The user: \"The hunt should be driven by maximizing the exp gain\"."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "No resting: her pet drinks potions and HP staying low ends the hunt (the safety stop).",
+     "why": "The user: \"Just remove the sit recover hp functionality, it's no longer needed\"."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "The five loot rules (pile here, on the way, urgent, lull loot, loot elsewhere) replaced by one loot sweep, with \"no touch for loot\" guards.",
+     "why": "Live she picked up 199 of 299 mesos a minute seen and lost 100: 47% waiting on PILE_CLEAR, 28% known and never gone for; the user: \"try not to hit by mobs just for picking up loots\"."
+    },
+    {
+     "date": "2026-10-31",
+     "what": "Monsters on a platform just under or over a pile count as its guards (BESIDE_GUARDS).",
+     "why": "In the simulator a pile on 9 was stood on with Horny Mushrooms walking 8 and 10 by it: four touches."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "Piles priced in seconds they may add to her way (`_allow`), not by an exchange of mesos for EXP.",
+     "why": "The user: \"I'm not sure about this currency conversion. My idea is just picking up mesos and items as we kill mobs\"."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "PET_LOOT turned off.",
+     "why": "It put her piles off for her pets, against \"piles should be picked up soon after killing\" (the user's word); its gain was the simulator's pets'."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "HuntReport counts to the end of the stand-by trip, with `casts` for every throw of hers.",
+     "why": "R1 of 2026-11-02 reported 52 kills where the run had 53: the stand-by trip's kill and the navigator's shots were missed."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "The spawn guard (RESPAWN_GUARD): trips to piles held for the map's respawn pass.",
+     "why": "The cornered clip's R3; the user: \"good to merge\"."
+    }
+   ],
+   "gotchas": [
+    "The rule numbers are the design's, not the order tried: at a ground rule 6a is tried right after rule 1, and the sweep comes after shooting.",
+    "An objective's clock keeps running while it's suspended and while rules 1-4 shoot: that bounds a shoot-respawns-on-the-way loop, but it also means a long fight on the way can drop the objective (logged as OBJECTIVE_S).",
+    "When looks are lost (LookLost) `_paused` shifts every clock by the pause, so a long pause isn't 'stuck'; the game's own clocks (respawns, drop lives) are not shifted.",
+    "A ground no standable spot reaches (the basin) counts as reached anywhere on it: waiting to reach the spot's x, close monsters interrupted her for good.",
+    "Kills count for a visit only after she arrived and only on the ground (or from it or its spot); others are 'on the way'.",
+    "With only one ground (`--grounds 23`, or a one-ground value map) every reason to leave but the GROUND_S backstop becomes 'stay' and waiting (`_elsewhere`, `_stay`), or she'd make one-second visits forever.",
+    "The stuck guard first raises a KeyDoubt 'stall' (behavior.keycheck) to check whether her keys moved in the game's bindings; only if that doesn't fix it does she stand by.",
+    "`_sweep_calls` on a made-up look (Scene.what_if, the navigator's look ahead) saves and restores the sweeper's state, so a hypothetical solve can't replace the itinerary she's on."
+   ],
+   "tests": [
+    "tests/test_hunt.py",
+    "tests/test_grind.py",
+    "tests/test_records.py",
+    "tests/test_spawnclock.py",
+    "tests/test_ropes.py",
+    "tests/test_unseen.py",
+    "tests/test_kill_credit.py",
+    "tests/test_harness.py",
+    "tests/test_landing.py",
+    "tests/test_census.py",
+    "tests/test_loot_chain.py",
+    "tests/test_navigation.py",
+    "tests/test_keycheck.py",
+    "tests/test_danger.py",
+    "tests/test_framecheck.py",
+    "tests/test_presence.py",
+    "tests/test_jump_reach.py",
+    "tests/test_window_size.py",
+    "tests/test_character.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/grind.py",
+   "title": "Grinding (Grind)",
+   "tagline": "The hunt loop going round the map like a player grinds, never camping one ground.",
+   "summary": "`Grind` subclasses `Hunt` and is the default with `tour --loop` (since 2026-10-27). Instead of the value map's grounds, its stops come from `Patrol`'s loop over the map's spawn points; at a stop she stays only while what's there gives as much EXP a second as going on would, and she shoots and loots on the legs between stops. With the target-first planner (on by default) a stop's fights go one chosen monster at a time and with the whole screen and GAMELAB_LOOT_CHAIN (both on by default) her drops go as a loot chain.",
+   "details_md": "Built after the user played 4.5 minutes on Tree Dungeon on 2026-10-24 (484 EXP a minute against the hunt loop's 283 camping one ground): a median 1 s on a platform, a circuit up the tower and back, killing what came into reach on the way.\n\n### What it changes from the hunt loop\n\n- **Where she goes** (`_next_ground`): the next stop by `Patrol.choose` (the loop's next stop worth going to, or a pile of monsters she has seen pulling her off it, or a census trip), after `Patrol.replan` looks for a better loop (`_look_at_round`). Each stop is a `Visit` of the hunt loop to that platform at the stop's x.\n- **At a stop** (`_at_ground`, the marginal value theorem: a forager leaves a patch once its rate falls under what the rest of the habitat gives): a monster a star reaches now is shot at once (at her live kill time, 0.085 s a point of EXP, that's 11.8 EXP/s, more than any loop: Tree Dungeon's best is 7.7); otherwise she stays while `_stay_gain` (the held monsters' EXP over their kill time and the walk, less what touches there cost) is at least the bar `max(Plan.rate, the next stop's gain)`. Under it she leaves after `LEAVE_CONFIRM_S` (0.3 s); `STOP_MAX_S` (40 s) is the backstop. No better spot, no lull loot, no rate rule. Held monsters out of reach on another platform: a walk of at most `REACH_STEP` (200) along hers to bring them into reach (rule 'reach').\n- **On the legs**: the hunt loop's rule 4 (in passing), 4b (finish) and the sweep's piles on her way. Every `RECHOOSE_S` (1 s) of a trip to a stop, `_interrupt` asks `Patrol.choose` again with that stop as the default; a pile seen elsewhere or \"back to the loop\" reroutes her.\n- **Her drops**: the sweep with only each pile's allowance (`_sweep_terms`: no budget, no lulls; with the planner no MOST_S cap, and the allowance `Targeting.loot_allow`'s); leaving, those on her way to the next stop (`_leave`).\n- **What she knows**: every look updates `patrol.Belief` from her memory (`_look`), learns her touches per stop (`_learn_touches`) and prices a bar of HP from her max HP (`_price_hp`, `hunt.bar_exp`).\n- **Credit**: each kill is credited to the platform it died on (`credit`), moved when the ledger re-binds a kill (`_book_kills`). The value map (lab/grounds.json) isn't written.\n\n### The target-first planner path\n\nWith `behavior.targeting.Targeting` on (`GAMELAB_TARGET`, default on), `_targets` narrows the hunt's targets to the one monster the planner chooses, `_stance` asks the planner's plan, and `_at_ground` becomes `_planned_step`: piles that may go first (`_pile_first`), the plan against the primary, a trip to the place it can be hit from (`_to_place`, objective why \"to target\"), or `_goes` back to her round when the round clearly beats what the screen has given lately (`GO_GAIN` 1.15). With the whole screen and the loot chain on, `_sweep_act` sends the sweep's next piles as one navigator chain (`_loot_plan`, `behavior.lootchain`), booked by `_chain_over`.\n\n### Records\n\n'grind' telemetry records: `loop` (a new loop taken up), `next` (each stop chosen), `go`, `state` every `STATE_EVERY_S` (60 s), and `end` (stays, pulls, skips, what the belief learned, the census, the loop's promise against what it delivered).",
+   "lines": 1151,
+   "key_items": [
+    {
+     "name": "Grind",
+     "kind": "class",
+     "line": 142,
+     "signature": "class Grind(Hunt): def __init__(self, tour, log=print, rng=None, patrol: Patrol | None = None)",
+     "summary": "The hunt loop grinding round the map: builds a Patrol for the map (route times from the planner, danger from the hunter's positioning model) and, when on, the target-first planner.",
+     "details_md": "With the planner's chain on it sets `nav.keep_avoid` and `Looter.store_has_them` (fights leave their drops to the drop store); with the whole screen, `Attacks.whole_screen` and the escort's `set_aside`."
+    },
+    {
+     "name": "Grind._at_ground",
+     "kind": "method",
+     "line": 536,
+     "signature": "def _at_ground(self, s: Scene, targets, visible, hidden, now: float) -> None",
+     "summary": "At a stop: back to the stop if BACK and worse off; shoot what's in reach; leave if `_leaving` says so; close in on her platform; sweep a round trip; step to bring held monsters into reach; else wait."
+    },
+    {
+     "name": "Grind._leaving",
+     "kind": "method",
+     "line": 929,
+     "signature": "def _leaving(self, s: Scene, held: list[Monster]) -> str | None",
+     "summary": "Stay or go: stays while `_stay_gain` >= max(the loop's rate, the next stop's gain); else leaves after LEAVE_CONFIRM_S; STOP_MAX_S backstop, also for waiting on held monsters it never shoots."
+    },
+    {
+     "name": "Grind._stay_gain",
+     "kind": "method",
+     "line": 870,
+     "signature": "def _stay_gain(self, s: Scene, held: list[Monster]) -> float",
+     "summary": "EXP a second of staying: held monsters' EXP / (EXP x kill time + walk), less hp_price x hp_rate at the stop (STAY_NET); with none held, `Patrol.wait_gain` (respawns expected in reach within DUE_S)."
+    },
+    {
+     "name": "Grind._next_ground",
+     "kind": "method",
+     "line": 1020,
+     "signature": "def _next_ground(self, s: Scene, heading: int | None = None) -> None",
+     "summary": "The next stop: replans the loop on its clock, asks `Patrol.choose` (skipping skipped platforms), makes a Visit and a spot objective, emits 'grind' next and 'tour'."
+    },
+    {
+     "name": "Grind._interrupt",
+     "kind": "method",
+     "line": 975,
+     "signature": "def _interrupt(self, s: Scene) -> bool",
+     "summary": "On a loot chain's trip only the chain's own check (`_chain_stops`); otherwise the hunt loop's trip interrupts plus: with the whole screen, what the planner has; and on a trip to a stop, every RECHOOSE_S, a pull or 'back to the loop' from Patrol.choose."
+    },
+    {
+     "name": "Grind._look",
+     "kind": "method",
+     "line": 219,
+     "signature": "def _look(self) -> Scene",
+     "summary": "The hunt loop's look, then the belief updated from memory, touches learned, HP priced, and the loop's promised EXP accumulated."
+    },
+    {
+     "name": "Grind._planned_step",
+     "kind": "method",
+     "line": 564,
+     "signature": "def _planned_step(self, s: Scene, targets, visible, hidden, now: float) -> None",
+     "summary": "A step of the target-first planner at a stop: piles that go first, the plan against the primary (shoot, or a trip to its place), else piles, going back to the round, or leaving (IDLE_S idle)."
+    },
+    {
+     "name": "Grind._loot_plan",
+     "kind": "method",
+     "line": 631,
+     "signature": "def _loot_plan(self, s: Scene) -> \"lootchain.LootChain | None\"",
+     "summary": "Builds the loot chain through the first `MOST_PILES` (4) piles of the sweep's itinerary, stopping at a guarded pile, at an unseen or not-landed pile (walked to its middle), or where the spawn guard would hold."
+    },
+    {
+     "name": "Grind._chain_over",
+     "kind": "method",
+     "line": 702,
+     "signature": "def _chain_over(self, o, result: str) -> bool",
+     "summary": "Books a finished loot chain: stretches run over count as stands (tries, `stood_on`, `cant_pick` only where she stood), a 'loot_chain' record, and `CHAIN_OFF_S` of the old way if a monster blocked its first walk."
+    },
+    {
+     "name": "Grind._book_kills",
+     "kind": "method",
+     "line": 310,
+     "signature": "def _book_kills(self, s: Scene, kills: list) -> None",
+     "summary": "The hunt loop's bookkeeping, plus each kill credited to the platform it died on, moved when the ledger re-binds the kill to another monster (the magician's)."
+    },
+    {
+     "name": "Grind._learn_touches",
+     "kind": "method",
+     "line": 271,
+     "signature": "def _learn_touches(self, s: Scene) -> None",
+     "summary": "HP_BY_TOUCHES: touches that hurt since the last look, each at the share of her HP a touch by the nearest monster's kind takes, charged to the stop she's at or going to (`Patrol.learn_hp`)."
+    },
+    {
+     "name": "Grind._held",
+     "kind": "method",
+     "line": 835,
+     "signature": "def _held(self, s: Scene) -> list[Monster]",
+     "summary": "Monsters her memory is sure of, seen within HOLD_S (3.5 s), that she can get at from her platform (on it or in a star's reach from somewhere along it), not dying: what holds her at a stop."
+    },
+    {
+     "name": "Grind._promise",
+     "kind": "method",
+     "line": 1122,
+     "signature": "def _promise(self) -> dict",
+     "summary": "The loop's promise against what it delivered (EXP a minute since the loop was taken up and over the run), for the 'state' and 'end' records.",
+     "details_md": "Added 2026-11-02: the bar in use (556 EXP a minute over an hour) was 1.27 times the 437 delivered, and nothing recorded either."
+    }
+   ],
+   "inputs": [
+    "everything the hunt loop reads (looks, ledger, drop store, danger, memory)",
+    "Patrol's loop, belief and next-stop choice (behavior/patrol.py)",
+    "the target-first planner's choice and plans (behavior/targeting.py) when on",
+    "her max HP as read (Hunter.max_hp) to price a bar of HP"
+   ],
+   "outputs": [
+    "the same key plans and trips as the hunt loop",
+    "Hunter.exp_rate and Hunter.ground_rate for the landings' prices and a rope's hang",
+    "telemetry 'grind' records (loop, next, go, state, end) and 'loot_chain' records",
+    "a HuntReport, and the 'grinding: ...' log line at the end"
+   ],
+   "uses": [
+    "gamelab/behavior/hunt.py",
+    "gamelab/behavior/patrol.py",
+    "gamelab/behavior/targeting.py",
+    "gamelab/behavior/lootchain.py",
+    "gamelab/behavior/fight.py",
+    "gamelab/behavior/ledger.py",
+    "gamelab/behavior/looting.py",
+    "gamelab/attack/spots.py",
+    "gamelab/attack/danger.py",
+    "gamelab/attack/stance.py",
+    "gamelab/localization/memory.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/scene.py",
+    "gamelab/motion/bodies.py",
+    "gamelab/motion/physics.py",
+    "gamelab/perception/loot.py",
+    "gamelab/control/navigator.py",
+    "gamelab/telemetry.py",
+    "maplehelper/engine.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamelab/lab/telemetry/",
+     "mode": "write",
+     "what": "'grind' and 'loot_chain' records (plus the hunt loop's)"
+    }
+   ],
+   "concurrency": "None of its own; it runs inside Hunt.run on the command's main thread.",
+   "tunables": [
+    {
+     "name": "STOP_MAX_S",
+     "value": "40.0",
+     "meaning": "guess: backstop, s at one stop with nothing in reach (or waiting on held monsters)"
+    },
+    {
+     "name": "LEAVE_CONFIRM_S",
+     "value": "0.3",
+     "meaning": "s under the bar before she leaves a stop"
+    },
+    {
+     "name": "HOLD_S",
+     "value": "3.5",
+     "meaning": "a remembered monster seen within this long holds her at a stop"
+    },
+    {
+     "name": "REACH_STEP",
+     "value": "200.0",
+     "meaning": "guess: units she walks at once to bring held monsters into reach"
+    },
+    {
+     "name": "RECHOOSE_S",
+     "value": "1.0",
+     "meaning": "guess: s between looks at where she'd go instead on a trip"
+    },
+    {
+     "name": "GO_GAIN",
+     "value": "1.15",
+     "meaning": "guess: her round must beat what the screen gave lately by this to go (planner)"
+    },
+    {
+     "name": "DELIVERS",
+     "value": "0.8",
+     "meaning": "share of a round's rate she makes of it (the planner's round bar)"
+    },
+    {
+     "name": "SEARCH_S",
+     "value": "2.5",
+     "meaning": "s past a kill's drops' landing she waits for a search that can say none landed"
+    },
+    {
+     "name": "BACK, BACK_MARGIN, BACK_TRIES, BACK_REST_S",
+     "value": "False, 0.05, 3, 5.0",
+     "meaning": "back to the stop when worse off by danger (off)"
+    },
+    {
+     "name": "HP_BY_TOUCHES, TOUCH_GAP_S, TOUCH_NEAR",
+     "value": "True, 30.0, 100.0",
+     "meaning": "HP a stop costs learned from her touches"
+    },
+    {
+     "name": "STAY_NET",
+     "value": "True",
+     "meaning": "staying's gain is net of what touches there cost"
+    },
+    {
+     "name": "STATE_EVERY_S",
+     "value": "60.0",
+     "meaning": "s between 'grind' state records"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "Grinding designed after the user's own 4.5 minutes of play on Tree Dungeon.",
+     "why": "They made 484 EXP a minute never camping, where her hunt loop made 283 on one ground; the user: \"this would how an experience player will grind to get EXP\"."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "Grinding made the default with `tour --loop` (`--camp` for the hunt loop).",
+     "why": "The user: \"Yes make that the default\"; live it made 318-408 EXP a minute on Tree Dungeon on 2026-10-26."
+    },
+    {
+     "date": "2026-10-31",
+     "what": "HP a stop costs learned from her touches (HP_BY_TOUCHES) and staying's gain made net of them (STAY_NET).",
+     "why": "Her HP bar between looks missed most of what she lost (in the simulator's grind it saw 3.27 of the 8.68 bars she lost on seed 1)."
+    },
+    {
+     "date": "2026-10-31",
+     "what": "BACK (back to the stop by danger) built, then turned off.",
+     "why": "The user's choice of \"more exp and loot\" over as safe as master: off made 18.6 EXP a minute more over 12 seeds."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "DROPS_IN_CHOICE and PILE_HP dropped with the sweep's move to seconds.",
+     "why": "The sweep no longer prices drops in EXP; drops in the next-stop choice cost EXP in 15-minute runs."
+    },
+    {
+     "date": "2026-11-04",
+     "what": "The target-first planner (behavior.targeting) on by default.",
+     "why": "The user's call, with its second gate not passed."
+    },
+    {
+     "date": "2026-11-05",
+     "what": "Her drops as one loot chain through a few piles (Grind._loot_plan, behavior.lootchain).",
+     "why": "The user, 2026-11-04: \"plan for a few loot targets in advance so you don't need to have this 'pauses'\"."
+    }
+   ],
+   "gotchas": [
+    "A stop is left as soon as staying gives less than going on: she doesn't wait for respawns (Patrol.wait_gain is 1-2 EXP/s at a point watched empty).",
+    "Kills are credited by the platform they died on, not by the ground hunted, and the value map isn't written (48% of 23's kills live died on 22 and 24).",
+    "Rule 1 (close quarters) yields to her way back to the stop unless a monster is actually on her (the `_close_quarters` override); only `_back` (BACK) sends her on that way, and BACK is off, so today it doesn't come into play.",
+    "`_sweep_calls` never cuts the 'back to spot' trip: from 2026-10-31 a pile on that way cut it about 900 times in a row on seed 9.",
+    "Many behaviours are switched by environment variables read by other modules: GAMELAB_TARGET, GAMELAB_SCREEN, GAMELAB_LOOT_CHAIN, GAMELAB_TAKE_WEIGHT."
+   ],
+   "tests": [
+    "tests/test_grind.py",
+    "tests/test_census.py",
+    "tests/test_stay_or_go.py",
+    "tests/test_target.py",
+    "tests/test_loot_chain.py",
+    "tests/test_kill_credit.py",
+    "tests/test_records.py",
+    "tests/test_hunt.py",
+    "tests/test_chatbox.py",
+    "tests/test_guard.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/tour.py",
+   "title": "The tour (Tour): grounds, the value map, stand-by",
+   "tagline": "The original sweep of hunting platforms, and the map knowledge the hunt loop builds on.",
+   "summary": "`Tour` has two jobs. Run by `tour` without `--loop`, it sweeps the map's hunting platforms in a short travel order, shoots each one clear from a safe spot, collects the drops and stands by on a safe platform. And every hunt loop is built over a Tour: it holds the value map (lab/grounds.json), the kinds worth hunting, the safe platforms and the stand-by trip.",
+   "details_md": "### Map knowledge (used by Hunt and Grind)\n\n- **Kinds worth hunting** (`worth`): kinds giving at least `WORTH` (0.25) of the map's best EXP a kill; snails (2 against 15) are only shot when in her way.\n- **The value map** (`ground_values`): a platform's expected EXP a visit, starting at `SEEN_SHARE` (0.3) of its spawns' EXP and counting as `PRIOR` (2) visits, blended with what real visits gave (`lab/grounds.json`, per map). Only platforms whose spawn kinds her eyes can recognise count.\n- **Hunting grounds** (`hunting_grounds`): platforms expected to give at least `MIN_VALUE` (0.15) of the best one's EXP a visit, or, for the hunt loop, its EXP a second (`visit_s`). By EXP a visit, one 351 s visit to the basin once put every other ground under the cut.\n- **Safe platforms** (`safe`): `MapModel.safe` and at least `STAND_WIDTH` (120) wide; `stand_by` goes to the nearest one by route time (`nearest_safe`).\n\n### The tour itself (`run`)\n\n1. `sweep` orders the grounds: nearest next by route time with a random +-25%, then 2-opt swaps kept while they save over 0.5 s. A blind random order's median (of 9) is logged for comparison.\n2. Each stop (`hunt`, up to `GOES_PER_STOP` 5 goes): go to the spot (stopping on the way where she can stand with a target in reach, `_in_reach`), fight there (`Hunter.clear`, patience 2 s from a spot off the platform, 1 s on it, finishing what's in reach), a whole-screen look for what's left, another spot that reaches it, or onto the platform itself.\n3. `collect_loot` goes for remembered drops by route, nearest first: 60 s a trip, none started past `LOOT_SECONDS` (180 s), a guarded pile's guard fought (2 kills, 20 s).\n4. The visit is recorded, the rest of the sweep replanned from where she ended up, and finally `stand_by`.\n\nThe hunt-modes design kept the old tour \"until the loop has passed the game bar in 3 separate sessions\".\n\nNote: `Tour.sweep` (the order of grounds) is unrelated to `behavior/sweep.py` (the loot sweep).",
+   "lines": 504,
+   "key_items": [
+    {
+     "name": "Tour",
+     "kind": "class",
+     "line": 88,
+     "signature": "class Tour: def __init__(self, hunter: Hunter, nav: Navigator, log=print, rng: random.Random | None = None)",
+     "summary": "A hunting tour with a hunter and her fighting navigator: safe platforms, kinds' EXP and worth, and the value map loaded from disk."
+    },
+    {
+     "name": "Tour.run",
+     "kind": "method",
+     "line": 431,
+     "signature": "def run(self, stops: int | None = None, kinds=None, kills_per_stop: int = 5, seconds_per_stop: float = 90) -> TourReport",
+     "summary": "Sweeps the hunting grounds (all, or the `stops` nearest), hunting each, replanning the rest after each stop, then stands by."
+    },
+    {
+     "name": "Tour.sweep",
+     "kind": "method",
+     "line": 392,
+     "signature": "def sweep(self, grounds: list[int], stops: int, here: tuple[int, float]) -> tuple[list[int], float]",
+     "summary": "An order of grounds keeping travel short: nearest next by route time x uniform(0.75, 1.25), then 2-opt on real route times."
+    },
+    {
+     "name": "Tour.hunt",
+     "kind": "method",
+     "line": 207,
+     "signature": "def hunt(self, pid: int, kinds=None, kills: int = 5, seconds: float = 90) -> Report",
+     "summary": "One stop: shoot platform `pid` clear from a chosen spot, other spots for monsters out of reach, then collect drops; records the visit.",
+     "details_md": "\"Killing some, then walking down into the rest to pick up the drops, gave up the safe spot\": drops are collected only after the fight."
+    },
+    {
+     "name": "Tour.collect_loot",
+     "kind": "method",
+     "line": 328,
+     "signature": "def collect_loot(self) -> None",
+     "summary": "Goes to remembered drops on other platforms and picks them up via Looter.collect; drops noted by fights on these trips wait for the next collection."
+    },
+    {
+     "name": "Tour.ground_values",
+     "kind": "method",
+     "line": 104,
+     "signature": "def ground_values(self) -> dict[int, float]",
+     "summary": "Expected EXP a visit per platform: (PRIOR x SEEN_SHARE x spawn EXP + EXP seen) / (PRIOR + visits)."
+    },
+    {
+     "name": "Tour.hunting_grounds",
+     "kind": "method",
+     "line": 122,
+     "signature": "def hunting_grounds(self, visit_s: Callable[[int], float] | None = None) -> list[int]",
+     "summary": "Platforms worth a visit: at least MIN_VALUE of the best by EXP a visit, or by EXP a second with `visit_s`."
+    },
+    {
+     "name": "Tour.record_visit",
+     "kind": "method",
+     "line": 145,
+     "signature": "def record_visit(self, pid: int, exp: float, seconds: float) -> None",
+     "summary": "The hunt loop's visit into the value map: visits, EXP, timed visits and their seconds; saved to lab/grounds.json."
+    },
+    {
+     "name": "Tour.stand_by",
+     "kind": "method",
+     "line": 195,
+     "signature": "def stand_by(self, mode: str | None = None) -> None",
+     "summary": "The end of a tour or hunt: a trip to the nearest safe platform (AVOID without an escort; the hunt loop passes TRANSIT); she stands, no sitting since 2026-10-26."
+    },
+    {
+     "name": "Tour.nearest_safe",
+     "kind": "method",
+     "line": 173,
+     "signature": "def nearest_safe(self) -> int",
+     "summary": "The safe platform quickest by route; if she's on a rope or falling, from the platform she lands on first."
+    },
+    {
+     "name": "WORTH",
+     "kind": "constant",
+     "line": 37,
+     "signature": "WORTH = 0.25",
+     "summary": "Monsters giving under this share of the map's best EXP aren't hunted, only shot in her way."
+    }
+   ],
+   "inputs": [
+    "the Hunter (looks, clear, looter) and its fighting Navigator (go, planner, mover)",
+    "the MapModel's mob EXP, monsters by platform and safe platforms",
+    "lab/grounds.json's past visits for this map"
+   ],
+   "outputs": [
+    "fights and trips through the hunter and navigator",
+    "the value map written back to lab/grounds.json",
+    "telemetry 'tour' records (order, stop, spot, safe, grounds) for the mini-map",
+    "a TourReport (\"tour done: ...\")"
+   ],
+   "uses": [
+    "gamelab/behavior/hunter.py",
+    "gamelab/behavior/fight.py",
+    "gamelab/behavior/looting.py",
+    "gamelab/control/navigator.py",
+    "gamelab/attack/reach.py",
+    "gamelab/attack/spots.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/pose.py",
+    "gamelab/localization/scene.py",
+    "gamelab/motion/physics.py",
+    "gamelab/motion/route.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/paths.py",
+    "gamelab/telemetry.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamelab/lab/grounds.json",
+     "mode": "read-write",
+     "what": "per map and platform: visits, EXP, timed visits and seconds (another character's under lab/characters/<her files>/)"
+    }
+   ],
+   "concurrency": "None: runs on the `tour` command's main thread.",
+   "tunables": [
+    {
+     "name": "WORTH",
+     "value": "0.25",
+     "meaning": "kinds under this share of the best EXP aren't hunted"
+    },
+    {
+     "name": "SEEN_SHARE, PRIOR",
+     "value": "0.3, 2",
+     "meaning": "a visit's prior: 30% of the spawns' EXP, counting as 2 visits"
+    },
+    {
+     "name": "MIN_VALUE",
+     "value": "0.15",
+     "meaning": "grounds under this share of the best are skipped"
+    },
+    {
+     "name": "STAND_WIDTH",
+     "value": "120",
+     "meaning": "narrower safe platforms aren't stood by on"
+    },
+    {
+     "name": "GOES_PER_STOP",
+     "value": "5",
+     "meaning": "trips to a spot and fights there per stop"
+    },
+    {
+     "name": "LOOT_SECONDS",
+     "value": "180",
+     "meaning": "no loot trip starts this far into a collection"
+    },
+    {
+     "name": "DROP_FALL",
+     "value": "120",
+     "meaning": "a kill placed on no platform: drops fetched from a platform at most this far below"
+    },
+    {
+     "name": "BLIND_SAMPLES",
+     "value": "9",
+     "meaning": "random orders whose median travel is logged against the sweep"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-26",
+     "what": "Resting on the chair removed: stand_by just stands.",
+     "why": "Her pet drinks her potions and low HP ends the hunt (the safety stop)."
+    },
+    {
+     "date": "",
+     "what": "Drops collected only after a stop's fight, never during.",
+     "why": "Killing some, then walking down into the rest to pick up the drops, gave up the safe spot."
+    },
+    {
+     "date": "",
+     "what": "Drops noted by fights on a loot trip wait for the next collection.",
+     "why": "Each kill on a trip would make another trip; in the simulator a whole tour went on collecting."
+    }
+   ],
+   "gotchas": [
+    "Platforms whose spawn kinds her eyes can't recognise get no value at all (`ground_values`): she can't see those monsters coming.",
+    "The spawn data alone misleads: by the data platforms 34 and 35 spawn slimes, but 11 visits found only snails there; blending with real visits (PRIOR) corrects it.",
+    "hunting_grounds with `visit_s` ranks by EXP a second, not a visit: needed because the hunt loop's visits last as long as a ground gives.",
+    "nearest_safe raises 'no safe platform reachable' if no route exists; on a rope it first gets her onto a platform (a stop while hanging once ended the run)."
+   ],
+   "tests": [
+    "tests/test_navigation.py",
+    "tests/test_hunt.py",
+    "tests/test_loot.py",
+    "tests/test_character.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/patrol.py",
+   "title": "Patrol: the map's spawn points, stops and loop",
+   "tagline": "Pure model behind grinding: spawn-point belief, the best loop, and the next stop.",
+   "summary": "`Patrol` is grinding's knowledge of the map and its choices: every spawn point she hunts, a stop on each platform that reaches some, a `Belief` of how many monsters each point holds now and later, the closed loop of stops that gives the most EXP a minute in the long run, and the choice of the next stop. It is pure: it reads game data, the planner's route times and her memory, and never looks or presses a key.",
+   "details_md": "### The map, once\n\n- **Points** (`points_of`): every spawn point of a kind she hunts, with its platform, x, kind and the kind's EXP.\n- **Stops** (`stops_of`): on each platform that gets at points, the x (tried every `STAND_STEP`, 20 units) that reaches the most EXP: her own platform's points whole, another's by the share a star reaches (`spots.coverage`), times `1 - STOP_DANGER (2) x danger` there. On Tree Dungeon 31 points and 26 stops.\n- **Legs**: route times between stops (`travel`, the planner's `arrive`), cached (`leg`).\n\n### The belief (`Belief`, updated every look)\n\nEach point's monsters (`stock`): those her memory has there; else, for a point seen empty or emptied by her kill, what's back since (`back`: `1 - exp(-rate x dt)`); else, never seen, `Q_UNKNOWN` (0.35). The refill has no memory. The game refills the map to its cap at a pass every `TICK_S` (7.115 s, measured), so the refill rate is her own kills a second over the map's free points (`own / weight`) plus the other players' part (`others`), learned on a grid of rates from points seen free and looked at again within 20 s, weighed by age (180 s), with a gamma prior about `REFILL_RATE` (0.27 a tick). Another player's dot by a point cuts her `share` by `TAKE_WEIGHT x take(kind)`.\n\n**The census** (`_census`, `CENSUS` on): a count by every spawn point, hunted kinds or not, held to the map's cap; kills of hers whose newborn she didn't see are spread over points out of view. **The gate** (`ratio`): when her view's points hold `OCC_MAX` (0.55) or less of the map's average over 60 s, monsters are probably piling elsewhere, and trips open.\n\n### The loop (`best`, `rate`)\n\nA round of 2 to 12 stops, rated in the long run: each point gives its EXP (times her share) times what's back a cycle after she found it free (`caught`); the cycle is travel + 1 s a stop + her shooting (`kill_s` s a point of EXP, learned from her throws); less `hp_price` x the HP touches cost (the danger hook). Grown greedily from the 8 best single stops, adding the stop that raises the rate most at its cheapest place. `replan` takes a new loop only if 15% better, not within 60 s of the last change, unless 3 stops in a row gave nothing.\n\n### The next stop (`choose`)\n\nAlong the loop from where she was, the first stop expected to hold `SKIP_FULL` (25%) of its full stock. A stop where she has seen monsters pulls her off the loop when its net EXP pays `PULL_GAIN` (1.25) times what the loop gives over the detour (`pays`). On a pile trip that no longer pays even without the margin: \"back to the loop\". With the gate open, a census trip (`_trip`): stops off her round believed to hold monsters, taken when their monsters beat 1.25 times her kills a second (over the last 180 s) over the detour.\n\nBefore she has seen anything, the module's docstring puts Tree Dungeon's loop at 10, 7 (486 EXP a minute), and `STOP_DANGER`'s comment at 9, 8 (492) since 2026-10-31; the user grinding there made 484.",
+   "lines": 1497,
+   "key_items": [
+    {
+     "name": "Patrol",
+     "kind": "class",
+     "line": 949,
+     "signature": "class Patrol: def __init__(self, model: MapModel, kinds, exp, travel, danger=None, touch=None)",
+     "summary": "The map's points and stops, the belief, the loop she follows and the choice of her next stop. `travel` is the planner's route time; `danger(platform, x)` the danger hook (default: `default_danger` from touch shares)."
+    },
+    {
+     "name": "Belief",
+     "kind": "class",
+     "line": 586,
+     "signature": "class Belief: def __init__(self, model: MapModel, points: list[Point])",
+     "summary": "How many monsters each spawn point holds now and ahead, from her memory; the refill rate (her kills and others' learned); other players' take; and the census of the whole map."
+    },
+    {
+     "name": "Belief.update",
+     "kind": "method",
+     "line": 748,
+     "signature": "def update(self, t: float, memory, players: list[Player] | None = None) -> None",
+     "summary": "At a look: memory's monsters assigned to their nearest points, points emptied by her kills or by looks that searched them, refills observed (`_seen`), the refill rate recomputed, rivals by points noted, then the census and occupancy."
+    },
+    {
+     "name": "Belief._census",
+     "kind": "method",
+     "line": 820,
+     "signature": "def _census(self, t: float, memory, players: list[Player] | None, last: float | None) -> None",
+     "summary": "The census: points in view hold what's seen there; unseen births of her kills are spread over points out of view by how likely each is clear; the total out of view held to the cap less what's in view and pending."
+    },
+    {
+     "name": "Patrol.rate",
+     "kind": "method",
+     "line": 1079,
+     "signature": "def rate(self, loop: Iterable[int], t: float | None = None, kept: dict[int, float] | None = None) -> Plan | None",
+     "summary": "A round's long-run EXP a second as a Plan: points covered, refill including the round's own kills, the cycle solved by 12 fixed-point iterations of `caught(cycle, refill)`, less hp_price x HP a round."
+    },
+    {
+     "name": "Patrol.best",
+     "kind": "method",
+     "line": 1132,
+     "signature": "def best(self, t: float | None = None) -> Plan | None",
+     "summary": "The best round of LOOP_MIN (2) to LOOP_MAX (12) stops, grown from each of the SEEDS (8) best single stops by cheapest insertion of the stop that raises the rate most."
+    },
+    {
+     "name": "Patrol.replan",
+     "kind": "method",
+     "line": 1172,
+     "signature": "def replan(self, t: float, force: bool = False) -> str | None",
+     "summary": "Every REPLAN_S (20 s): takes a better round only if LOOP_GAIN (15%) better and LOOP_MIN_S (60 s) after the last change, unless EMPTY_RUN (3) stops in a row gave nothing. Returns why it changed."
+    },
+    {
+     "name": "Patrol.choose",
+     "kind": "method",
+     "line": 1267,
+     "signature": "def choose(self, t, here, x, current=None, skip=(), heading=None, peek=False, bonus=None) -> tuple[int | None, dict]",
+     "summary": "The next stop and the reasons (for the log and 'grind' records): a trip in progress, else `_choose`, else a census trip off the round when one beats her bar. `peek` leaves her place in the loop as it is."
+    },
+    {
+     "name": "Patrol._choose",
+     "kind": "method",
+     "line": 1368,
+     "signature": "def _choose(self, t, here, x, current=None, skip=(), heading=None, peek=False, bonus=None) -> tuple[int | None, dict]",
+     "summary": "Along the loop the first stop expected to hold SKIP_FULL of its full stock; with none due, the best elsewhere if better; then pulls (a stop with monsters seen that pays PULL_GAIN x the loop over its detour) or 'back to the loop'.",
+     "details_md": "After a pull the loop goes on from the stop the detour was costed to. A loop worth nothing by the belief has no bar: no pulls. Replayed on the magician's live run of 2026-10-29 (28 pulls to the bottom region in 7 minutes), none of those pulls happen by this rule."
+    },
+    {
+     "name": "Patrol._trip",
+     "kind": "method",
+     "line": 1310,
+     "signature": "def _trip(self, t: float, here: int, x: float, nxt: int, current: int | None, skip: set) -> tuple[list[int], float, float, float] | None",
+     "summary": "A census trip off her round: from a stop believed to hold TRIP_MIN_N (1) monsters, extended while monsters a second rise; taken if monsters >= PULL_GAIN x her kills a second x the detour."
+    },
+    {
+     "name": "Patrol.expect",
+     "kind": "method",
+     "line": 1218,
+     "signature": "def expect(self, i: int, t: float) -> tuple[float, float, float, float]",
+     "summary": "At stop i at time t: EXP expected in reach (her share), of it the EXP of monsters she has seen, the s of shooting it, and the EXP it holds full."
+    },
+    {
+     "name": "stops_of",
+     "kind": "function",
+     "line": 429,
+     "signature": "def stops_of(model: MapModel, points: list[Point], danger=None) -> list[Stop]",
+     "summary": "One stop per platform that gets at points: the x reaching the most EXP, times 1 - STOP_DANGER x danger, nearest the middle among equals."
+    },
+    {
+     "name": "pays",
+     "kind": "function",
+     "line": 535,
+     "signature": "def pays(exp: float, detour: float, rate: float) -> bool",
+     "summary": "Whether a pile's expected EXP pays for its detour: exp >= PULL_GAIN x the loop's rate x detour s."
+    },
+    {
+     "name": "caught",
+     "kind": "function",
+     "line": 516,
+     "signature": "def caught(cycle: float, rate: float = REFILL_RATE) -> float",
+     "summary": "Monsters caught at a point per round, going round every `cycle` s: what's back a cycle after she found it free."
+    },
+    {
+     "name": "TICK_S",
+     "kind": "constant",
+     "line": 212,
+     "signature": "TICK_S = 7.115",
+     "summary": "The game's respawn pass period, fitted on live telemetry (7.09-7.13 s): the map refills to its cap at each pass."
+    }
+   ],
+   "inputs": [
+    "the MapModel's spawns, platforms, mob EXP and cap (localization.mapdata)",
+    "the planner's route times (travel), passed in by Grind",
+    "her memory of monsters (localization.memory: entries, events, covers) and other players' dots, every look",
+    "the danger hook (attack.danger via Hunter.danger), her throws and EXP (learn_kills), her touches (learn_hp)"
+   ],
+   "outputs": [
+    "the loop she follows (Plan) and why it changed",
+    "the next stop with a decision record (why, expected, seen, gain, skipped, pulls, trips) for the log and 'grind' telemetry",
+    "expectations for Grind: wait_gain, expect, net, hp_rate, due"
+   ],
+   "uses": [
+    "gamelab/attack/danger.py",
+    "gamelab/attack/reach.py",
+    "gamelab/attack/spots.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/memory.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/players.py",
+    "gamelab/localization/tracking.py",
+    "gamelab/motion/physics.py",
+    "gamelab/perception/kinds.py"
+   ],
+   "files_io": [],
+   "concurrency": "None: pure computation, called from Grind on the hunt's thread (best() takes about 0.1 s on Tree Dungeon).",
+   "tunables": [
+    {
+     "name": "KILL_S_PER_EXP, KILL_PRIOR_EXP",
+     "value": "0.085, 300.0",
+     "meaning": "s of shooting a point of EXP (Lucky Seven live), the prior's weight"
+    },
+    {
+     "name": "STOP_S",
+     "value": "1.0",
+     "meaning": "guess: s a stop costs beyond its kills"
+    },
+    {
+     "name": "TICK_S, REFILL_P",
+     "value": "7.115, 0.27",
+     "meaning": "respawn pass period; a free point's refill chance a pass with others about"
+    },
+    {
+     "name": "REFILL_PRIOR_N, REFILL_MEMORY_S, WATCH_GAP_S",
+     "value": "3.0, 180.0, 20.0",
+     "meaning": "the learned refill: prior weight, memory, max gap between looks"
+    },
+    {
+     "name": "Q_UNKNOWN",
+     "value": "0.35",
+     "meaning": "a point never seen is this full"
+    },
+    {
+     "name": "TAKE_WEIGHT",
+     "value": "0.5 (GAMELAB_TAKE_WEIGHT)",
+     "meaning": "how much of what other players take she believes"
+    },
+    {
+     "name": "RIVAL_X, RIVAL_DY, RIVAL_KEEP_S",
+     "value": "200.0, 100.0, 20.0",
+     "meaning": "another player's dot this near a point, this recently, takes its monsters"
+    },
+    {
+     "name": "DANGER_HP_S, HP_PRICE, HP_PRIOR_S",
+     "value": "0.0175, 193.5, 20.0",
+     "meaning": "HP a second per unit of danger, EXP a bar of HP, prior s"
+    },
+    {
+     "name": "STOP_DANGER",
+     "value": "2.0",
+     "meaning": "a stop's EXP counts 1 - 2 x its danger"
+    },
+    {
+     "name": "LOOP_MIN, LOOP_MAX, SEEDS",
+     "value": "2, 12, 8",
+     "meaning": "stops in a round, and rounds grown"
+    },
+    {
+     "name": "LOOP_GAIN, LOOP_MIN_S, EMPTY_RUN, REPLAN_S",
+     "value": "0.15, 60.0, 3, 20.0",
+     "meaning": "when a new round replaces hers"
+    },
+    {
+     "name": "SKIP_FULL",
+     "value": "0.25",
+     "meaning": "a loop stop expected under this share of full is skipped"
+    },
+    {
+     "name": "PULL_GAIN",
+     "value": "1.25",
+     "meaning": "guess: a pile must give 1.25x what the loop gives over its detour"
+    },
+    {
+     "name": "DUE_S",
+     "value": "2.0",
+     "meaning": "guess: s of waiting weighed for respawns at a stop"
+    },
+    {
+     "name": "CENSUS, OCC_MAX, OCC_S",
+     "value": "True, 0.55, 60.0",
+     "meaning": "the census on; the gate opens at 0.55 of the map's average over 60 s"
+    },
+    {
+     "name": "TRIP_MIN_N, TRIP_GONE_N, BAR_S",
+     "value": "1.0, 0.2, 180.0",
+     "meaning": "a trip starts at a stop believed to hold 1 monster; drops one under 0.2; her kill rate over 180 s"
+    },
+    {
+     "name": "STOP_SLACK",
+     "value": "0.0",
+     "meaning": "stops standing clear of spawn points: off (cost 4.3% EXP)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-29",
+     "what": "Each point's own refill clock replaced by one memoryless refill rate.",
+     "why": "At 16:39-16:44 she went between 7 and 14 for 4 minutes for nothing; the user: \"the character keeps going up where no mobs are spawning\"."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "Pulls weighed against the loop's long-run rate (PULL_GAIN x the loop over the detour), not 1.5x the next stop's own rate.",
+     "why": "Live on the magician's run, 28 pulls in 7 minutes kept her at the bottom: the user, \"keeps patrolling the bottom region which has worse spawn rate\"."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "The refill as the map filling itself to its cap: her own kills plus others' learned part.",
+     "why": "Measured on Tree Dungeon against the server's own rule (OrionAlpha's LifePool.tryCreateMob)."
+    },
+    {
+     "date": "2026-10-31",
+     "what": "STOP_DANGER 2.0 and HP_PRICE 193.5 from the user's reference prices.",
+     "why": "Stops sat on spawn points where a respawn landed on her; a bar of HP is its potions' mesos (2 HP a meso) at 0.5 EXP a meso."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "The census, the occupancy gate and census trips.",
+     "why": "The user: a grind confined to the upper tower \"would cause bottom of the tower pile up with mobs\"; gate: \"if all the visible spawn points have a low spawn rate, it probably means the mobs are piling elsewhere\". +15.1% EXP for the thief over 40 minutes in the simulator."
+    },
+    {
+     "date": "2026-11-05",
+     "what": "TAKE_WEIGHT 0.5: half of what other players are believed to take.",
+     "why": "Logged takes of 0.42-0.77 had a dot by her round cut its rate by 55% at 22 switches to an all-low round; at 0.5 the cut is 21%."
+    }
+   ],
+   "gotchas": [
+    "Nothing here is chosen by a platform's or a kind's name: it's general over maps.",
+    "A point is emptied once and full again once a monster is seen there after that, so another player's kill of a monster she saw isn't read as a respawn.",
+    "Camping (a one-stop round, `camping`) is computed and logged with every new loop for comparison, but never taken up.",
+    "Two piles each worth the other's detour made her turn at every look (30 ms apart) until a pile in progress had to be beaten with the margin.",
+    "Belief.rate is a property set at each update; REFILL_RATE and the grid may be changed by tests or replays (_prior_mean caches by their values)."
+   ],
+   "tests": [
+    "tests/test_grind.py",
+    "tests/test_census.py",
+    "tests/test_stay_or_go.py",
+    "tests/test_kill_credit.py",
+    "tests/test_landing.py",
+    "tests/test_stranger_take.py",
+    "tests/test_character.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/sweep.py",
+   "title": "The loot sweep (sweep.plan, Sweeper)",
+   "tagline": "Which known piles to pick up on her way, and in what order: exact, in seconds.",
+   "summary": "Pure planner for loot: given pick spots (piles with worth, stand time, landing time, survival, guards and an allowance in seconds) and route times, it returns the itinerary that picks up the most expected mesos within what each pile may add to her way, solved exactly by a dynamic program over subsets. `Sweeper` keeps the itinerary she's on unless another is clearly better.",
+   "details_md": "### The problem\n\nAn orienteering problem in seconds: choose the set and order of piles that maximises `sum(worth_i x P(still there on arrival))`, subject to:\n\n- each pile alone adds at most its own `allow` to her way (its insertion time, guards' kill times not counted);\n- the whole itinerary's `extra` (route through the piles and on to the destination, minus the straight way, minus guards' kills) at most the sum of its piles' allowances, capped at `MOST_S` (6 s; no cap in the hunt loop's lull);\n- within `budget` when the hunt loop gives one (a lull's wait, or the way out when leaving).\n\nOf itineraries that pick up as much (to `GAIN_TIE`, 0.1 mesos), the quickest wins.\n\n### The solve (`plan`)\n\n1. Each candidate is checked alone: no route, over its allowance, or expired (survival 0 at its start) is left out with a reason (`Itinerary.out`).\n2. The best `MAX_CAND` (8) by worth x survival per second of insertion are kept.\n3. A dynamic program over subsets (2^8 masks x 8 last spots) keeps, for each set and last spot, the earliest time she can leave it, the order, and the expected worth (survival taken at each actual arrival).\n4. Every (set, last spot) is closed with the leg on to `dest` and checked against the caps; the best key `(round(gain / 0.1), -extra)` wins.\n\nA stop's start is `max(arrival, lands) + guards' kill time`: drops not landed yet are waited for, guards are shot first.\n\n### Keeping an itinerary (`Sweeper.solve`)\n\nSolved again at every look, two piles each worth the other's detour turned her back and forth. So the current itinerary is re-timed (`again`) and kept unless the new one picks up `KEEP_SHARE` (20%) more, as long as it still fits its allowances plus `KEEP_S` (0.5 s).\n\n### What a stand meets (`meets`, `bounce`)\n\nUsed by the hunt loop's guards: each monster walks at its velocity, turning back at its platform's walk edges (`bounce`), sampled every `STEP_S` (0.1 s); one with unknown heading may be anywhere it could walk within `UNSURE_S` (1 s). It meets her stand when the gap is under its half width + hers + `CONTACT_MARGIN` (10).\n\nMeasured cost (README): 8 candidates a median 2.1 ms (p99 10.5), 6 candidates 0.34 ms; in the simulator's `loop_tree_grind_drops` a solve has a median of 1.5 candidates. The prototype on the live thief run of 2026-10-30 had a median of 3 (8 at most).",
+   "lines": 353,
+   "key_items": [
+    {
+     "name": "plan",
+     "kind": "function",
+     "line": 166,
+     "signature": "def plan(spots: list[Spot], here: tuple[int, float], dest: tuple[int, float] | None, arrive: Arrive, budget: float | None = None, most: float | None = MOST_S) -> Itinerary",
+     "summary": "The best itinerary through `spots` from `here` to `dest` by route times `arrive`: exact DP over subsets of at most 8 candidates."
+    },
+    {
+     "name": "Sweeper",
+     "kind": "class",
+     "line": 293,
+     "signature": "class Sweeper",
+     "summary": "The itinerary she's on (`current`, `dest`), kept until another is clearly better; `drop()` forgets it."
+    },
+    {
+     "name": "Sweeper.solve",
+     "kind": "method",
+     "line": 300,
+     "signature": "def solve(self, spots, here, dest, arrive, budget=None, most=MOST_S) -> Itinerary",
+     "summary": "Plans afresh; keeps the current itinerary (re-timed by `again`) unless the new one is KEEP_SHARE better, the same destination and still within its allowances + KEEP_S."
+    },
+    {
+     "name": "again",
+     "kind": "function",
+     "line": 266,
+     "signature": "def again(it: Itinerary, spots: list[Spot], here, dest, arrive, most=MOST_S) -> Itinerary | None",
+     "summary": "An itinerary's order re-timed from where she is now; None if a spot is gone, unreachable, or the order now costs over its allowances + KEEP_S."
+    },
+    {
+     "name": "meets",
+     "kind": "function",
+     "line": 332,
+     "signature": "def meets(monsters, lo: float, hi: float, t0: float, t1: float, reach, her_half: float, margin: float = CONTACT_MARGIN) -> object | None",
+     "summary": "The first monster that would come within touching of her standing anywhere in [lo, hi] between t0 and t1 s from now."
+    },
+    {
+     "name": "bounce",
+     "kind": "function",
+     "line": 323,
+     "signature": "def bounce(x0: float, v: float, t: float, lo: float, hi: float) -> float",
+     "summary": "Where something walking from x0 at v along [lo, hi], turning back at the ends, is after t s."
+    },
+    {
+     "name": "Spot",
+     "kind": "dataclass",
+     "line": 89,
+     "signature": "@dataclass(frozen=True) class Spot",
+     "summary": "A pick spot: key, platform, x, worth (mesos), stand s, lands (s until its drops are down), still(dt) survival, guards, allow."
+    },
+    {
+     "name": "Itinerary",
+     "kind": "dataclass",
+     "line": 118,
+     "signature": "@dataclass class Itinerary",
+     "summary": "The chosen stops, extra s on her way, expected value, the straight way's s, the budget, and why each other candidate was left out; `record()` for the 'sweep' telemetry."
+    },
+    {
+     "name": "budget_for",
+     "kind": "function",
+     "line": 160,
+     "signature": "def budget_for(direct: float) -> float",
+     "summary": "The hunt loop's budgets for a way of `direct` s: max(BUDGET_MIN 2 s, BUDGET_SHARE 0.5 x direct)."
+    },
+    {
+     "name": "MOST_S",
+     "kind": "constant",
+     "line": 61,
+     "signature": "MOST_S = 6.0",
+     "summary": "s an itinerary may add to her way at most, whatever its piles' allowances sum to (two fresh piles' worth).",
+     "details_md": "From the review of 2026-11-01: their sum alone once had her plan +11.6 then +18.2 s on a 2.6 s way for 260 mesos."
+    }
+   ],
+   "inputs": [
+    "pick spots built by Hunt._spots (or Grind's) from the drop store's piles",
+    "her route times (Planner.arrive via Hunt._arrive), where she is and where she's going",
+    "an optional budget (a lull's wait, or the way out's allowance)"
+   ],
+   "outputs": [
+    "an Itinerary: ordered Stops with arrival and leave times, its value and extra time, and reasons for every pile left out",
+    "for the hunt loop's guards: the monster that would meet a stand (meets)"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "None: pure functions, called once per look per destination from the hunt loop.",
+   "tunables": [
+    {
+     "name": "BUDGET_MIN, BUDGET_SHARE",
+     "value": "2.0, 0.5",
+     "meaning": "the hunt loop's budgets: at least 2 s or half the straight way"
+    },
+    {
+     "name": "ALLOW",
+     "value": "2.0 (BUDGET_MIN)",
+     "meaning": "a spot's allowance where its maker gives none"
+    },
+    {
+     "name": "MOST_S",
+     "value": "6.0",
+     "meaning": "the most an itinerary may add to her way"
+    },
+    {
+     "name": "MAX_CAND",
+     "value": "8",
+     "meaning": "candidates in the exact solve (2^8 sets x 8 ends)"
+    },
+    {
+     "name": "KEEP_SHARE, KEEP_S",
+     "value": "0.2, 0.5",
+     "meaning": "the itinerary she's on is kept unless another picks up 20% more; slack over its allowances"
+    },
+    {
+     "name": "GAIN_TIE",
+     "value": "0.1",
+     "meaning": "mesos: itineraries this close are told apart by time"
+    },
+    {
+     "name": "STAND_PAST_S",
+     "value": "0.5",
+     "meaning": "s after a stand that its guard check covers"
+    },
+    {
+     "name": "CONTACT_MARGIN",
+     "value": "10.0",
+     "meaning": "units more than touching for a stand"
+    },
+    {
+     "name": "STEP_S",
+     "value": "0.1",
+     "meaning": "s between samples of a monster's walk"
+    },
+    {
+     "name": "UNSURE_S",
+     "value": "1.0",
+     "meaning": "s a monster of unknown heading is taken to walk either way"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-30",
+     "what": "The loot sweep built: one choice of piles on her way replacing five pile rules.",
+     "why": "The user: \"before leaving an area you should try to pick as much as possible without too much impact on travel time, and in general you should kill all the mobs that are in the way\"."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "UNSURE_S 1 s for a monster whose heading isn't known.",
+     "why": "Taken for as long as the stand was away, every pile on the ground she shot was left in loop_tree_mp_runs_out (none of 26 picked up)."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "No exchange of mesos for EXP and no price of her time: each pile within its own allowance in seconds, the itinerary within MOST_S.",
+     "why": "The user: \"I imagine piles should be picked up soon after killing. If a pile is about to expire, it probably means they aren't important enough\"."
+    }
+   ],
+   "gotchas": [
+    "Guards' kill times aren't charged to allowances (they're EXP, not loot time), but they do delay every later stop.",
+    "A pile that can't be reached on its own within its allowance never enters the DP, even if it would be cheap as part of a chain.",
+    "`dest` None means the route ends at its last pile (grind's planner at a stop: no place to come back to)."
+   ],
+   "tests": [
+    "tests/test_sweep.py",
+    "tests/test_hunt.py",
+    "tests/test_target.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/lootchain.py",
+   "title": "The loot chain",
+   "tagline": "Runs through the sweep's next few piles as one navigator chain, pressing pick-up all the way.",
+   "summary": "The sweep says which piles and in what order; the loot chain says how she goes through them: up to `MOST_PILES` (4) at once, as one key plan of the navigator to each bunch of drops as last seen, pick-up pressed all the way, standing only for the presses a run past wouldn't give. Pure: `Grind` has the looks, the drop store and the navigator; this module is the plan's shape.",
+   "details_md": "On when the grind's target-first planner runs with the whole screen and `GAMELAB_LOOT_CHAIN` isn't `'0'` (`on()`; default on).\n\n### Shape\n\n- A `LootChain` holds `Stretch`es in the sweep's order (one per pile), where she goes on to after them (`dest`: her target's place or the next stop), the look it was planned on and the sweep's time estimate.\n- A `Stretch` holds a pile's drops as `bunches` (`bunches()`: drops closer than `looting.PILE_GAP`, 15 units, are one bunch, as (middle, count)), the item kinds among them, which bunches she has run over (`ran`), and `again` if she has been through it before.\n\n### The way (`LootChain.way`)\n\nFor the navigator's `through`: a list of (platform, x, seconds standing). Each stretch is entered from its end nearer where she comes onto it (`enter`, the planner's `arrive_within`), each bunch a waypoint with `stand_s(n, again)`: `max(0, n - RUN_PRESSES) x 0.12 s` the first time (a run past gives 2 presses for sure at 120 ms a press), `(n + 1) x 0.12 s` if she has been through it and drops still show. `_run_through` merges waypoints she only runs past into the walk that goes on past them.\n\n### Booking (`LootChain.book`)\n\nAfter the trip, the navigator's record of the stretches she ran over (platform, x from, x to) marks the bunches within `STOOD_ON` (15) of them as done; `Grind._chain_over` turns those into tries and `stood_on`, and what's left is a stop of the next plan.\n\n`END_ROOM` (10) keeps a walk to a drop short of its platform's end; `OFF_END` (60) says a pile no look has seen that far past its platform's end is no pile there (a kill placed wrong); `CHAIN_OFF_S` (0.5 s) sends her the old way (a trip and a stand) after a monster stood in a chain's first walk.",
+   "lines": 147,
+   "key_items": [
+    {
+     "name": "LootChain",
+     "kind": "dataclass",
+     "line": 76,
+     "signature": "@dataclass class LootChain",
+     "summary": "A chain's plan: stretches, the place after them (`dest`), the look it was planned on, the estimated s and when it started; `text()` for the log, `record()` for 'loot_chain' telemetry."
+    },
+    {
+     "name": "LootChain.way",
+     "kind": "method",
+     "line": 85,
+     "signature": "def way(self, platform: int, x: float, enter) -> list[tuple[int, float, float]]",
+     "summary": "What's left of the way from (platform, x) as (platform, x, s standing) waypoints for the navigator's `through`."
+    },
+    {
+     "name": "Stretch",
+     "kind": "dataclass",
+     "line": 55,
+     "signature": "@dataclass class Stretch",
+     "summary": "One pile of a chain: its bunches (x, count), item kinds, `again`, `seen`, which bunches were run over, and whether it was booked; `done` once all are run over."
+    },
+    {
+     "name": "stand_s",
+     "kind": "function",
+     "line": 48,
+     "signature": "def stand_s(n: int, again: bool = False) -> float",
+     "summary": "s to stand at a bunch of n drops: the presses a run wouldn't give (n - RUN_PRESSES), or n + 1 presses when going through it again."
+    },
+    {
+     "name": "bunches",
+     "kind": "function",
+     "line": 37,
+     "signature": "def bunches(xs) -> list[tuple[float, int]]",
+     "summary": "Drops' x grouped: closer than PILE_GAP is one bunch, as (middle, count), left to right."
+    },
+    {
+     "name": "LootChain.book",
+     "kind": "method",
+     "line": 109,
+     "signature": "def book(self, ran: list[tuple[int, float, float]], place=lambda p: p) -> None",
+     "summary": "Marks bunches within STOOD_ON of the stretches she ran over as behind her."
+    },
+    {
+     "name": "on",
+     "kind": "function",
+     "line": 32,
+     "signature": "def on() -> bool",
+     "summary": "Whether her drops go by the chain: GAMELAB_LOOT_CHAIN not '0' (default on)."
+    },
+    {
+     "name": "MOST_PILES",
+     "kind": "constant",
+     "line": 20,
+     "signature": "MOST_PILES = 4",
+     "summary": "Piles a chain goes through at most: the rest are the next plan's, from a newer look."
+    },
+    {
+     "name": "RUN_PRESSES",
+     "kind": "constant",
+     "line": 25,
+     "signature": "RUN_PRESSES = 2",
+     "summary": "Presses a run through a bunch gives for sure; read from the game's data and the simulator's reach, not tried live."
+    }
+   ],
+   "inputs": [
+    "the sweep's itinerary and the drop store's piles (Pile.xs: where each drop lay), from Grind._loot_plan",
+    "the planner's arrive_within for entering a stretch",
+    "the navigator's record of what she ran over"
+   ],
+   "outputs": [
+    "waypoints for control.navigator's `through` (one chain of moves and walks)",
+    "booked stretches for Grind._chain_over; a 'loot_chain' record"
+   ],
+   "uses": [
+    "gamelab/control/actions.py",
+    "gamelab/behavior/ledger.py",
+    "gamelab/behavior/looting.py"
+   ],
+   "files_io": [],
+   "concurrency": "None: pure data and functions.",
+   "tunables": [
+    {
+     "name": "MOST_PILES",
+     "value": "4",
+     "meaning": "piles per chain"
+    },
+    {
+     "name": "RUN_PRESSES",
+     "value": "2",
+     "meaning": "presses a run past a bunch gives"
+    },
+    {
+     "name": "PRESS_S",
+     "value": "PILE_EVERY_MS / 1000 (0.12)",
+     "meaning": "s per pick-up press"
+    },
+    {
+     "name": "CHAIN_OFF_S",
+     "value": "0.5",
+     "meaning": "guess: s of the old way after a monster in a chain's first walk"
+    },
+    {
+     "name": "END_ROOM",
+     "value": "10.0",
+     "meaning": "units short of a platform's end a drop there is walked to"
+    },
+    {
+     "name": "OFF_END",
+     "value": "60.0",
+     "meaning": "guess: units past a platform's end for an unseen pile to be no pile"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-05",
+     "what": "Her drops as one chain through a few piles, no stand, settle or look between them.",
+     "why": "The user, 2026-11-04: \"don't just go to the first target, pickup, then wait, plan for next target, move, then pickup\"."
+    }
+   ],
+   "gotchas": [
+    "A run past a pile isn't a stand: `cant_pick` still needs two real stands with a drop staying under her (Stretch.again, Pile.runs).",
+    "A kill's pile no look has seen yet ends the chain at its middle; the look there decides.",
+    "100% of the drops stays the aim: a drop still there after the run is a stop of the next plan."
+   ],
+   "tests": [
+    "tests/test_loot_chain.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/looting.py",
+   "title": "Looting (Looter) and what drops are worth",
+   "tagline": "Picking up after fights, her inventory's tabs, and the price of every drop.",
+   "summary": "`Looter` is the hunter's looting part: the fights' and the tour's sweeps and mop-ups of drops on her platform, the drops remembered for later, drops she couldn't pick up, and which inventory tabs are full. The module also prices drops in mesos (`Worth`, `PRICES`, `coins_for`, `expected_worth`), which the drop store, the sweep and the valuable-pile rule rank piles by.",
+   "details_md": "### Two roles\n\n- **For the tour and fights** (older): `sweep_after` sweeps a fight's kill spots once she has landed; `collect` picks up a remembered spot if it's on her platform and unguarded (no monster within `TOO_CLOSE`), else remembers it in `pending`; `walk_piles` walks from the nearer end of the drops to the far one, `LOOT_REACH` (60) past each end, pressing pick-up and standing on each pile; `mop_up` looks again up to `MOP_UP` (3) times (0.3 s apart) and goes back for what's left; `remember` forgets a spot after two empty looks `EMPTY_LOOKS` (1.5 s) apart, past `SETTLE` (3 s).\n- **For the hunt loops**: the drop store (behavior/ledger.py) owns the piles, and the loops clear `pending`. They still rely on the Looter for `can_take`, `wanted`, `cant_pick`, `stood_on`, `on_look`, and the hooks `yield_to` (EXP before loot) and `unseen` (monsters a look missed guard drops). With the loot chain (`store_has_them`), `sweep_after` and `sweep_through` do nothing.\n\n### Inventory tabs (from 2026-10-31)\n\nA drop's tab (`tab_of`) is Use for item ids 2xxxxxx, Etc for 4xxxxxx (mesos none). A tab becomes full (`full`) when drops stay under her after two stands (`cant_pick`) and the pickup log says \"You can't get anymore items.\", or after `FAILED_PICKS` (3) failures in a row. An \"earned. (Tab)\" line after the last refusal for a kind that didn't fit says the tab has room. A full tab's items are left, mesos and the other tab still taken; kinds she holds a stack of (`held`) are still taken until one stays under her (`refused`). A full tab is retried after `TAB_RETRY_S` (600 s). A phone push (`push`, control.notify) is sent when a tab fills.\n\n### Worth\n\nItems at the game data's shop price (`PRICES`: e.g. a Slime Bubble 50, a Magic Potion 250, Bronze Ore 20). Mesos by coin: on the first map bronze 15, gold 75; elsewhere `coins_for` averages the amounts the map's monsters drop (Tree Dungeon bronze 33.4, gold 51.5). A drop is valuable at `VALUABLE_COINS` (2) bronze coins. A kill's pile before a look sees it is worth `expected_worth`: 0.64 drops a kill, 57% mesos (live, 2026-10-30).",
+   "lines": 669,
+   "key_items": [
+    {
+     "name": "Looter",
+     "kind": "class",
+     "line": 261,
+     "signature": "class Looter: def __init__(self, hunter: \"Hunter\")",
+     "summary": "What she picks up, what she remembers for later (`pending`), what she can't pick up, and her full tabs; plus the hunt loop's hooks `yield_to` and `unseen`."
+    },
+    {
+     "name": "Looter.collect",
+     "kind": "method",
+     "line": 407,
+     "signature": "def collect(self, drops: DropSpot) -> bool",
+     "summary": "Picks up a remembered spot now if it's on her platform, nothing in reach goes first and no monster guards it; else remembers it. True when done with it."
+    },
+    {
+     "name": "Looter.walk_piles",
+     "kind": "method",
+     "line": 470,
+     "signature": "def walk_piles(self, s: Scene, spots: list[DropSpot], margin: float) -> list[float]",
+     "summary": "Walks over the drops on her platform from the nearer end to the far one and `margin` past, pressing pick-up and standing on each pile; returns where she stood."
+    },
+    {
+     "name": "Looter.mop_up",
+     "kind": "method",
+     "line": 500,
+     "signature": "def mop_up(self, stood: list[float] | None = None) -> None",
+     "summary": "Looks again after a sweep (up to MOP_UP times) and goes back for drops still there; stuck ones to cant_pick, guarded ones remembered."
+    },
+    {
+     "name": "Looter.cant_pick",
+     "kind": "method",
+     "line": 539,
+     "signature": "def cant_pick(self, stuck: list[Loot]) -> None",
+     "summary": "Drops stood on twice and still there: left for UNPICKABLE_FOR (90 s); reads the pickup log to decide which tab is full or has room."
+    },
+    {
+     "name": "Looter.can_take",
+     "kind": "method",
+     "line": 303,
+     "signature": "def can_take(self, kind: str) -> bool",
+     "summary": "Whether a drop of `kind` fits: mesos always, an item while its tab isn't full, or a held stack's kind not refused."
+    },
+    {
+     "name": "Looter.remember",
+     "kind": "method",
+     "line": 370,
+     "signature": "def remember(self, s: Scene) -> None",
+     "summary": "Notes drops a look saw for later and forgets spots seen empty twice EMPTY_LOOKS apart (one look can miss drops behind a monster)."
+    },
+    {
+     "name": "Looter.sweep_after",
+     "kind": "method",
+     "line": 447,
+     "signature": "def sweep_after(self, spots: list[DropSpot]) -> None",
+     "summary": "Sweeps a fight's drops once she has landed (up to 8 looks 0.15 s apart); drops on other platforms left for the tour. Nothing with store_has_them."
+    },
+    {
+     "name": "Worth",
+     "kind": "dataclass",
+     "line": 170,
+     "signature": "@dataclass(frozen=True) class Worth",
+     "summary": "What drops are worth on one map: items by PRICES, mesos by coin; `valuable` is VALUABLE_COINS bronze coins."
+    },
+    {
+     "name": "expected_worth",
+     "kind": "function",
+     "line": 211,
+     "signature": "def expected_worth(kind: str | None, value: \"Worth\", can: Callable[[str], bool] | None = None) -> float",
+     "summary": "A kill's pile worth before it's seen: 0.64 drops x (57% mesos at the middle of its kind's amounts + 43% items by their drop rates); a full tab's items worth nothing."
+    },
+    {
+     "name": "coins_for",
+     "kind": "function",
+     "line": 225,
+     "signature": "def coins_for(model) -> dict[str, float]",
+     "summary": "What a bronze (under 50) and a gold (50-99) coin are worth on a map, from what its monsters drop, weighted by spawn points."
+    },
+    {
+     "name": "PRICES",
+     "kind": "constant",
+     "line": 105,
+     "signature": "PRICES = {...}",
+     "summary": "Shop prices from the game data (info/price) of every drop of the three maps, in mesos."
+    },
+    {
+     "name": "tab_of",
+     "kind": "function",
+     "line": 618,
+     "signature": "def tab_of(kind: str) -> str | None",
+     "summary": "The inventory tab a drop goes into by its item id (Use for 2xxxxxx, Etc otherwise); None for mesos."
+    }
+   ],
+   "inputs": [
+    "looks (Scene.loot, monsters) through the hunter",
+    "the pickup log's lines (Eyes.messages) when drops stay under her",
+    "the game data's item ids and prices, and perception.drops' per-monster drop tables"
+   ],
+   "outputs": [
+    "walks and pick-up presses through Actions",
+    "pending drop spots for the tour; unpickable spots; full tabs and held kinds for every caller",
+    "telemetry 'inventory' events; a phone push when a tab fills",
+    "drop prices (Worth) for the drop store, the sweep and rule 6a"
+   ],
+   "uses": [
+    "gamelab/behavior/hunter.py",
+    "gamelab/control/navigator.py",
+    "gamelab/control/notify.py",
+    "gamelab/attack/reach.py",
+    "gamelab/attack/stance.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/players.py",
+    "gamelab/localization/scene.py",
+    "gamelab/perception/drops.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/perception/loot.py",
+    "gamelab/directions.py",
+    "gamelab/telemetry.py",
+    "maplehelper/ocr/item_names.py",
+    "maplehelper/ocr/parse.py"
+   ],
+   "files_io": [],
+   "concurrency": "None: called on the hunt's thread; mop_up and sweep_after sleep 0.3 s / 0.15 s between looks.",
+   "tunables": [
+    {
+     "name": "LOOT_REACH",
+     "value": "60",
+     "meaning": "drops spread this far around where the monster died"
+    },
+    {
+     "name": "PILE_GAP",
+     "value": "15",
+     "meaning": "drops closer than this are one pile, picked up from one place"
+    },
+    {
+     "name": "STOOD_ON",
+     "value": "15",
+     "meaning": "she stood on a drop when she stopped within this of it"
+    },
+    {
+     "name": "MOP_UP",
+     "value": "3",
+     "meaning": "looks after a sweep for drops still there"
+    },
+    {
+     "name": "SETTLE",
+     "value": "3.0",
+     "meaning": "s a kill's drops take to land and show"
+    },
+    {
+     "name": "EMPTY_LOOKS",
+     "value": "1.5",
+     "meaning": "s between two empty looks that forget a remembered spot"
+    },
+    {
+     "name": "UNPICKABLE_FOR",
+     "value": "90",
+     "meaning": "s drops she failed to pick up are left alone"
+    },
+    {
+     "name": "FAILED_PICKS",
+     "value": "3",
+     "meaning": "items in a row stuck under her mark their tab full"
+    },
+    {
+     "name": "TAB_RETRY_S",
+     "value": "600.0",
+     "meaning": "guess: s before a full tab is tried again"
+    },
+    {
+     "name": "DROPS_LAST",
+     "value": "90",
+     "meaning": "s remembered drops are worth going back for (the tour)"
+    },
+    {
+     "name": "COINS",
+     "value": "{bronze: 15, gold: 75}",
+     "meaning": "the first map's coins in mesos"
+    },
+    {
+     "name": "VALUABLE_COINS",
+     "value": "2.0",
+     "meaning": "a drop worth this many bronze coins is valuable"
+    },
+    {
+     "name": "EXPECTED_DROPS, EXPECTED_MESOS",
+     "value": "0.64, 0.57",
+     "meaning": "drops a kill and their mesos share (live)"
+    },
+    {
+     "name": "STANDING_ONLY, PLAYER_PILES",
+     "value": "False, False",
+     "meaning": "measured options left off"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-21",
+     "what": "Drops priced at the game data's shop prices (PRICES), mesos by their coin.",
+     "why": "Rule 6a and the drop store rank piles by what they're worth; the first map's prices on 2026-10-21, the new maps' on 2026-10-24."
+    },
+    {
+     "date": "2026-10-31",
+     "what": "Inventory tracked by tab (Use, Etc) instead of one full flag.",
+     "why": "The user: \"we also need to watch for backpack full scenario\"; one flag left every item for the rest of the run once set."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "Earned lines parsed by maplehelper's loot-line parser against the game's item names.",
+     "why": "A regex read the game's cut names (\"Horny Mushroo... x1\") as kinds of their own, so a cap top-up into a full Etc tab cleared it."
+    }
+   ],
+   "gotchas": [
+    "A drop stood on twice and still there may be someone else's (drops belong to the killer for a while) or her tab may be full: only the pickup log or FAILED_PICKS tell which.",
+    "In the hunt loops `pending` is cleared at every pass: the drop store, not the Looter, remembers piles there.",
+    "Every drop not in PRICES is worth UNKNOWN_WORTH (50): equipment and scrolls aren't looked for."
+   ],
+   "tests": [
+    "tests/test_loot.py",
+    "tests/test_fight.py",
+    "tests/test_hunt.py",
+    "tests/test_ledger.py",
+    "tests/test_geometry.py",
+    "tests/test_target.py",
+    "tests/test_unseen.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/bootstrap.py",
+   "title": "Her stats from perception (HerStats)",
+   "tagline": "Her max HP, level and DEF read or fitted from perception, never from config.",
+   "summary": "The \"bootstrap\" of her stats: her max HP (the HUD's HP number), her level (the HUD's LV. digits, else her EXP number) and her DEF (her stat window's W.DEF, else fitted to her measured touches, else a prior), each with where it came from. The safety stop's HP reserve and the positioning model (attack.danger) are worked out from them; `Hunter` builds one `HerStats` at start and feeds it as perception reads.",
+   "details_md": "This is not the hunt's start-up sequence: it's how her character stats get bootstrapped from what perception reads, once the user asked to drop them from config.toml (2026-10-28).\n\n### The three stats\n\n- **Max HP** (`see_max_hp`): the HUD's \"HP [cur/max]\" number, the moment it reads. Until then a command that hunts waits for it (behavior.safety's `HpNotRead`); the positioning model assumes `PLAN_TOUCHES` (6) of the map's largest touch.\n- **Level** (`see_level`): the LV. digits while they read; the EXP number's level once they haven't for `LV_UNREAD_S` (2 s). Until read, `UNREAD_LEVEL` (1), where a touch takes the most.\n- **DEF** (`refit`): her stat window's W.DEF (opened and read at a hunt's start by behavior.statcheck), kept in lab/her_stats.json with the level and the perception session it was read in; else `fit_defence` to her last `FIT_N` (40) exact touches; else the prior: `PRIOR_DEF` 0 for the safety stop (the most a touch can take), `PLAN_DEF` (attack.danger's 75) for the positioning model.\n\n### Fitting DEF to touches (`fit_defence`)\n\nFor every DEF from 0 to 400 in steps of 0.25, count how many touches some monster of their map could have dealt by the game's formula (`attack.danger.touch_taken` at the touch's level, anywhere in its damage roll). Needs `FIT_MIN` (8) touches and `FIT_AGREE` (80%) agreeing. The `Defence` keeps `low` (the safety stop uses the lowest DEF allowed: the most a touch can take), `high`, and `best` (the prior if inside the range, else the middle). The newest 8 touches are checked separately: if they disagree, gear may have changed, and the lower low is taken or the prior used.\n\n### Doubting a stat-window read (`window_doubt`)\n\nA W.DEF read before this run is doubted if read at another level, in another perception session, or over `SESSION_S` (3 h) before; any read is doubted if her newest touches since don't fit it, or it's above what her touches fit. A W.DEF outside 0-400 is a misread and not taken (an OCR \"711\" for 111 once put her reserve at 117 HP of 840).\n\n`her()` gives attack.danger the `Her` (HP, level, DEF best) it measures touches against.",
+   "lines": 489,
+   "key_items": [
+    {
+     "name": "HerStats",
+     "kind": "class",
+     "line": 201,
+     "signature": "class HerStats: def __init__(self, path: Path | None = None, rows=(), session: str | None = None)",
+     "summary": "Her stats as perception read them this run (max_hp, level, level_from, defence), with her stats file (lab/her_stats.json) kept up to date; each see_* returns what changed in words."
+    },
+    {
+     "name": "fit_defence",
+     "kind": "function",
+     "line": 147,
+     "signature": "def fit_defence(rows, plan: float = PLAN_DEF) -> Defence",
+     "summary": "Her DEF from her kept touches: the DEF range most of the last 40 fit (80% must agree), checking the newest 8 for a gear change."
+    },
+    {
+     "name": "Defence",
+     "kind": "dataclass",
+     "line": 79,
+     "signature": "@dataclass(frozen=True) class Defence",
+     "summary": "Her DEF as known: best (positioning), low (safety stop), high, source ('stat window', 'touches', 'prior'), counts and why; `words()` for the log."
+    },
+    {
+     "name": "HerStats.see_window",
+     "kind": "method",
+     "line": 353,
+     "signature": "def see_window(self, wdef: float, at=None, rows=None, level=None, session=None, read=None, speed=None) -> str | None",
+     "summary": "Her stat window read W.DEF `wdef`: kept with its level, session and the window's other stats, checked against her touches; out-of-range reads refused."
+    },
+    {
+     "name": "HerStats.window_doubt",
+     "kind": "method",
+     "line": 402,
+     "signature": "def window_doubt(self, rows=None, session=None, level=None, now=None) -> str | None",
+     "summary": "Why a W.DEF read isn't her DEF now: another session, level, too old, or her touches don't fit it."
+    },
+    {
+     "name": "HerStats.refit",
+     "kind": "method",
+     "line": 446,
+     "signature": "def refit(self, rows) -> str | None",
+     "summary": "Her DEF again: the window's if read and not doubted, else fitted to touches, else the prior; saves and says what changed."
+    },
+    {
+     "name": "HerStats.see_level",
+     "kind": "method",
+     "line": 305,
+     "signature": "def see_level(self, level: int | float | None, source: str, t: float | None = None) -> str | None",
+     "summary": "Her level by the LV. digits or the EXP number (the digits win while they read); her first level this run can make a kept W.DEF doubtful."
+    },
+    {
+     "name": "HerStats.see_max_hp",
+     "kind": "method",
+     "line": 295,
+     "signature": "def see_max_hp(self, most: int | None, source: str | None = None) -> str | None",
+     "summary": "Her max HP from the HUD's number (or the stat window's while the HUD hasn't read)."
+    },
+    {
+     "name": "HerStats.her",
+     "kind": "method",
+     "line": 476,
+     "signature": "def her(self, largest_touch: float = 1.0) -> danger.Her",
+     "summary": "What the positioning model measures touches against: max HP (or PLAN_TOUCHES x the largest touch), level (or UNREAD_LEVEL), DEF best."
+    },
+    {
+     "name": "HerStats.window_due",
+     "kind": "method",
+     "line": 382,
+     "signature": "def window_due(self, level=None, session=None, rows=None, now=None) -> str | None",
+     "summary": "Why her stat window should be read now (none read, doubted, or read at another level); behavior.statcheck asks it."
+    },
+    {
+     "name": "agreeing",
+     "kind": "function",
+     "line": 192,
+     "signature": "def agreeing(defence: float, rows) -> tuple[int, int]",
+     "summary": "How many of her last FIT_N usable touches the formula gives at `defence`, of how many."
+    }
+   ],
+   "inputs": [
+    "the HUD's HP number and LV. digits, and her EXP number's level (perception, via the Hunter)",
+    "her stat window's read (perception.stat_window via behavior.statcheck)",
+    "her measured touches (behavior.safety.Touches.rows) with each one's level and the map's monsters' PADamage",
+    "the perception service's session id (session_of_feed)"
+   ],
+   "outputs": [
+    "max_hp, level and a Defence for the safety stop's reserve (behavior.safety) and attack.danger's Her",
+    "lines for her log saying what changed and where it came from",
+    "lab/her_stats.json (read by `gamelab stats` and an offline `patrol`)"
+   ],
+   "uses": [
+    "gamelab/attack/danger.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamelab/lab/her_stats.json",
+     "mode": "read-write",
+     "what": "her DEF (window read or fit) and max HP and level as last read, with when and where from"
+    }
+   ],
+   "concurrency": "None.",
+   "tunables": [
+    {
+     "name": "PRIOR_DEF, PLAN_DEF",
+     "value": "0.0, attack.danger.DEFENCE (75)",
+     "meaning": "DEF while unknown: the safety stop's, the positioning model's"
+    },
+    {
+     "name": "UNREAD_LEVEL",
+     "value": "1",
+     "meaning": "her level for a touch while unread"
+    },
+    {
+     "name": "UNREAD_SHARE",
+     "value": "0.5",
+     "meaning": "the safety stop's share of her bar while max HP is unread (where nothing hunts)"
+    },
+    {
+     "name": "PLAN_TOUCHES",
+     "value": "6.0",
+     "meaning": "positioning model's max HP while unread: this many of the map's largest touch"
+    },
+    {
+     "name": "FIT_N, FIT_MIN, FIT_AGREE",
+     "value": "40, 8, 0.8",
+     "meaning": "touches fitted, needed, and agreeing"
+    },
+    {
+     "name": "DEF_STEP, DEF_TOP",
+     "value": "0.25, 400.0",
+     "meaning": "the DEF grid; reads outside 0-400 are misreads"
+    },
+    {
+     "name": "LV_UNREAD_S",
+     "value": "2.0",
+     "meaning": "s of unread LV. digits before the EXP number's level is taken"
+    },
+    {
+     "name": "SESSION_S",
+     "value": "3 h",
+     "meaning": "a stat-window read is this session's for this long at most"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-28",
+     "what": "Max HP and level from perception, removed from config.toml.",
+     "why": "The user: \"These should not even be in config yaml, use perception result to bootstraps\"."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "DEF read off her stat window, else fitted to her touches by the game's damage formula.",
+     "why": "The user: \"You can open character stats panel to check the defense\"; her 178 touches of 2026-10-24 to 28 fit DEF 48-115 as her gear changed."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "W.DEF reads outside 0-400 refused, and kept reads doubted across sessions and levels.",
+     "why": "The review of 2026-10-28: an OCR's \"711\" for 111 put her reserve at 117 HP of 840; a stale read kept governing."
+    }
+   ],
+   "gotchas": [
+    "The safety stop uses `low` (the lowest DEF the evidence allows: the most a touch can take), while the positioning model uses `best`.",
+    "A W.DEF lower than what her touches fit isn't doubted: lower is the safe side.",
+    "Despite the name, this isn't the hunt's start-up sequence (that's Hunt.run): it bootstraps her stats, and keeps updating them all run as perception reads."
+   ],
+   "tests": [
+    "tests/test_bootstrap.py",
+    "tests/test_safety.py",
+    "tests/test_stat_window.py",
+    "tests/test_statcheck.py",
+    "tests/test_panel_speed.py",
+    "tests/test_lv_number.py",
+    "tests/test_character.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/walk.py",
+   "title": "The movement-only walk",
+   "tagline": "Random navigator trips over the map, no attack: the live QA walk as one process.",
+   "summary": "`walk()` sends one monster-avoiding navigator on random trips, one after another, for a number of minutes: `python -m gamelab nav --walk MINUTES`, and the simulator harness's `walk` policy draws the same trips. It tests movement alone, keeping the navigator's tracker, memory and trip state from trip to trip as a hunt would.",
+   "details_md": "Each trip goes to a platform drawn at random (`places`): on Tree Dungeon (map 10002073) one of `PLATFORMS` 7-33 (the live QA walk's), elsewhere any platform at least `MIN_WIDTH` (60) wide; an x drawn uniformly `EDGE` (15) in from its ends; `TRIP_S` (40 s) to get there through `nav.go`. Each trip is logged with its result, moves, touches on the way and waits.\n\n`save()` runs every `SAVE_S` (270 s) if given: in the command it asks the rolling recorder (control.rolling) to save its last 300 s as 'qa-walk'. The command (`cmd_nav` -> `_nav_walk` in `gamelab/__main__.py`) runs the walk inside `on_alarm` (the Lie Detector or a stop makes her retreat and ends it), parks her at the end (behavior.retreat.park) and saves once more. With `minutes` None it runs until something stops it, as the harness's horizon does.\n\nIt replaced the live QA walk of 2026-10-28 (a script that started `nav` again for each trip), so the navigator's state carries over between trips the way it does in a hunt.",
+   "lines": 52,
+   "key_items": [
+    {
+     "name": "walk",
+     "kind": "function",
+     "line": 29,
+     "signature": "def walk(nav, model, rng: random.Random, minutes: float | None = None, trip_s: float = TRIP_S, log=None, save=None, save_every: float = SAVE_S) -> list",
+     "summary": "Trips of `nav` to random places until `minutes` have passed; returns the navigator's Trips."
+    },
+    {
+     "name": "places",
+     "kind": "function",
+     "line": 24,
+     "signature": "def places(model) -> list",
+     "summary": "The platforms a walk's trips go to: Tree Dungeon's 7-33, elsewhere any MIN_WIDTH wide."
+    },
+    {
+     "name": "PLATFORMS",
+     "kind": "constant",
+     "line": 17,
+     "signature": "PLATFORMS = range(7, 34)",
+     "summary": "Tree Dungeon's platforms of the live QA walk."
+    },
+    {
+     "name": "TRIP_S",
+     "kind": "constant",
+     "line": 20,
+     "signature": "TRIP_S = 40.0",
+     "summary": "s each trip has to get there."
+    }
+   ],
+   "inputs": [
+    "a Navigator that avoids monsters (no escort), the MapModel, a seeded random.Random"
+   ],
+   "outputs": [
+    "navigator trips (keys through the key player), log lines per trip, the list of Trips"
+   ],
+   "uses": [
+    "gamelab/control/navigator.py"
+   ],
+   "files_io": [],
+   "concurrency": "None: blocking trips on the caller's thread.",
+   "tunables": [
+    {
+     "name": "PLATFORMS",
+     "value": "range(7, 34)",
+     "meaning": "Tree Dungeon's platforms walked to"
+    },
+    {
+     "name": "MIN_WIDTH",
+     "value": "60.0",
+     "meaning": "elsewhere, platforms at least this wide"
+    },
+    {
+     "name": "EDGE",
+     "value": "15.0",
+     "meaning": "units in from a platform's ends"
+    },
+    {
+     "name": "TRIP_S",
+     "value": "40.0",
+     "meaning": "s per trip"
+    },
+    {
+     "name": "SAVE_S",
+     "value": "270.0",
+     "meaning": "s between saves of the rolling recording"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-28",
+     "what": "The live QA walk made one process (`nav --walk`).",
+     "why": "Starting `nav` again for each trip lost the navigator's tracker, memory and trip state that a hunt keeps."
+    }
+   ],
+   "gotchas": [
+    "Sends keys: `nav --walk` moves her for real (no attack)."
+   ],
+   "tests": [
+    "tests/test_evade.py",
+    "tests/test_guard.py"
+   ]
+  }
+ ],
+ "data_types": [
+  {
+   "name": "Objective",
+   "module": "gamelab/behavior/hunt.py",
+   "line": 405,
+   "summary": "Where she's heading: a ground's spot or a pile. Kept on Hunt's stack while a higher rule suspends it, with its route choice and clock.",
+   "fields": [
+    {
+     "name": "kind",
+     "type": "str",
+     "meaning": "\"spot\" or \"pile\""
+    },
+    {
+     "name": "platform, x",
+     "type": "int, float | None",
+     "meaning": "where it is"
+    },
+    {
+     "name": "ground",
+     "type": "int | None",
+     "meaning": "the ground a spot is for"
+    },
+    {
+     "name": "pile / spot",
+     "type": "Pile | None, Spot | None",
+     "meaning": "the pile (ledger) or spot (attack.spots)"
+    },
+    {
+     "name": "weights, choice",
+     "type": "dict, Choice",
+     "meaning": "its route weights and way, kept through suspensions"
+    },
+    {
+     "name": "started",
+     "type": "float",
+     "meaning": "its clock (OBJECTIVE_S), running while suspended"
+    },
+    {
+     "name": "trip",
+     "type": "TripState | None",
+     "meaning": "the navigator's trip in progress"
+    },
+    {
+     "name": "passing, finishing",
+     "type": "dict[int, float], float",
+     "meaning": "s shot in passing per platform (rule 4), s finishing (rule 4b)"
+    },
+    {
+     "name": "why",
+     "type": "str",
+     "meaning": "the rule that set it (\"valuable pile\", \"sweep\", \"to target\", \"back to spot\")"
+    },
+    {
+     "name": "after, chain",
+     "type": "tuple | None, LootChain | None",
+     "meaning": "a sweep pile's way on, and its loot chain"
+    }
+   ]
+  },
+  {
+   "name": "Visit",
+   "module": "gamelab/behavior/hunt.py",
+   "line": 436,
+   "summary": "A stay at a hunting ground (or a grind stop): what it gave and its clocks, used by the rate rule and the value map.",
+   "fields": [
+    {
+     "name": "ground, spot",
+     "type": "int, Spot",
+     "meaning": "the ground and where she shoots it from"
+    },
+    {
+     "name": "arrived",
+     "type": "float | None",
+     "meaning": "when she got there (None: on her way)"
+    },
+    {
+     "name": "exp, throws",
+     "type": "float, int",
+     "meaning": "EXP her kills there gave, and her throws"
+    },
+    {
+     "name": "changes, spot_since",
+     "type": "int, float",
+     "meaning": "rule 7's spot changes and when the spot was taken"
+    },
+    {
+     "name": "kills",
+     "type": "list[float]",
+     "meaning": "when her kills there were (respawns due back)"
+    },
+    {
+     "name": "empty_since",
+     "type": "float | None",
+     "meaning": "since when looks covering it saw nothing wanted"
+    },
+    {
+     "name": "backs",
+     "type": "int",
+     "meaning": "grind's trips back to the stop"
+    }
+   ]
+  },
+  {
+   "name": "HuntReport",
+   "module": "gamelab/behavior/hunt.py",
+   "line": 451,
+   "summary": "What a hunt did from start to the end of its stand-by trip: the run summary, the 'hunt done' line and the telemetry 'summary' record.",
+   "fields": [
+    {
+     "name": "seconds, standby_s",
+     "type": "float",
+     "meaning": "the hunt's time and the stand-by trip's"
+    },
+    {
+     "name": "grounds",
+     "type": "list[int]",
+     "meaning": "grounds or stops visited in order"
+    },
+    {
+     "name": "kills, exp_gains, exp, exp_read",
+     "type": "dict, int, float, int | None",
+     "meaning": "kills by kind, EXP gains, EXP by kinds, EXP off her number"
+    },
+    {
+     "name": "throws, casts",
+     "type": "int",
+     "meaning": "the hunt's own throws; every throw of hers including the navigator's"
+    },
+    {
+     "name": "piles, on_the_way",
+     "type": "int",
+     "meaning": "piles gone after; EXP gains while travelling"
+    },
+    {
+     "name": "rules, rule_s",
+     "type": "Counter",
+     "meaning": "passes each rule decided, and the seconds after each"
+    },
+    {
+     "name": "touches, misses, drinks, lowest_hp, max_hp",
+     "type": "int, float",
+     "meaning": "her touches, MISSes, potions, lowest and max HP read"
+    },
+    {
+     "name": "stop",
+     "type": "str",
+     "meaning": "why it ended (\"time up\", \"stuck\", ...)"
+    }
+   ]
+  },
+  {
+   "name": "Spot",
+   "module": "gamelab/behavior/sweep.py",
+   "line": 89,
+   "summary": "A pick spot for the loot sweep (sweep.Spot, not attack.spots.Spot, which is where she shoots a ground from): made by Hunt._spots from a drop-store pile, consumed by sweep.plan.",
+   "fields": [
+    {
+     "name": "key, platform, x",
+     "type": "object, int, float",
+     "meaning": "the pile's key and where she stands"
+    },
+    {
+     "name": "worth",
+     "type": "float",
+     "meaning": "mesos (only what she can take)"
+    },
+    {
+     "name": "stand, lands",
+     "type": "float",
+     "meaning": "s the stand takes; s until its drops lie on the ground"
+    },
+    {
+     "name": "still",
+     "type": "Callable[[float], float]",
+     "meaning": "chance it still lies there dt s from now"
+    },
+    {
+     "name": "guards",
+     "type": "tuple[Guard, ...]",
+     "meaning": "monsters to shoot first (monster, kill_s, exp)"
+    },
+    {
+     "name": "allow",
+     "type": "float",
+     "meaning": "s it may add to her way on its own"
+    }
+   ]
+  },
+  {
+   "name": "Itinerary",
+   "module": "gamelab/behavior/sweep.py",
+   "line": 118,
+   "summary": "The sweep's answer: which piles in what order, then on to where she's going; recorded as 'sweep' telemetry.",
+   "fields": [
+    {
+     "name": "stops",
+     "type": "list[Stop]",
+     "meaning": "each spot with its arrive and leave times"
+    },
+    {
+     "name": "extra, value, direct",
+     "type": "float",
+     "meaning": "s added to her way, expected mesos, the straight way's s"
+    },
+    {
+     "name": "budget",
+     "type": "float | None",
+     "meaning": "the budget it kept to (None: allowances alone)"
+    },
+    {
+     "name": "out",
+     "type": "dict",
+     "meaning": "why each other candidate was left out"
+    }
+   ]
+  },
+  {
+   "name": "Plan",
+   "module": "gamelab/behavior/patrol.py",
+   "line": 394,
+   "summary": "A grind loop and what it gives in the long run: Patrol.rate makes it, Patrol.best picks it, Grind holds its rate as the bar to beat.",
+   "fields": [
+    {
+     "name": "stops",
+     "type": "tuple[int, ...]",
+     "meaning": "indices into Patrol.stops, in round order"
+    },
+    {
+     "name": "rate",
+     "type": "float",
+     "meaning": "EXP a second, less the danger's cost"
+    },
+    {
+     "name": "cycle, travel, kills",
+     "type": "float",
+     "meaning": "s a round, of it route times, of it shooting"
+    },
+    {
+     "name": "exp, points, hp",
+     "type": "float, int, float",
+     "meaning": "EXP a round, spawn points reached, bars of HP a round"
+    }
+   ]
+  },
+  {
+   "name": "Stop",
+   "module": "gamelab/behavior/patrol.py",
+   "line": 385,
+   "summary": "A grind stop (patrol.Stop, not sweep.Stop, which is one pile of an itinerary): where a leg of the loop ends, and the spawn points it gets at.",
+   "fields": [
+    {
+     "name": "platform, x",
+     "type": "int, float",
+     "meaning": "where she stands"
+    },
+    {
+     "name": "cover",
+     "type": "tuple[tuple[int, float], ...]",
+     "meaning": "(point id, share she gets at): 1 on her platform, a star's share on another"
+    }
+   ]
+  },
+  {
+   "name": "Point",
+   "module": "gamelab/behavior/patrol.py",
+   "line": 365,
+   "summary": "A spawn point of a kind she hunts (game data), the unit of Patrol's belief.",
+   "fields": [
+    {
+     "name": "id, platform, x",
+     "type": "int, int, float",
+     "meaning": "its index and place"
+    },
+    {
+     "name": "kind, exp",
+     "type": "str, float",
+     "meaning": "the monster kind and its EXP a kill"
+    }
+   ]
+  },
+  {
+   "name": "LootChain",
+   "module": "gamelab/behavior/lootchain.py",
+   "line": 76,
+   "summary": "A loot chain's plan through up to 4 piles: built by Grind._loot_plan, its way fed to the navigator, booked by Grind._chain_over.",
+   "fields": [
+    {
+     "name": "stretches",
+     "type": "list[Stretch]",
+     "meaning": "one per pile: bunches (x, count), kinds, ran, again, seen"
+    },
+    {
+     "name": "dest",
+     "type": "tuple[int, float] | None",
+     "meaning": "where she goes after (her target's place, the next stop)"
+    },
+    {
+     "name": "planned_on, est_s, started",
+     "type": "Scene, float, float",
+     "meaning": "the look it was planned on, the sweep's time, when it began"
+    }
+   ]
+  },
+  {
+   "name": "DropSpot",
+   "module": "gamelab/behavior/looting.py",
+   "line": 249,
+   "summary": "Where drops lie or will land, for the tour's and fights' looting (Looter.pending, collect, sweep_after).",
+   "fields": [
+    {
+     "name": "x, y, platform",
+     "type": "float, float, int | None",
+     "meaning": "where"
+    },
+    {
+     "name": "since",
+     "type": "float",
+     "meaning": "when (the kill, or first seen)"
+    },
+    {
+     "name": "mesos, on_ground",
+     "type": "bool",
+     "meaning": "mesos seen there; seen on the ground (else where a kill died)"
+    },
+    {
+     "name": "empty_since",
+     "type": "float | None",
+     "meaning": "when a look first saw it empty"
+    }
+   ]
+  },
+  {
+   "name": "Worth",
+   "module": "gamelab/behavior/looting.py",
+   "line": 170,
+   "summary": "What drops are worth on a map, in mesos: Hunter.worth (worth_for), used by the drop store, the sweep and rule 6a.",
+   "fields": [
+    {
+     "name": "coins",
+     "type": "dict",
+     "meaning": "mesos per coin kind (bronze, gold) on this map"
+    },
+    {
+     "name": "valuable",
+     "type": "float (property)",
+     "meaning": "VALUABLE_COINS bronze coins: a drop worth this is gone for at once"
+    }
+   ]
+  },
+  {
+   "name": "Defence",
+   "module": "gamelab/behavior/bootstrap.py",
+   "line": 79,
+   "summary": "Her DEF as known, from bootstrap.HerStats, for the safety stop (low) and the positioning model (best).",
+   "fields": [
+    {
+     "name": "best, low, high",
+     "type": "float, float, float | None",
+     "meaning": "the positioning model's DEF, the lowest the evidence allows, the highest"
+    },
+    {
+     "name": "source",
+     "type": "str",
+     "meaning": "\"stat window\", \"touches\" or \"prior\""
+    },
+    {
+     "name": "n, agree",
+     "type": "int",
+     "meaning": "touches fitted and how many agree"
+    },
+    {
+     "name": "at, why",
+     "type": "float | None, str",
+     "meaning": "when the window was read; why it's the prior or doubted"
+    }
+   ]
+  },
+  {
+   "name": "TourReport",
+   "module": "gamelab/behavior/tour.py",
+   "line": 53,
+   "summary": "What a tour did: platforms visited, kills there and on the way, loot trips.",
+   "fields": [
+    {
+     "name": "visited",
+     "type": "list[int]",
+     "meaning": "platforms hunted"
+    },
+    {
+     "name": "kills, throws, exp_gains",
+     "type": "dict, int, int",
+     "meaning": "at the stops"
+    },
+    {
+     "name": "on_the_way, loot_trips",
+     "type": "int",
+     "meaning": "kills while travelling or guarding drops; loot trips"
+    },
+    {
+     "name": "stop",
+     "type": "str",
+     "meaning": "how it ended"
+    }
+   ]
+  }
+ ],
+ "flows": [
+  {
+   "id": "hunt-pass",
+   "title": "One pass of the hunt loop",
+   "summary": "How a single look turns into a single step, and how a trip hands control back when something new appears.",
+   "trigger": "Hunt.run's loop (from `tour --loop`), every pass until the minutes run out or a stop.",
+   "steps": [
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "cmd_tour",
+     "text": "`tour --loop` builds the hunter, a fighting navigator and a Tour, then runs Grind (default) or Hunt (`--camp`) inside on_alarm, and parks at the end.",
+     "process": "the tour command"
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt.run",
+     "text": "One report for the hunt; hooks installed on the Looter and Attacks; first ground chosen; then `_pass()` in a loop, standing still on LookLost and running key or stat checks when they're due.",
+     "process": "the tour command"
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt._pass",
+     "text": "One pass: a look, the bookkeeping, the backstops (the stuck guard, the objective's 60 s clock), then the rules: rule 1 (close quarters) and rule 6a (a valuable pile, only with nothing in reach) first, then `_while_travelling` if an objective is set, else `_at_ground`.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt._look",
+     "text": "A band look with her platform's drops (the whole screen once a far kill's drops have landed); the 'monsters' record for the mini-map.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt._book",
+     "text": "New kills from the ledger credited to the visit or 'on the way'; progress clock; fight state reset at a new place or objective.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter.health_check",
+     "text": "Potions, and the safety stop when her HP stays low (it raises and ends the hunt).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt._at_ground",
+     "text": "At the ground: high ground, shoot, better spot, then the rate rule: stay (the sweep's round trip, else wait) or leave (the sweep's piles on the way out, then the next ground).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt._note",
+     "text": "The step a rule takes first notes it: the rule counted in the report (`rules`, and the seconds until the next note in `rule_s`) and, when the rule changes, the 'hunt' telemetry record sent for the mini-map.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt._travel",
+     "text": "An objective becomes one navigator trip in TRANSIT mode with `until=_interrupt`; `nav.step` until it arrives, stops 'in position', or fails.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator.step",
+     "text": "Plans and plays chains of moves; before each chain it calls the loop's `_interrupt`.",
+     "process": "keys go to the elevated key player"
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt._interrupt",
+     "text": "Whether a rule calls for her now (close quarters, a valuable pile that goes first, a wound to finish, a target she may shoot in passing, a pile the sweep now has): yes stops the trip 'in position' and the next pass decides.",
+     "process": ""
+    }
+   ]
+  },
+  {
+   "id": "grind-stop",
+   "title": "Grinding: the loop, the next stop, stay or go",
+   "summary": "How grinding chooses its round and next stop, and when it leaves a stop.",
+   "trigger": "The start of the run, then each time she leaves a stop (Grind._next_ground); the stay-or-go check at every pass at a stop.",
+   "steps": [
+    {
+     "module": "gamelab/behavior/grind.py",
+     "symbol": "Grind._look",
+     "text": "Meanwhile, every look updates Patrol's belief from her memory, learns her touches per stop and prices a bar of HP from her max HP.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/grind.py",
+     "symbol": "Grind._next_ground",
+     "text": "At the run's start and whenever she leaves a stop: the round looked at again (`_look_at_round`), then `Patrol.choose` for the next stop; a Visit and a spot objective for it, 'grind' next and 'tour' records.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/grind.py",
+     "symbol": "Grind._look_at_round",
+     "text": "Learns her kill time from throws and EXP, and asks Patrol.replan on its clock; a new loop is logged and sent as a 'grind' loop record.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/patrol.py",
+     "symbol": "Patrol.replan",
+     "text": "Every REPLAN_S (20 s), or at once after 3 stops in a row gave nothing: `Patrol.best`'s round is taken if 15% better than hers and 60 s after the last change.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/patrol.py",
+     "symbol": "Patrol.best",
+     "text": "Grows rounds from the 8 best single stops by cheapest insertion, each rated by Patrol.rate (refill, cycle, HP cost).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/patrol.py",
+     "symbol": "Patrol.choose",
+     "text": "The next stop: a census trip in progress, the loop's next stop expected to hold 25% of full, a pull to seen monsters that pays 1.25x the loop over the detour, or a new census trip.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/grind.py",
+     "symbol": "Grind._interrupt",
+     "text": "On the leg, every RECHOOSE_S she asks Patrol.choose again; a pull or 'back to the loop' reroutes her at the next pass. Rules 4, 4b and the sweep shoot and loot on the way.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/grind.py",
+     "symbol": "Grind._at_ground",
+     "text": "At the stop: shoot what's in reach; otherwise compare `_stay_gain` with max(the loop's rate, the next stop's gain).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/grind.py",
+     "symbol": "Grind._leaving",
+     "text": "Stay while `_stay_gain` is at least max(the loop's rate, the next stop's gain); under it for LEAVE_CONFIRM_S (0.3 s), leave; STOP_MAX_S (40 s) the backstop.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/grind.py",
+     "symbol": "Grind._leave",
+     "text": "The sweep's piles on her way to the next stop first, then `Patrol.left` (it counts stops that gave nothing) and `_next_ground`.",
+     "process": ""
+    }
+   ]
+  },
+  {
+   "id": "kill-to-pickup",
+   "title": "From a kill to its drops picked up",
+   "summary": "How a kill's pile becomes a stop of the loot sweep, guarded, timed against respawns, and picked up.",
+   "trigger": "Her EXP number rises and the ledger places the kill: the drop store expects a pile where it died.",
+   "steps": [
+    {
+     "module": "gamelab/behavior/ledger.py",
+     "symbol": "DropStore",
+     "text": "An expected pile at the kill (drops land about 2 s later), worth its kind's expected drops; looks confirm, update or forget it.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt._sweep",
+     "text": "Once a look for each destination: pick spots from the store's candidates (`_spots`), the terms (`_sweep_terms`: a lull's wait as the budget, or what's left of her way out's), then the sweeper's solve; a 'sweep' record when the itinerary changes.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt._spots",
+     "text": "Each candidate pile becomes a sweep.Spot: worth she can take, stand time, landing, survival, guards (`_guards`) and allowance (`_allow`).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/sweep.py",
+     "symbol": "Sweeper.solve",
+     "text": "The exact best itinerary on her way (or a round trip, or her way out), kept unless another is 20% better.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt._sweep_act",
+     "text": "Guards shot first; by the pile, wait for the landing or stand; else a trip there.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt._go_for",
+     "text": "The spawn guard may hold a short trip for the respawn pass; else a pile objective is pushed and travelled to.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunt.py",
+     "symbol": "Hunt._stand",
+     "text": "On arrival: each bunch walked to and pressed (a press per drop plus one), a try counted, a 'pick' event.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/looting.py",
+     "symbol": "Looter.cant_pick",
+     "text": "Drops still under her after two stands are left 90 s; the pickup log tells whether a tab is full.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/grind.py",
+     "symbol": "Grind._loot_plan",
+     "text": "In grinding with the planner and loot chain on, the itinerary's next 4 piles go as one navigator chain (LootChain.way), booked by Grind._chain_over.",
+     "process": ""
+    }
+   ]
+  },
+  {
+   "id": "tour-run",
+   "title": "The original tour: a sweep of stops",
+   "summary": "The tour without --loop: an ordered list of platforms, each fought clear and then looted.",
+   "trigger": "`python -m gamelab tour` without --loop (cmd_tour -> Tour.run).",
+   "steps": [
+    {
+     "module": "gamelab/behavior/tour.py",
+     "symbol": "Tour.run",
+     "text": "Hunting grounds by the value map, ordered by Tour.sweep; the blind random order's travel logged for comparison.",
+     "process": "the tour command"
+    },
+    {
+     "module": "gamelab/behavior/tour.py",
+     "symbol": "Tour.sweep",
+     "text": "Nearest next by route time with a random +-25%, then 2-opt on real route times.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/tour.py",
+     "symbol": "Tour.hunt",
+     "text": "Up to 5 goes: to the spot (stopping where a target is in reach and she can stand), a fight, a whole-screen look for what's left, another spot or onto the platform.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter.clear",
+     "text": "The fight at the spot (behavior.fight): kills in reach, finishes far ones, with the stop's patience.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/tour.py",
+     "symbol": "Tour.collect_loot",
+     "text": "Trips to remembered drops, nearest first, 60 s each, none after 180 s; Looter.collect picks up or fights the guard.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/tour.py",
+     "symbol": "Tour._record",
+     "text": "`Tour.hunt` ends by recording the visit (visits and EXP) in lab/grounds.json; back in `Tour.run`, the rest of the sweep is replanned from where she ended up.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/tour.py",
+     "symbol": "Tour.stand_by",
+     "text": "To the nearest safe platform at least 120 wide, to stand by.",
+     "process": ""
+    }
+   ]
+  }
+ ],
+ "not_done": [
+  "gamelab/docs/hunt-modes.md's status line still lists step 6, the game trials against the bar, as to do; the old tour was to stay until the loop passed it in 3 sessions.",
+  "RESPAWN (8 s, the simulator's) isn't settled by live telemetry: the game may not refill a platform she empties that way; it stays until the in-game check.",
+  "Not built (hunt-modes.md): the whole-screen loot look about 3 s after each kill, and \"the same objective dropped 3 times\" in the stuck guard.",
+  "Most thresholds are marked \"guess\" (PULL_GAIN, LOOP_GAIN, STOP_MAX_S, REACH_STEP, RECHOOSE_S, TRIP_AHEAD_S, CHAIN_OFF_S and more): tuned in the simulator harness, not measured in game.",
+  "Drop ownership (15 s, ledger.OWN_S) and how often other players take the piles she leaves aren't measured.",
+  "The loot chain's RUN_PRESSES (2) is read from the simulator's reach and her speed, not tried live.",
+  "Whether her pet picks up what she walks past is only estimated from recordings; PET_LOOT stays off.",
+  "The target-first planner is on by default though its second gate wasn't passed (behavior/targeting.py).",
+  "Drops lying at a stop aren't counted in the next stop's choice (DROPS_IN_CHOICE was tried and left off).",
+  "BACK (going back to the stop when a knock leaves her somewhere more dangerous) is built but off by the user's choice of more EXP and loot.",
+  "A sweep guard is shot only from where she is now, not from a place along her way; one she can't shoot from there leaves the pile out for that look.",
+  "One map at a time: portals and other maps are out of scope (hunt-modes.md open questions)."
+ ]
+}

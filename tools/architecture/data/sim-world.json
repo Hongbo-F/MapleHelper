@@ -1,0 +1,1855 @@
+{
+ "id": "sim-world",
+ "layer": "sim",
+ "title": "Simulator: the offline world and the fakes",
+ "tagline": "A deterministic offline game the whole stack plays, with no game window and no keys",
+ "summary": "World simulates MapleStory on a real map, tick by tick: her body by the client's movement engine, monsters with v83's AI, attacks, kills, EXP, drops, touches, knock-backs, respawns and other players. The fakes (FakeEyes, FakePlayer, a fake Clock) put it behind gamelab's own seams, so the unchanged stack runs on it, including the Lie Detector via FakePlayer.alarm_at. Scene sets replay moments of live recordings in it to check fixes before they go live.",
+ "details_md": "The simulator is a small, deterministic stand-in for MapleStory that the **whole** gamelab stack runs against with no game window and no key player. (*The stack* means gamelab's code above the game: perception's readers, localization, the planners, the hunter.) It plays on a real map (`localization.mapdata.MapModel`, from the game data), in map units, on a fake clock. Three parts:\n\n- **The world** (`world.py`, `World`): her body, the monsters, attacks, kills, EXP, drops, touches, knock-backs, ropes, portals, pets and other players: \"the game\".\n- **The fakes** (`fakes.py`): gamelab's existing seams faked over the world: `FakeEyes` for `perception.eyes.Eyes`, `FakePlayer` for `control.client` (the elevated key player), `Clock` for `time`; `patched` swaps them in and refuses anything that would reach the real game.\n- **Scene sets** (`no_hit_scenes.py`, `hunt_scenes.py`): moments of live recordings put back into the world, to check a fix against what live play showed.\n\nThe sim-harness slice (`scenarios.py`, `harness.py`, `golden.py`) builds the stack on these and runs it.\n\n**Words.** A *key plan* is a timed list of key down/up events for the key player; a *splice* replaces the rest of a running plan. A *seed* numbers one world (same seed, same run). A *golden trace* is a recorded scenario run later code must reproduce exactly; the *harness* runs many seeds and tabulates them.\n\n### Time and determinism\n\nThe world keeps time in whole milliseconds on a **5 ms tick** (`TICK_MS`), and the game's own **30 ms step** (`STEP_MS`, from `motion.body.STEP`) falls at a phase drawn from the seed. Keys are events in a sorted queue (`Event`), and the world only runs forward when a fake asks (`World.advance`: every fake look, glance, message read or cancel), so its state depends only on the key events, never on how often the stack looked. Random draws are keyed by what they are for, the seed and the tick (`World.chance`: `Random(f\"{what}:{seed}:{ms}\")`), and each optional knob has its own generator, so switching one off leaves the other draws unchanged.\n\n### What happens to a key\n\nThe game sees a key half a step (15 ms) before the measured medians (`body.Lags`: arrow pressed 66 ms, let go 68 ms, jump 65 ms) and acts at its next 30 ms step, so on average it acts those medians after the key. On the ground an arrow accelerates her by the engine's rule (`body.ground_step`) and letting go brakes her; a jump gets the \"kick\" (`body.takeoff`); in the air she flies `body.fly`'s arc, re-flown whenever the arrow the game sees changes. Walls stop her by the client's rule plus foothold group 0's walls (`Realism.zero_walls`). Up grabs a rope, down on a rope's top climbs down it, jump with down held drops her through a platform.\n\nAn attack's timeline:\n\n| When (after the key) | What |\n|---|---|\n| 65 ms (`JUMP_LAG`) | it picks its target from where she is then: the claw's swipe up close, else the star's band search (from a jump: `AIR_PICK` 'search'); then the line to the star's pick is checked (`sight_stop`) |\n| 290 ms (`DAMAGE_SHOWS_MS`) | the server's damage: HP off, or the kill, her EXP and (2 s later) drops |\n| 520 ms (`STAR_DELAY_MS`) | the star lands: the monster's flinch, push-back and its chase of her (aggro) |\n| 0.75 s + distance / 1490 | a killed monster stops being drawn alive and plays its death (`Realism.dies_late`) |\n\n### Monsters and touches\n\nMonsters walk as the v83 client's AI moves them (each decision a whole number of 90 ms AI steps, 1-3 s long), turning 20 units in from their platform's ends (`WALK_EDGE`); Slimes jump (`SimJumper`). A hit makes the monster chase her for 180-240 s. A monster touches her when the box of the frame it shows meets a 50-unit vertical line over her feet (the client's touch test). A touch leaves her invulnerable for 1.5 s and is a MISS (her evasion) or takes HP (a share of the monster's touch damage, or meowdb's formula with her DEF), knocks her back 270 units/s out and up (not on a rope), and may make her pet drink a potion.\n\n### Knobs\n\n- `Noise`: the real game's and perception's errors (missed stars, spread lags, lost taps, detector misses, hidden name tag or minimap dot...), all off by default.\n- `Realism`: what isn't known of the game and how busy the map is (respawn passes, other players, drops, inventory, walls, knock, aggro...); the defaults are the simulator's own world.\n- `Her`: the character (`LEVEL_19` ... `LEVEL_25`, `MAGE_32`, `HER_35`).\n\nThe world keeps **its own truth** apart from the stack's beliefs (invulnerability 1.5 s in the world, 1.45 s in the stack's `perception.touches.INVULNERABLE_S`; her true walking speed whatever her planner assumes), so a wrong belief shows up as a cost instead of being hidden.\n\n### The fakes\n\n`FakeEyes` draws each look as a blank frame carrying a `Screen` record (monsters, drops, her heading, touch popups); the fake detectors read that record, not pixels. Monsters' HP bars and her EXP, HP and level numbers are real pixels, read by the real readers. Her place comes straight from the world (`TRUE_PLACE`). `FakePlayer` plays each key plan's events on the world, one plan after another, with cancels, splices and the **Lie Detector**: with `alarm_at` set, the running plan stops then, and afterwards only what the real player's rule (`control.player.alarm_refusal`) lets through plays: pet food, her retreat's moves for 12 s, the solver's cursor and OK clicks.\n",
+ "groups": [
+  {
+   "id": "sim-the-world",
+   "title": "The world: the game, simulated",
+   "summary": "Her body, the monsters, attacks, touches, the map's respawns, drops, pets and other players, with the Noise, Realism and Her knobs.",
+   "modules": [
+    "gamelab/sim/world.py"
+   ]
+  },
+  {
+   "id": "sim-the-fakes",
+   "title": "The fakes: eyes, key player, clock",
+   "summary": "gamelab's seams to the game (Eyes, control.client, time) faked over the world, and the guard that keeps a simulated run away from the real game and the real lab folder.",
+   "modules": [
+    "gamelab/sim/fakes.py",
+    "gamelab/sim/__init__.py"
+   ]
+  },
+  {
+   "id": "sim-scene-sets",
+   "title": "Scene sets from live recordings",
+   "summary": "Moments of real recordings (attacks at nothing; journeys between platforms) put in the world to check fixes against what live play showed.",
+   "modules": [
+    "gamelab/sim/no_hit_scenes.py",
+    "gamelab/sim/hunt_scenes.py"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "path": "gamelab/sim/world.py",
+   "title": "The world",
+   "tagline": "The game simulated on a real map, tick by tick, driven by key events",
+   "summary": "World holds her (position, speed, mode, HP, MP, EXP, inventory), the monsters (SimMonster, SimJumper), drops, pets and other players, and runs them forward tick by tick when a fake asks (advance). Keys come in as timed events; the game sees them after measured lags and acts at its 30 ms steps. The comment above each constant says where its value comes from (a measurement, the game data or a v83 client source) and which ones are guesses; Noise, Realism and Her switch the unknowns and errors on and off.",
+   "details_md": "The file is long (4.2k lines) but plain, top to bottom:\n\n1. **Constants with their evidence** (lines 150-975): each under a comment saying where it came from (recordings, telemetry, game data, HeavenClient/RustMS, meowdb) and what it was before.\n2. **Knob dataclasses**: `Noise` (game and perception errors, all off by default), `Realism` (unknowns and crowd), `Camp`, `Her` and the presets `LEVEL_19`, `LEVEL_23`, `LEVEL_24`, `LEVEL_25`, `MAGE_32` (plus the `HER_35` dict).\n3. **Monster game data**: `Frame`, `MobInfo`, `mob_info` (read from `Mob/<id>.img`, cached as JSON), and the damage maths: `touch_damage`, `stars_to_kill`, `hits_of`, `evade_chance`, `game_hit_chance`, `push_chance`.\n4. **Monsters**: `SimMonster` (walkers) and `SimJumper` (monsters that jump), with `JumpSpace` and `end_link`.\n5. **Small records**: `Drop`, `SimPet`, `Rival`, `Event`.\n6. **`World`**: set-up, time, the tick, keys, her motion, touches, attacks and kills, the map's respawn pass, other players, loot and pets, and \"what can be seen\".\n\n### One tick (`World._tick`, every 5 ms)\n\n1. Handle every queued event due by now (`_handle`): key down/up, release, \"seen\" (the game noticing a key), \"liftoff\", \"aim\", \"star\", \"struck\", \"loot\", \"map_tick\", rival and camp events, test callbacks (`call_at`).\n2. Move her: `_ground` (at each 30 ms game step `body.ground_step` sets her speed for the step and she glides 1/6 of it per tick; past a platform's end she flies off unless a wall rises there), `_air` (the flight's precomputed path, re-flown when the arrow the game sees changes; she lands, grabs a rope or falls out of the map), or `_climb`.\n3. Up held at an exit portal (within `PORTAL_BOX`) ends the run (`SimLeftMap`).\n4. `_touch`, the harness's `_closeness` and `_idleness` counters, MP regeneration, the path log every 100 ms, her pets every 50 ms.\n\n`World.advance(clock_t)` runs ticks to the clock and raises `SimDied`, `SimLeftMap` or `SimFellOut` once the run is over.\n\n### Monsters\n\nA `SimMonster`'s motion is a list of segments (stand, walk left, walk right) drawn lazily from its own generator; `ghost()` copies it (and its generators) to look ahead without disturbing it. Decisions follow v83's AI: `AI_STEP` 90 ms, an idle decision of `(r + 1000) // 90` steps with r uniform in 0-1999 (1.0-3.0 s), a third each stand/left/right; chasing, `(r + 800) // 90` with r in 0-399, at her (or on past her up to `AGGRO_PASS`, 100 units). A hit whose damage (after the monster's defence) reaches the game data's `pushed` pushes it `KNOCK_MOB` (about 21 units: 130 units/s slowing at 400 units/s squared), and it stands in its hit1 frame for `FLINCH_S` (0.6 s). Its touch body is the lt/rb box of the frame it shows, turned the way it faces. A `SimJumper` (a monster with a jump action, `MapModel.mob_hops`: Tree Dungeon's Slimes) is stepped event by event: AI steps, walk ends, jumps, landings, hit ends.\n\n### Attacks\n\n`_pressed` refuses an attack key on a rope (`ROPE_REFUSAL` on the message bar), ignores it inside the 0.73 s attack lock (`ATTACK_LOCK`), spends MP for Lucky Seven (`_cast`) or refuses with too little, and queues \"aim\" at `JUMP_LAG`. `_aim` picks; `_attack` applies damage at `DAMAGE_SHOWS_MS`; `_struck` (at `STAR_DELAY_MS`) flinches, pushes and aggroes; `_kill` gives EXP (`model.mob_exp`), queues drops 2 s later and, only with `respawn_tick` 0, its own respawn. The magician's Magic Claw has its own path (`_press_magic`, `magic_pick`, `_aim_magic`, `_attack_magic`): no line check, ground only, two hits of 157-181 a cast.\n\n### The map's life\n\nWith `Realism.respawn_tick` (default `TICK_S`, 7.115 s), `_map_tick` refills the map to its cap (`MapModel.mob_cap`, the server's formula) at random spawn points with no monster within `SPAWN_CLEAR` (100 units), as OrionAlpha's `LifePool.tryCreateMob` does. Other players are a roaming `Rival` and fixed or coming-and-going `Camp`s, whose kills give her no EXP (unless `shared_exp`) and whose drops she can't take for `rival_owns` s. Pets (`Realism.pets`) trail her and take drops they walk over.\n\n### The game's windows\n\nThe backslash opens the KEY BINDINGS window (keys do nothing while open), Esc closes it or opens the MENU, her stats key toggles her stat window, her chat key her chat box: for the stack's key, stat and chat checks.\n\n### What the fakes read\n\n`her()`, `visible_monsters()` (killed ones drawn alive until the star lands, then fading), `drawn_bar()`, `dying_at()`, `live_drops()`, `recent_messages()`, `mp_drawn()` (MP shown 0.29 s late), `others_at()`, `binding_view()`, and the harness's logs (`attack_log`, `touch_log`, `kill_log`...).\n",
+   "lines": 4239,
+   "key_items": [
+    {
+     "name": "World",
+     "kind": "class",
+     "line": 2148,
+     "signature": "class World: def __init__(self, model: MapModel, keys: GameKeys, start: tuple[int, float], seed: int = 1, monsters=\"all\", hp=1.0, inventory_full=False, facing=RIGHT, origin=0.0, drops=(), hanging=None, noise=None, realism=None, step_phase=None, character=LEVEL_19)",
+     "summary": "The simulated game: her standing on platform start[0] at x start[1] (or hanging on a rope), the map's monsters at their spawn points (or a given list), drops lying, and every log the harness reads.",
+     "details_md": "Each knob draws from its own generator (`rival:`, `drops:`, `camps:`, `ticks:`, `mix:`, `takers:`, `pets:`, `expiry:` + seed; each monster's chase `chase:<seed>:<i>`), so the world with a knob off is the same as without it. `step_phase` (the ms of the game's first 30 ms step) is drawn from `step:<seed>`. Her walk and climb are her truth (`her_shoe`, `her_climb`), not her planner's. With `respawn_tick` on, the monsters over the map's cap start dead and the first pass comes at a drawn phase."
+    },
+    {
+     "name": "World.advance",
+     "kind": "method",
+     "line": 2498,
+     "signature": "def advance(self, clock_t: float) -> None",
+     "summary": "Runs whole 5 ms ticks up to clock time clock_t; raises SimLeftMap, SimFellOut or SimDied once the run is over, so the next look finds it ended.",
+     "details_md": "The fakes call it before every look, glance or plan check: the world is lazy and only moves when observed, which is why the result doesn't depend on how often it is observed."
+    },
+    {
+     "name": "World.chance",
+     "kind": "method",
+     "line": 2511,
+     "signature": "def chance(self, what: str, ms: int | None = None) -> float",
+     "summary": "A noise draw in [0, 1) for `what` at tick `ms` (now by default): random.Random(f\"{what}:{seed}:{ms}\").random(), the same every run whatever was looked at before.",
+     "details_md": "The evade and damage rolls of a touch, the claw's stance, a band's tie, a push, a miss, the death watch's sighting, the looks' misses and the air pick's noise all draw here, each named (`evade`, `damage`, `stance`, `band`, `push:<idx>`, `see:<idx>`...). That is what makes a run reproducible and lets a look be added or dropped without moving later draws."
+    },
+    {
+     "name": "World._tick",
+     "kind": "method",
+     "line": 2547,
+     "signature": "def _tick(self) -> None",
+     "summary": "One 5 ms tick: handle due events, move her (ground, air or rope), portals, touches, closeness and idleness counters, MP regeneration, the path log and her pets."
+    },
+    {
+     "name": "World._pressed",
+     "kind": "method",
+     "line": 2819,
+     "signature": "def _pressed(self, action: str, at: float) -> None",
+     "summary": "A key going down, as the game takes it: arrows seen after Lags.on (or swallowed during an attack with Realism.lock_arrows), jump lifted off at the step after Lags.jump (lost in the air), drop-through with down, attacks (lock, rope refusal, MP, darts), rope grabs, pick-up, potion and pet food.",
+     "details_md": "An attack key outside the 0.73 s lock queues an `aim` event at `JUMP_LAG` (65 ms). With `Realism.lock_arrows`, an arrow pressed less than `ARROW_LOCK` (0.719 s) after an attack's key is seen only `ARROW_HELD` (0.77 s) after that key, and only if still held."
+    },
+    {
+     "name": "World._ground",
+     "kind": "method",
+     "line": 2908,
+     "signature": "def _ground(self, dt: float) -> None",
+     "summary": "Her on the ground: at each game step body.ground_step sets her speed toward the arrow the game sees (or brakes), then she glides a sixth of the step per tick; past a platform's end she flies off unless a wall rises there."
+    },
+    {
+     "name": "World._air",
+     "kind": "method",
+     "line": 2988,
+     "signature": "def _air(self) -> None",
+     "summary": "Her in the air along the precomputed body.fly path; re-flown from where she is when the steering arrow changes (none during a knock); lands, grabs a rope with up held, or falls out of the map below its lowest floor (SimFellOut)."
+    },
+    {
+     "name": "World._touch",
+     "kind": "method",
+     "line": 3186,
+     "signature": "def _touch(self) -> None",
+     "summary": "Checks the monsters on nearby platforms against her body (default HER_TOUCH: a line 50 tall at her x) using each monster's current frame box; skips newborns still fading in and while she is invulnerable."
+    },
+    {
+     "name": "World._hit_by",
+     "kind": "method",
+     "line": 3210,
+     "signature": "def _hit_by(self, m: SimMonster, mx: float) -> None",
+     "summary": "A touch: invulnerability for Realism.invulnerable (1.5 s), MISS by evade_chance, else HP off by touch_damage, death at 0, her pet's potion, and the knock-back flight (not on a rope unless Realism.rope_knocks).",
+     "details_md": "The knock pushes 270 units/s away from the monster and 270 up (`KNOCK_VX`, `KNOCK_VY`); with `KNOCK_ADDS` the sideways push adds to her own speed without exceeding 270, and with `KNOCK_LANDS_WALKING` she lands at no more than her walk speed: about 73 units in the air and a 14-unit slide from standing."
+    },
+    {
+     "name": "World._aim",
+     "kind": "method",
+     "line": 3542,
+     "signature": "def _aim(self, key_ms: int, skill: bool = False, tag: str = \"\", step: int | None = None) -> None",
+     "summary": "The attack starts (65 ms after its key) and picks its target from where she is: on the ground a random claw stance's swipe, else the star's band search; in the air the search from her feet (AIR_PICK 'search'); then the line check (sight_stop). Queues the damage at DAMAGE_SHOWS_MS.",
+     "details_md": "With `AIR_TURN_SAME_STEP`, an arrow the game acted on at the same step as the attack key turns her too late: the attack goes the way she faced before. Ties within a band are drawn at random (the client's order by when each monster entered the map is unknown). A stopped star hits nothing and no other monster takes it."
+    },
+    {
+     "name": "World._attack",
+     "kind": "method",
+     "line": 3612,
+     "signature": "def _attack(self, facing: str, m: SimMonster | None, swipe: bool, stop: tuple | None = None, skill: bool = False, how: tuple | None = None, key_ms: int | None = None) -> None",
+     "summary": "The server's damage, 290 ms after the key: a miss (Noise.miss), HP off in stars (a claw swipe 0.2), and either a 'struck' event when the star lands (520 ms) or the kill."
+    },
+    {
+     "name": "World._kill",
+     "kind": "method",
+     "line": 3756,
+     "signature": "def _kill(self, m: SimMonster, mx: float, what: str, key_ms: int | None = None, bar: float = 1.0) -> None",
+     "summary": "A kill: drawn alive until her star lands (DIE_LANDS_S + distance / DIE_FLIGHT), EXP from model.mob_exp, drops queued DROP_DELAY (2 s) later, drop-takers scheduled, and (only with respawn_tick 0) its own respawn Realism.respawn s later; called from _attack at the damage's time instead of a 'struck'."
+    },
+    {
+     "name": "World._map_tick",
+     "kind": "method",
+     "line": 3808,
+     "signature": "def _map_tick(self) -> None",
+     "summary": "The map's respawn pass every TICK_S (7.115 s): fills to the cap (MapModel.mob_cap) at randomly ordered spawn points with no monster within SPAWN_CLEAR (100 units), as OrionAlpha's LifePool.tryCreateMob.",
+     "details_md": "Monster positions for the clearance test come from `ghost()` copies, because looking at a chasing monster would otherwise advance its own walk."
+    },
+    {
+     "name": "SimMonster",
+     "kind": "dataclass",
+     "line": 1550,
+     "signature": "@dataclass class SimMonster",
+     "summary": "A walking monster: lazily drawn motion segments from its own rng, v83 AI decisions, the chase after a hit (aggro), the push-back and flinch, and its body from the game data's frame boxes."
+    },
+    {
+     "name": "SimJumper",
+     "kind": "dataclass",
+     "line": 1795,
+     "signature": "@dataclass class SimJumper(SimMonster)",
+     "summary": "A monster that jumps (Tree Dungeon's Slimes), moved event by event as v83's Mob::think, think_jump and jump: a jump in one idle decision of five (JUMP_IDLE), at a rising wall within 40 units ahead, off its platform's ends, and, chasing her while she is over a higher floor of another group, one AI step in three (JUMP_CHASE).",
+     "details_md": "Its history is a list of segments (`stand`, `walk`, `press`, `hit`, `air`), kept `JUMPER_KEEP_S` (10 s) back so a look a little back in time still works."
+    }
+   ],
+   "inputs": [
+    "a MapModel (localization.mapdata) for the map's platforms, ropes, walls, portals, spawns, EXP and caps",
+    "her GameKeys (maplehelper.config), mapped to actions by _actions",
+    "timed key events, releases and clicks from FakePlayer (World.key, release_all, click, withdraw_from)",
+    "the clock's time from FakeEyes and FakePlayer (World.advance)",
+    "Noise, Realism and Her settings from the scenario or harness",
+    "monster frames, HP, accuracy and touch damage from the game data (Mob/<id>.img via gamedata), cached as JSON"
+   ],
+   "outputs": [
+    "what can be seen, for FakeEyes: her place and mode, visible monsters with poses, bars and fades, drops, messages, MP as drawn, others' places, the key-binding and stat windows' state",
+    "SimDied / SimLeftMap / SimFellOut when a run ends",
+    "logs for the harness and tests: attack_log, pick_log, touch_log, land_log, knock_log, kill_log, death_log, path_log, idle_log, climb_log, grab_log, aim_log and a text log",
+    "summary(): her end state for the golden trace"
+   ],
+   "uses": [
+    "gamelab/motion/body.py",
+    "gamelab/motion/physics.py",
+    "gamelab/motion/flow.py",
+    "gamelab/motion/bodies.py",
+    "gamelab/attack/reach.py",
+    "gamelab/attack/danger.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/control/actions.py",
+    "gamelab/behavior/pet.py",
+    "gamelab/character.py",
+    "gamelab/classes/magician.py",
+    "gamelab/perception/drops.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/perception/stat_window.py",
+    "gamelab/perception/keybindings.py",
+    "gamelab/directions.py",
+    "maplehelper/config.py",
+    "maplehelper/engine.py",
+    "maplehelper/game.py",
+    "gamedata/paths.py",
+    "gamedata/canvas.py",
+    "gamedata/wz.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamedata/data/out/mobs/<mob id, 7 digits>.json",
+     "mode": "read-write",
+     "what": "each monster's game-data facts (frames, HP, PDDamage, accuracy, pushed) cached by mob_info; written whole through a .part file and os.replace because harness workers read it too"
+    },
+    {
+     "path": "Mob/<mob id>.img (the game data copy, via gamedata.canvas)",
+     "mode": "read",
+     "what": "read by _read_mob when the cache is missing or older than its fields"
+    }
+   ],
+   "concurrency": "None of its own: single-threaded and lazy, run forward only when a fake asks (advance). Harness workers in other processes share the monster cache files.",
+   "tunables": [
+    {
+     "name": "TICK_MS",
+     "value": "5",
+     "meaning": "the world's tick in ms (also the engine's air step)"
+    },
+    {
+     "name": "STEP_MS",
+     "value": "30",
+     "meaning": "the game's step: it acts on keys and sets her ground speed every 30 ms"
+    },
+    {
+     "name": "ATTACK_LOCK",
+     "value": "0.73 s",
+     "meaning": "attack keys (and jump keys) pressed inside the last attack's lock are ignored (COMBAT.attack_lock_ms)"
+    },
+    {
+     "name": "ARROW_HELD / ARROW_LOCK",
+     "value": "0.77 / 0.719 s",
+     "meaning": "with Realism.lock_arrows, an arrow pressed within ARROW_LOCK of an attack key is seen only ARROW_HELD after it"
+    },
+    {
+     "name": "JUMP_TAKEN_LATE",
+     "value": "False",
+     "meaning": "a jump key pressed in the air is lost (the harsher choice for plans)"
+    },
+    {
+     "name": "HER_TOUCH",
+     "value": "(0.0, 50.0)",
+     "meaning": "her touch body: a line 50 tall at her x, the client's test"
+    },
+    {
+     "name": "INVULNERABLE",
+     "value": "1.5 s",
+     "meaning": "invulnerability after a touch, MISS or damage"
+    },
+    {
+     "name": "TOUCH_SHARE / TOUCH_SPREAD",
+     "value": "0.68 / 0.7",
+     "meaning": "a touch takes 0.68 of the monster's PADamage, give or take 70% (when her DEF isn't set)"
+    },
+    {
+     "name": "DEFENCE",
+     "value": "75.0",
+     "meaning": "her DEF in meowdb's touch formula for the Tree Dungeon characters"
+    },
+    {
+     "name": "EVADE_ACC",
+     "value": "27.0",
+     "meaning": "evasion chance = EVADE_ACC / the monster's accuracy (without Her.avoid)"
+    },
+    {
+     "name": "KNOCK_VX, KNOCK_VY",
+     "value": "270, 270",
+     "meaning": "her knock-back push out and up, units/s"
+    },
+    {
+     "name": "AI_STEP",
+     "value": "0.09 s",
+     "meaning": "the monster AI's step"
+    },
+    {
+     "name": "IDLE_THINK_MS / CHASE_THINK_MS",
+     "value": "(1000, 2000) / (800, 400)",
+     "meaning": "decision length: (r + least) // 90 steps, r uniform in 0..span-1"
+    },
+    {
+     "name": "AGGRO_S / AGGRO_PASS",
+     "value": "(180, 240) s / 100 units",
+     "meaning": "how long a hit monster chases her, and how far it walks past her before turning"
+    },
+    {
+     "name": "WALK_EDGE",
+     "value": "20 units",
+     "meaning": "a walker turns this far along its end foothold from its platform's end (localization.monsters)"
+    },
+    {
+     "name": "KNOCK_MOB_V / KNOCK_MOB_DECEL",
+     "value": "130 / 400",
+     "meaning": "a hit monster's push (about 21 units over 0.33 s)"
+    },
+    {
+     "name": "STAR_DAMAGE / CLAW",
+     "value": "(30, 70) / 0.2",
+     "meaning": "a star's damage range; a claw swipe is 0.2 of a star"
+    },
+    {
+     "name": "HITS",
+     "value": "pig 3, orange-mushroom 3, slime 2, snail 1",
+     "meaning": "first-map monsters' HP in stars; other kinds by stars_to_kill"
+    },
+    {
+     "name": "LUCKY_SEVEN / CAST_MP / MP_REGEN",
+     "value": "3.0 / 11 / 0.32 per s",
+     "meaning": "Lucky Seven in stars, its MP cost, her MP regeneration"
+    },
+    {
+     "name": "AIR_PICK",
+     "value": "'search'",
+     "meaning": "how an attack from a jump picks: the star's search from her feet (also 'widening', 'area', 'v83')"
+    },
+    {
+     "name": "TICK_S / SPAWN_CLEAR",
+     "value": "7.115 s / 100 units",
+     "meaning": "the map's respawn pass period, and the clearance a spawn point needs"
+    },
+    {
+     "name": "RESPAWN",
+     "value": "8.0 s",
+     "meaning": "per-monster respawn delay when respawn_tick is 0 (a guess)"
+    },
+    {
+     "name": "DROP_DELAY / DROP_LIFE / PICK_REACH",
+     "value": "2.0 s / 180 s / 15 units",
+     "meaning": "drops land 2 s after a kill, lie 180 s, are picked within 15 units"
+    },
+    {
+     "name": "DIE_LANDS_S / DIE_FLIGHT",
+     "value": "0.75 s / 1490 units/s",
+     "meaning": "a killed monster is drawn alive until key + 0.75 s + distance / 1490"
+    },
+    {
+     "name": "SPAWN_FADE_S / NEWBORN_SOLID_S",
+     "value": "0.817 s",
+     "meaning": "a newborn fades in over this and touches nothing until then"
+    },
+    {
+     "name": "CLAW_HIT / CLAW_LOCK_S / CLAW_SHOWS_S",
+     "value": "(157, 181) / 0.80 s / 0.53 s",
+     "meaning": "the magician's Magic Claw: hit damage (two a cast), lock, and when the hit shows"
+    },
+    {
+     "name": "NEAR_SEEN / OFF_SEEN",
+     "value": "NEAR_SEEN_1102 / 0.91",
+     "meaning": "with Noise.near_seen set (the harness's near-misses world): the detector's chance of finding a monster by distance on her platform (0.39 within 25 units ... 0.93 past 150), and on another"
+    },
+    {
+     "name": "TAKE_RATE / EXPIRE_PASS_S",
+     "value": "0.05 a minute / 60 s",
+     "meaning": "others take her drops at this rate after her ownership; expiry passes this far apart (both guesses)"
+    },
+    {
+     "name": "JUMPERS",
+     "value": "True",
+     "meaning": "monsters with a jump action jump (SimJumper); False walks them like the others"
+    },
+    {
+     "name": "DIE_LOST_S",
+     "value": "0.17 s",
+     "meaning": "with dies_late, the looks lose a dying monster this long after its death animation starts (the detector has no die1 pictures)"
+    },
+    {
+     "name": "DEATH_SEEN / DEATH_SEEN_AFTER",
+     "value": "0.83 / 0.14 s",
+     "meaning": "the fake death watch sees 83% of deaths, 0.14 s after the death animation begins (live: 118 of 142)"
+    },
+    {
+     "name": "POPUP_S",
+     "value": "1.0 s",
+     "meaning": "how long a touch's MISS or damage popup shows over her (v83's 400 ms opaque + 600 fading; unconfirmed in this game)"
+    },
+    {
+     "name": "AIR_TURN_SAME_STEP",
+     "value": "True",
+     "meaning": "an arrow acted on in the air at the same 30 ms step as an attack's key turns her too late for it"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-21",
+     "what": "Arrows pressed during an attack are swallowed (Realism.lock_arrows; ARROW_HELD 0.77 s, 0.835 until that day's review)",
+     "why": "In game, chains sent right after a throw first moved her about 0.79 s after the attack key"
+    },
+    {
+     "date": "2026-10-21",
+     "what": "The star's line is checked by the v83 line (reach.LINE)",
+     "why": "The user saw her own platform stop her stars in game"
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Damage applied at the server's DAMAGE_SHOWS_MS (0.29 s) instead of at the star's release (STAR_DELAY_MS)",
+     "why": "Live, a kill's EXP gain showed 0.15-0.46 s after the key"
+    },
+    {
+     "date": "2026-10-27",
+     "what": "AIR_PICK 'search' the default for attacks from a jump, with fitted air noise (TREE_AIR)",
+     "why": "'widening' counted live throws as hits that weren't, hiding what keeping clear gains"
+    },
+    {
+     "date": "2026-10-27",
+     "what": "A touch on a rope leaves her on it (Realism.rope_knocks False)",
+     "why": "Live on 2026-10-26, 11 of 11 hits on a rope left her on it"
+    },
+    {
+     "date": "2026-10-30",
+     "what": "The respawn cap by the server's formula (MapModel.mob_cap)",
+     "why": "The user: \"Let's use the formula... we don't know how many mobs are on the map at any given time\""
+    },
+    {
+     "date": "2026-10-31",
+     "what": "Respawn by the map's pass (respawn_tick) in every world",
+     "why": "The user: \"Use the tick default everywhere\"; the per-monster 8 s clock was denser and easier than the game"
+    },
+    {
+     "date": "2026-10-31",
+     "what": "Monsters chase her once hit (aggro, AGGRO_S), and their AI and jumps follow v83's",
+     "why": "The user: \"Mobs move on their own until you hit them, then you draw their aggro...\" and \"Yes, align them\""
+    },
+    {
+     "date": "2026-10-31",
+     "what": "Foothold group 0's walls stop her whatever her group (Realism.zero_walls)",
+     "why": "Live placements on Tree Dungeon never passed the tower's walls; without it she fell out of the map"
+    },
+    {
+     "date": "2026-10-31",
+     "what": "A hit monster's push is v83's 130 units/s slowing at 400 (KNOCK_MOB 21 units)",
+     "why": "Aligning with the client; before, 18 units over 0.25 s evenly"
+    },
+    {
+     "date": "2026-11-02",
+     "what": "Her touch body is the client's line 50 tall (HER_TOUCH); her knock is the client's 270/270 push",
+     "why": "RustMS's copy of HeavenClient, and R1-R3's lossless frames"
+    },
+    {
+     "date": "2026-11-02",
+     "what": "A newborn touches nothing until it has faded in (NEWBORN_SOLID_S)",
+     "why": "The user's decision 2 of the recordings' roadmap; no live touch came 0-0.75 s after a respawn pass"
+    },
+    {
+     "date": "2026-11-02",
+     "what": "The world walks and climbs her at her truth (Her.walk_speed, climb_speed), not her planner's; the magician's Magic Claw added (SimMagic, MAGE_32)",
+     "why": "So a wrong speed or belief in her profile shows in the simulator"
+    },
+    {
+     "date": "2026-11-03",
+     "what": "Invulnerability 1.5 s in every world, and NEAR_SEEN (the harness's near-misses world) as the perception of 2026-11-02 finds monsters (NEAR_SEEN_1102)",
+     "why": "The user's \"yes\" to the touch study's two changes as the defaults"
+    },
+    {
+     "date": "2026-11-03",
+     "what": "A star's line checked to the client's own hit point too (Realism.hit_inside False)",
+     "why": "The cornered study's review: her aim up close by a wall"
+    }
+   ],
+   "gotchas": [
+    "Every draw is seeded by (what, seed, tick) through World.chance, so adding or dropping a look changes nothing; the exception is Noise.detect_miss, drawn per look.",
+    "An attack picks by each kind's walking height (World.top), but touches use the frame boxes (World.body); the two don't agree yet (README: Found offline).",
+    "The world is 'the game' and keeps its own truths apart from the stack's beliefs: INVULNERABLE 1.5 s against perception.touches.INVULNERABLE_S 1.45, her true walk against her planner's.",
+    "advance() raises SimDied (or SimLeftMap, SimFellOut, both subclasses) once the run is over, and every later look raises it again.",
+    "Events live in a list kept sorted with bisect.insort and popped from the front; withdraw_from removes a spliced plan's later keys and its final release.",
+    "The Lucky Seven key swipes with the claw up close like the attack key: _uncast gives its MP and stars back.",
+    "A monster's HP is kept in stars (or, with Her.spread or the magician, in average-star units of damage before defence), not in game HP.",
+    "Evaluating a monster at a time draws its walk segments up to then (a chaser's aimed at where she is when drawn), so code that only peeks, especially ahead in time, uses SimMonster.ghost() (as _map_tick and _kill do).",
+    "Her touch is tested as a line at her x now, tick by tick, without the client's sweep from her place a frame before (she moves 0.75 units a tick at her walk): the comment above HER_TOUCH says why that's left out.",
+    "HER_35 exists twice with the same numbers, world.HER_35 and no_hit_scenes.HER_35; harness.py imports both, the second last, so its `--world her-35` is no_hit_scenes' (tests/test_no_hit_scenes.py checks that)."
+   ],
+   "tests": [
+    "tests/test_sim.py",
+    "tests/test_sim_her.py",
+    "tests/test_sim_mobs.py",
+    "tests/test_sim_tree.py",
+    "tests/test_sim_magic.py",
+    "tests/test_knock.py",
+    "tests/test_touches.py",
+    "tests/test_drop_worlds.py",
+    "tests/test_landing.py",
+    "tests/test_clearance.py",
+    "tests/test_jump_reach.py",
+    "tests/test_heading.py",
+    "tests/test_harness.py",
+    "tests/test_cornered_aim.py",
+    "tests/test_flow.py",
+    "tests/test_body.py",
+    "tests/test_ropes.py",
+    "tests/test_character.py",
+    "tests/test_danger.py",
+    "tests/test_loot.py",
+    "tests/test_panel_speed.py",
+    "tests/test_no_hit_scenes.py",
+    "tests/test_chatbox.py",
+    "tests/test_replan.py",
+    "tests/test_retreat.py",
+    "tests/test_statcheck.py"
+   ]
+  },
+  {
+   "path": "gamelab/sim/fakes.py",
+   "title": "The fakes",
+   "tagline": "Fake eyes, a fake key player and a fake clock over the world, with guards",
+   "summary": "FakeEyes answers perception's questions from the world (looks, glances, monsters, bars, drops, numbers, windows), FakePlayer plays key plans on it as the real key player would (cancels, splices, the Lie Detector via alarm_at), and Clock makes time pass only when something sleeps or looks. patched swaps them into gamelab for a run and makes anything that would touch the real game or gamelab/lab raise SimViolation.",
+   "details_md": "`fakes.py` fakes the three seams between gamelab and the outside world, so the unchanged stack runs on a `World`.\n\n### `Clock`\n\nReplaces `time.monotonic`, `sleep`, `time`, `perf_counter` and `strftime`. It starts at `START` (10,000 s; `time.time()` reads `EPOCH` plus elapsed). Nothing takes time but sleeps and the fakes' own calls, each charged a documented cost (`LOOK_S` 0.10 s a look, `GLANCE_S` 0.035 s, `DETECT_S` 0.03 s, `DETECT_WIDE_S` 0.25 s, `LOOT_S` 0.02 s a strip, `MESSAGES_S` 0.4 s...): a loop that only looked would otherwise never see time move. Options: `limit` (raises `SimTimeout`, a `BaseException` so `except Exception` recovery loops can't swallow it), `pace` (also sleep in real time, to watch on the mini-map), `think` (charge the stack's real computing time, measured with the real `perf_counter`) and `reads` (charge it at every clock read). `frames` calls a function at every game frame the clock passes (the continuous feed's `SyncFeed.tick` at 60 Hz).\n\n### `FakeEyes` (a subclass of `perception.eyes.Eyes`)\n\nEach `look()` runs the world to the clock, draws the screen as the world is then into an `Observation` stamped as taken at `now + LOOK_LAG`, then sleeps `LOOK_S` on the fake clock. `observe()` is the same picture with no cost, for the continuous feed. A frame is a blank half-size (540x960) array of sky colour, viewed as `Frame`, with a `Screen` record attached: monsters as `perception.mobs.Mob` (position, size, facing, pose `move`/`stand`/`hit1`, fade-in alpha), drops as `perception.loot.Item`, her heading as a `heading.Reading`, and touch popups. `FakeDetector` and `FakeLoot` \"find\" what is wholly inside the searched rows or box. Real pixels are drawn where real readers read them: HP bars (`hud.draw_hp_bar`, read by the inherited `Eyes.bar`, cached by the box's bytes), her EXP number (`exp_number.draw` with the game's glyphs, levels carried with the EXP table: `shown_exp`), her HP and level numbers, the KEY BINDINGS window and her stat window (`_capture`, at 1366x768). With `TRUE_PLACE` her place is the world's own, handed over as a `localization.locate.Located` with confidence 1.0 (her dot only while `Noise.unfound`).\n\nWhat a look misses is decided in `_unseen`, all from the world's seeded chances: a death animation after `DIE_LOST_S`, a newborn still too faint (`Noise.spawn_found`), a hit monster hiding under its numbers (`Noise.hit_hidden`; the magician's `SimMagic.hidden`), the detector's misses by distance on her platform (`Noise.near_seen`, in spells: `near_spell`) or on another (`off_seen`), and plain `detect_miss`. `FakeDeaths` and `FakeTouches` stand in for the death watch and the touch watch; `FakePetCare` reads the pet's fullness straight off the world.\n\n### `FakePlayer`\n\nImplements `client.send / submit / wait / done / cancel / splice / taken / can_splice` and the alarm calls. A plan is validated with the real `control.player.validate`, starts `START_LATENCY` (10 ms) after it is handed over and after the plans before it, and its events are pushed onto the world as timed key events; every key still held is released at its end. `cancel` withdraws a plan not started (one due at that very moment counts as not started) or cuts a running one (release all, the next plan 10 ms later). `splice` withdraws the running plan's later keys from the moment it takes over (at its `at_ms` or when the player sees it, `SPLICE_SEEN_S` 17 ms after hand-over), adjusting held keys; one the player would only see after the plan ended is never taken.\n\n**The Lie Detector** (`alarm_at`): from that clock time `alarm_up()` is true and `check_alarm()` raises `client.LieDetectorAlarm`. `_cutoff` decides each plan's fate as the real player would: a plan running at the sighting stops there (answered with `alarm.LIE_DETECTOR_ERROR`); one starting later plays only if its kind is in `alarm.PLAN_KINDS` (pet food, retreat, and the solver's `lie_cursor` and `lie_ok` clicks) and the real `player.alarm_refusal` lets it through; a `retreat` plan is cut at `RETREAT_WINDOW_S` (12 s) after the sighting. `page` and `keep_recent` are recorded, not executed.\n\n### `patched`\n\nThe context manager that puts all this in place for a run and restores everything after: `time.*`, `client.*`, `alarm.page` and `keep_recent`; every `Path` under `gamelab/lab` in loaded gamelab modules (globals and function defaults) moved to a temporary folder; write guards on `open`, `io.open`, `os.open`, `os.replace/rename/remove/unlink/mkdir/rmdir/utime` for paths under the real lab; and `maplehelper.win32.send_key`, the `gamelab.window` calls and `analysis.recordings.record` replaced by functions that raise `SimViolation`.\n",
+   "lines": 1347,
+   "key_items": [
+    {
+     "name": "FakeEyes",
+     "kind": "class",
+     "line": 405,
+     "signature": "class FakeEyes(Eyes): def __init__(self, world: World, clock: Clock, model: MapModel, guard=None)",
+     "summary": "perception.eyes.Eyes over the world: the game's camera (CAMERA_DOWN per map), a Localizer for her minimap dot, fake detectors, and the death and touch watches.",
+     "details_md": "`guard` is called before every look; `scenarios.Sim` passes one that raises unless the fakes are in place."
+    },
+    {
+     "name": "FakeEyes.look",
+     "kind": "method",
+     "line": 586,
+     "signature": "def look(self) -> Observation",
+     "summary": "Runs the world to the clock (after the guard and any charged thinking), draws the screen as it is then, stamps the Observation as taken LOOK_LAG (0.04 s) later, then sleeps LOOK_S (0.10 s) on the fake clock."
+    },
+    {
+     "name": "FakeEyes._observation",
+     "kind": "method",
+     "line": 603,
+     "signature": "def _observation(self, t: float, ropes: bool, counts: dict) -> Observation",
+     "summary": "The screen as a look sees it: name tag (unless hidden), HP to the bar's 147 px, MP to MP_STEPS, grass extent, minimap dots, ropes, EXP/HP/level boxes, chat box, and her true place as a Located (TRUE_PLACE)."
+    },
+    {
+     "name": "FakeEyes._draw",
+     "kind": "method",
+     "line": 725,
+     "signature": "def _draw(self, frame: np.ndarray, her: tuple[int, int], x: float, y: float) -> Screen",
+     "summary": "Puts the world's visible monsters (pose move/stand/hit1, facing, fade alpha) and drops into the frame's Screen record, and draws hurt monsters' HP bars as real pixels."
+    },
+    {
+     "name": "FakeEyes._unseen",
+     "kind": "method",
+     "line": 819,
+     "signature": "def _unseen(self, m, alive: bool) -> bool",
+     "summary": "Whether this look misses a monster that shows: death animation past DIE_LOST_S, newborn too faint, hidden under a hit's numbers, the detector's distance-based misses (in spells), or a plain detect_miss; all from the world's seeded chances."
+    },
+    {
+     "name": "FakePlayer",
+     "kind": "class",
+     "line": 918,
+     "signature": "class FakePlayer: def __init__(self, world: World, clock: Clock, trace: Trace, keys: GameKeys)",
+     "summary": "control.client's submit/send/done/wait/cancel/splice/taken, playing each plan's keys on the world in order, with the real player's validation and its Lie Detector rules."
+    },
+    {
+     "name": "FakePlayer.send",
+     "kind": "method",
+     "line": 967,
+     "signature": "def send(self, events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100, name=\"plan\", end_ms: int | None = None, kind: str | None = None) -> str",
+     "summary": "Hands over a plan: checks the alarm (unless it has a kind), validates it with control.player.validate, records it in the Trace, and schedules its events on the world."
+    },
+    {
+     "name": "FakePlayer.splice",
+     "kind": "method",
+     "line": 1002,
+     "signature": "def splice(self, running_id: str, events=(), at_ms: int = 0, held=(), *, end_ms=None, name=\"plan\", kind=None) -> str",
+     "summary": "Takes over a running plan from at_ms of its clock (or when the player sees the splice, SPLICE_SEEN_S later): withdraws its later keys, fixes up held keys, and plays the new plan; never taken if the old plan ended first."
+    },
+    {
+     "name": "FakePlayer.cancel",
+     "kind": "method",
+     "line": 1098,
+     "signature": "def cancel(self, plan_id: str) -> bool",
+     "summary": "Withdraws a plan not started yet (True) or cuts a running one, releasing every key (False); later plans are requeued."
+    },
+    {
+     "name": "FakePlayer._cutoff",
+     "kind": "method",
+     "line": 1182,
+     "signature": "def _cutoff(self, p: Plan, start: float) -> float",
+     "summary": "When a plan stops for the Lie Detector seen at alarm_at: a running plan stops at the sighting; later ones play only if player.alarm_refusal allows (pet food, retreat cut at RETREAT_WINDOW_S)."
+    },
+    {
+     "name": "Clock",
+     "kind": "class",
+     "line": 166,
+     "signature": "class Clock: def __init__(self, start=START, limit=None, pace=None, think=0.0, reads=False)",
+     "summary": "The fake time: monotonic, sleep, time, strftime; advance_to calls the feed at every game frame (frames); limit raises SimTimeout; think/reads optionally charge the stack's real computing time."
+    },
+    {
+     "name": "patched",
+     "kind": "function",
+     "line": 1222,
+     "signature": "def patched(clock: Clock, player: FakePlayer, folder: Path) -> Iterator[None]",
+     "summary": "Context manager that installs the fake time and player, redirects every gamelab/lab path to `folder`, installs write guards, and makes window/key/recording calls raise SimViolation; restores everything on exit."
+    },
+    {
+     "name": "_write_guards",
+     "kind": "function",
+     "line": 1300,
+     "signature": "def _write_guards(root: Path) -> list[tuple[object, str, Callable]]",
+     "summary": "Stand-ins for open(), io.open, os.open and the os calls that change files, refusing any path under `root` (also used by tests/conftest.py)."
+    },
+    {
+     "name": "TRUE_PLACE",
+     "kind": "constant",
+     "line": 402,
+     "signature": "TRUE_PLACE = True",
+     "summary": "Her place in every look is the world's own, as a Located with full confidence; False places her by her minimap dot as before."
+    },
+    {
+     "name": "FakeDetector",
+     "kind": "class",
+     "line": 269,
+     "signature": "class FakeDetector: def __init__(self, kinds=KINDS, clock: Clock | None = None)",
+     "summary": "Eyes.detector over a fake frame: finds the Screen's monsters wholly inside the searched rows (detect, detect_wide) or around a box (refind), charging DETECT_S / DETECT_WIDE_S."
+    }
+   ],
+   "inputs": [
+    "the World (positions, monsters, drops, HP/MP/EXP, windows, logs)",
+    "key plans from the stack through the patched control.client functions",
+    "the stack's sleeps and clock reads through the patched time functions",
+    "alarm_at set by a scenario or test: when the player sees the Lie Detector"
+   ],
+   "outputs": [
+    "Observations, glances, messages, chat lines and captures for perception and localization",
+    "timed key events, releases and clicks on the World",
+    "plan results (sent events, problems 'cancelled' or spliced) or PlayerError / LieDetectorAlarm",
+    "a Trace of plans, cancels and splices for golden traces; counts of looks, glances and hidden frames",
+    "SimViolation for anything that would reach the real game or write under gamelab/lab; SimTimeout past the limit"
+   ],
+   "uses": [
+    "gamelab/sim/world.py",
+    "gamelab/perception/eyes.py",
+    "gamelab/perception/mobs.py",
+    "gamelab/perception/loot.py",
+    "gamelab/perception/hud.py",
+    "gamelab/perception/heading.py",
+    "gamelab/perception/exp_number.py",
+    "gamelab/perception/hp_number.py",
+    "gamelab/perception/lv_number.py",
+    "gamelab/perception/minimap.py",
+    "gamelab/perception/terrain.py",
+    "gamelab/perception/touches.py",
+    "gamelab/perception/deaths.py",
+    "gamelab/perception/match.py",
+    "gamelab/perception/messages.py",
+    "gamelab/perception/chatbox.py",
+    "gamelab/perception/misses.py",
+    "gamelab/perception/keybindings.py",
+    "gamelab/perception/stat_window.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/localization/pose.py",
+    "gamelab/localization/locate.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/control/client.py",
+    "gamelab/control/player.py",
+    "gamelab/control/alarm.py",
+    "gamelab/behavior/pet.py",
+    "gamelab/attack/choice.py",
+    "gamelab/motion/physics.py",
+    "gamelab/screen.py",
+    "gamelab/paths.py",
+    "gamelab/window.py",
+    "gamelab/analysis/recordings.py",
+    "maplehelper/config.py",
+    "maplehelper/engine.py",
+    "maplehelper/ocr/exp_table.py",
+    "maplehelper/win32.py"
+   ],
+   "files_io": [
+    {
+     "path": "a temporary folder standing in for gamelab/lab (scenarios.Sim makes it)",
+     "mode": "read-write",
+     "what": "every gamelab Path under gamelab/lab is redirected there for the run, including paths.TOUCHES and paths.STATS"
+    },
+    {
+     "path": "gamelab/lab/",
+     "mode": "read",
+     "what": "never written during a run: any write under it raises SimViolation"
+    }
+   ],
+   "concurrency": "No threads of its own. With Clock.pace it also sleeps in real time; Clock.frames calls the feed's tick synchronously at each 60 Hz game frame the clock passes; keep_recent_after runs at once instead of on a thread.",
+   "tunables": [
+    {
+     "name": "LOOK_S, LOOK_LAG",
+     "value": "0.10, 0.04 s",
+     "meaning": "a look's cost and when in it the frame is taken (the harness's measured costs: 0.020, 0.006)"
+    },
+    {
+     "name": "DETECT_S / DETECT_WIDE_S",
+     "value": "0.03 / 0.25 s",
+     "meaning": "the monster search around her level / on the whole screen"
+    },
+    {
+     "name": "LOOT_S",
+     "value": "0.02 s",
+     "meaning": "per strip of the loot search"
+    },
+    {
+     "name": "GLANCE_S",
+     "value": "0.035 s",
+     "meaning": "a glance (minimap dot and HP)"
+    },
+    {
+     "name": "MESSAGES_S",
+     "value": "0.4 s",
+     "meaning": "reading the pickup log"
+    },
+    {
+     "name": "CHAT_S, CHAT_OCR_S",
+     "value": "0.035, 0.28 s",
+     "meaning": "the message bar, and the OCR of a new line"
+    },
+    {
+     "name": "CAPTURE_S",
+     "value": "0.035 s",
+     "meaning": "the client's whole picture (key bindings, stat window)"
+    },
+    {
+     "name": "START_LATENCY / RESULT_LATENCY",
+     "value": "0.01 / 0.01 s",
+     "meaning": "a plan starts this long after hand-over; its result is seen this long after it ends"
+    },
+    {
+     "name": "SPLICE_SEEN_S",
+     "value": "0.017 s",
+     "meaning": "when the player sees a splice (its 15 ms wait step plus reading)"
+    },
+    {
+     "name": "MISS_SHOWN_S / MISS_ABOVE / MISS_RISE",
+     "value": "0.45 s / 10 / 30 units/s",
+     "meaning": "her star's MISS popup over a monster: how long it is read, where, how fast it rises"
+    },
+    {
+     "name": "FRAME",
+     "value": "(540, 960)",
+     "meaning": "the half-size frame"
+    },
+    {
+     "name": "CAMERA_DOWN",
+     "value": "{10002073: 529.0}",
+     "meaning": "where the camera keeps her vertically on Tree Dungeon (else pose.CAMERA_OFFSET)"
+    },
+    {
+     "name": "WINDOW_ROWS / WINDOW_DOT_ROW",
+     "value": "{10002073: 112} / 49.5",
+     "meaning": "the minimap window's rows on a map taller than it, and where it keeps her dot"
+    },
+    {
+     "name": "START / EPOCH",
+     "value": "10000.0 / 1800000000.0",
+     "meaning": "the fake monotonic clock's start, and what time.time() reads then"
+    },
+    {
+     "name": "TRUE_PLACE",
+     "value": "True",
+     "meaning": "her place is the world's own in every look"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-28",
+     "what": "detect_wide finds every monster wholly inside the rows (the real detector's bands overlap)",
+     "why": "Bands 30 rows apart missed a tall monster across a band's edge"
+    },
+    {
+     "date": "2026-10-31",
+     "what": "TRUE_PLACE: her place in every look and frame is the world's own",
+     "why": "The user: \"Or simulation can just assume localization is correct\"; her dot alone had snapped her onto the wrong platform"
+    },
+    {
+     "date": "2026-11-01",
+     "what": "Clock.reads: charge the stack's computing at every clock read",
+     "why": "The latency analysis: a replan's computing never made it late, so its deadline couldn't fire"
+    },
+    {
+     "date": "2026-11-02",
+     "what": "A plan cut before the Lie Detector is seen is answered as cut, not with the alarm",
+     "why": "Found in the review of the rope hang"
+    }
+   ],
+   "gotchas": [
+    "SimTimeout is a BaseException, not an Exception, so a recovery loop's `except Exception` can't catch it and spin.",
+    "patched only redirects modules already loaded; scenarios.Sim imports them all first, and the write guard catches what that misses.",
+    "Detectors read the Screen record attached to the frame, not pixels; only HP bars and the HUD numbers are real pixels read by real readers.",
+    "A plan due to start at the very moment it is cancelled hasn't pressed anything: it is withdrawn.",
+    "splice raises RuntimeError if another plan is queued after the one it takes over (the navigator must withdraw it first).",
+    "With TRUE_PLACE the localizer itself is not exercised in the simulator; it has its own tests on the game's frames.",
+    "send() checks the alarm only for plans without a kind: pet food and retreat plans go to _cutoff for the real player's rules.",
+    "FakeEyes.bar caches readings by the box's bytes and clears the cache past 4096 entries (reads were 8 of 18 s of a feed scenario).",
+    "The Lie Detector's cut is decided when a plan is scheduled (_schedule calls _cutoff): alarm_at is set before the plans it should stop are handed over, as scenarios.lie_detector does at the run's start.",
+    "FakeTouches tells a touch in the first frame that shows its popup; live, a damage number is read a median 0.04 s later, as her bar moves.",
+    "The harness's measured look costs (LOOK_S 0.020, LOOK_LAG 0.006, ...) are swapped in by setattr on this module for a run and put back after (harness.run_one, the scene sets)."
+   ],
+   "tests": [
+    "tests/test_sim.py",
+    "tests/test_harness.py",
+    "tests/test_touches.py",
+    "tests/test_sim_magic.py",
+    "tests/test_sim_tree.py",
+    "tests/test_retreat.py",
+    "tests/test_worldstate.py",
+    "tests/test_feed.py",
+    "tests/test_framecheck.py",
+    "tests/test_resolution.py",
+    "tests/test_gains.py",
+    "tests/test_replan.py",
+    "tests/test_rope_hang.py",
+    "tests/test_statcheck.py",
+    "tests/test_jump_reach.py",
+    "tests/test_panel_speed.py"
+   ]
+  },
+  {
+   "path": "gamelab/sim/__init__.py",
+   "title": "The sim package",
+   "tagline": "The package's map of the simulator and its safety promise",
+   "summary": "No code: a docstring naming the simulator's parts (world, fakes, scenarios, golden) and promising that a simulated run sends no key and writes nothing under gamelab/lab.",
+   "details_md": "The package has no code of its own; its docstring is the map of the simulator:\n\n- `world.py` simulates the game on a real map;\n- `fakes.py` puts it behind the seams gamelab already has (`Eyes`, `gamelab.control.client`, time);\n- `scenarios.py` runs gamelab's entry points on it;\n- `golden.py` records their traces and checks the code still does the same (`python -m gamelab.sim.golden record|check`).\n\nIts safety promise: nothing here sends a key to the game or writes under `gamelab/lab` during a run. The stack runs only inside `with scenarios.Sim(model, scenario) as sim:`, where the fakes are in place, and opening any file under `gamelab/lab` for writing raises `SimViolation`. One exception is spelled out: a telemetry file opened *before* the run (as `python -m gamelab sim` does) keeps receiving records, so the mini-map can show the run.\n",
+   "lines": 10,
+   "key_items": [],
+   "inputs": [],
+   "outputs": [],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [],
+   "gotchas": [
+    "A telemetry file opened before the run (as `python -m gamelab sim` does) keeps receiving records during it; only files opened under gamelab/lab during the run are refused."
+   ],
+   "tests": []
+  },
+  {
+   "path": "gamelab/sim/no_hit_scenes.py",
+   "title": "No-hit scenes",
+   "tagline": "Eleven moments of attacks at nothing from live recordings, replayed in the world",
+   "summary": "Each Scene puts her and the on-screen monsters back where a failsafe recording of 2026-11-04/05 had them, monsters walking their recorded rails until she hits them, then runs the full stack for about 15 fake seconds. measures, fault_shows and Scene.solved say whether the recording's fault reproduces and whether a fix solves it in the user's terms.",
+   "details_md": "**Why it exists.** The failsafe's recordings of 2026-11-04 and 11-05 showed her attacks hitting nothing in a handful of recurring situations. Whole-run harness tables can't tell whether a fix helps: per-seed spread is about 64 EXP a minute, so a +10 effect needs about 160 seeds. The user asked to \"create scene in simulation to verify they work/solve the problem\". Each scene puts a few seconds of a recording back into the world and runs the full stack (about 1.2 s of real time a run). Scenes are not in `scenarios.SCENARIOS`: no golden trace, no effect on other runs.\n\n**A scene** (`Scene`) starts about 0.15 s before the look of the clip's first attack of its cause: her platform and x, facing, HP, MP, invulnerability left (`inv`), attack lock left (`locked`), the failsafe's count of attacks at nothing so far (`misses`), other players' minimap dots (`others`, as `Camp`s that hunt nothing), and the monsters on screen (`Mob`) with their HP bars and whether they already chase her. The monsters near her walk **on rails**: `(seconds, way)` stretches read off the recording's timeline, until her first hit on that monster, then the world's own AI (`_RailWalker`, `_RailJumper` swap in by changing the monster's class in `_place`).\n\n**The world** is the harness's `loop-grind` scenario on Tree Dungeon (preset `crowd`, attack policy `choice`) in the standard thief's worlds (`WORLD`: zero-walls, near-misses, walkers, spawn-fade, map-drops, drop-takers, near-misses-exact) with her at level 35 (`HER_35`), a star's miss chance of 0.04 (`MISS`, measured at a Green; the standard world's 0.275 is the first map's at level 19), no respawns within the scene (`respawn_tick` 0, `respawn` 600 s) and 15 s long by default. `scenario_of` also sets her stack as it was then: her facing, her target (`chooser.primary`), her belief of who chases her (`_she_hit`) and the failsafe's count (`_counted`). `script` adds events, such as another player's kill at a given second (`_strangers_kill`).\n\n**Judging.** `run_scene` runs a scene with the harness's measured look costs, captures telemetry, and returns `measures`: attacks, attacks at nothing (outcomes `nothing`, `stopped`, `miss`), the same within the recording's span, first hit, first star, claw swipes, when the target died, EXP, touches, knock-offs, the longest stand with a monster within 60 units (`_watch_stand`), MP spent. `fault_shows` says whether runs reproduce the recording's fault (by `Scene.fault`, else the runs' mean attacks at nothing in the recording's span at least `FAULT_SHARE` 0.6 of the recording's count, and of what the runs keyed); `Scene.solved` lists what \"solved\" means in the user's words (fewer attacks at nothing, first hit sooner, no standing still, the target killed, no less EXP), each about half of master's numbers. `SHIFTS` are small changes the frames can't rule out (rails 0.1 s late or early, her place 6 units either way); `over_shifts` counts on how many the verdicts hold.\n\n**The 11 scenes** cover: too close in front (`too_close_081701`, `too_close_111448`), at a wall's foot (`wall_foot_231613`), monsters walking past her (`walked_past_080032`, `walked_past_080939`), from below (`from_below_233732`, `from_below_234441`), another player's kill (`stranger_dead_080929`, `stranger_dying_080929`), a throw at her own kill (`own_kill_235621`) and a failsafe firing that was then ignored (`ignored_235621`).\n\n**Where they stand.** `tests/test_no_hit_scenes.py` keeps the scenes not yet solved in `OPEN` (strict expected failures): 8 of the 11, four whose fault still shows (`FAULT`: 111448, 080939, stranger_dying, own_kill) and four whose fault is gone but not every solved condition holds.\n",
+   "lines": 415,
+   "key_items": [
+    {
+     "name": "SCENES",
+     "kind": "constant",
+     "line": 106,
+     "signature": "SCENES: dict[str, Scene] = {}",
+     "summary": "The 11 scenes by name, filled by _scene calls at the bottom of the file."
+    },
+    {
+     "name": "Scene",
+     "kind": "dataclass",
+     "line": 85,
+     "signature": "@dataclass(frozen=True) class Scene",
+     "summary": "A recorded moment: the clip, what it saw (seconds, attacks, at nothing), her start, facing, HP, MP, invulnerability and lock left, the failsafe's count, the monsters, other players, an optional script, and what solved means."
+    },
+    {
+     "name": "Mob",
+     "kind": "dataclass",
+     "line": 74,
+     "signature": "@dataclass(frozen=True) class Mob",
+     "summary": "A monster at the scene's start: name, platform, x, its recorded walk as (s, way) rails, its HP bar share, and whether it already chases her."
+    },
+    {
+     "name": "scenario_of",
+     "kind": "function",
+     "line": 171,
+     "signature": "def scenario_of(name: str, seed: int, shift: str = \"\")",
+     "summary": "Builds the harness's loop-grind scenario on Tree Dungeon (preset crowd, attack choice) with the standard thief's worlds, her at HER_35, MISS 0.04, no respawn, the scene's monsters and other players (as Camps that hunt nothing), and a run function that places the monsters on rails, sets her MP, invulnerability and lock, and her stack's state (facing, target, aggro belief, failsafe count) before grinding."
+    },
+    {
+     "name": "run_scene",
+     "kind": "function",
+     "line": 240,
+     "signature": "def run_scene(name: str, seed: int, shift: str = \"\") -> tuple[dict, object, dict]",
+     "summary": "Runs a scene with the harness's measured look costs and telemetry captured; returns the trace, the Sim, and its measures plus the failsafe's firings."
+    },
+    {
+     "name": "measures",
+     "kind": "function",
+     "line": 207,
+     "signature": "def measures(w, sc: Scene) -> dict",
+     "summary": "What a run came to, from the world's attack_log and logs: attacks, at nothing, first hit, stabs, the target's death, EXP, touches, knock-offs, longest stand near a monster, MP."
+    },
+    {
+     "name": "fault_shows",
+     "kind": "function",
+     "line": 268,
+     "signature": "def fault_shows(name: str, runs: list[dict]) -> bool",
+     "summary": "Whether runs reproduce the recording's fault: the scene's own fault test, else the runs' mean attacks at nothing in its span at least FAULT_SHARE (0.6) of the recording's, and of what the runs keyed."
+    },
+    {
+     "name": "_RailWalker",
+     "kind": "class",
+     "line": 43,
+     "signature": "class _RailWalker(SimMonster)",
+     "summary": "A walker that follows its rails' (s, way) stretches until her first hit on it, then its own AI."
+    },
+    {
+     "name": "_RailJumper",
+     "kind": "class",
+     "line": 55,
+     "signature": "class _RailJumper(SimJumper)",
+     "summary": "A jumper on rails: no hop at a platform's end and no reach limit while on them."
+    },
+    {
+     "name": "shifted",
+     "kind": "function",
+     "line": 156,
+     "signature": "def shifted(sc: Scene, shift: str) -> Scene",
+     "summary": "The scene moved by one of SHIFTS: rails 0.1 s late or early, or her place 6 units either way."
+    },
+    {
+     "name": "over_shifts",
+     "kind": "function",
+     "line": 284,
+     "signature": "def over_shifts(name: str, runs_of: Callable[[str], list[dict]]) -> dict[str, int]",
+     "summary": "On how many SHIFTS the fault shows and the scene counts as solved."
+    },
+    {
+     "name": "HER_35",
+     "kind": "constant",
+     "line": 29,
+     "signature": "HER_35 = {\"max_hp\": 1244.0, \"level\": 35, ...}",
+     "summary": "Her at level 35 as these clips had her (HP 1244, MP 1048, W.DEF 117, avoid 80, Lucky Seven stars 174-285, claw 19-25, a cast 16 MP)."
+    },
+    {
+     "name": "_watch_stand",
+     "kind": "function",
+     "line": 225,
+     "signature": "def _watch_stand(w) -> None",
+     "summary": "Wraps World._idleness to keep World.stand_most: the longest she stands with no key and no attack while a monster is within 60 units on her platform."
+    }
+   ],
+   "inputs": [
+    "the scenes' data written in the file (from the failsafe's recordings, frames and verified ledgers)",
+    "harness.scenario and harness.COSTS['measured'] for the base scenario and look costs",
+    "the real stack: hunter, tour, navigator and Grind built by scenarios.Sim"
+   ],
+   "outputs": [
+    "per-run measures, fault_shows and unmet (what solved means that runs don't show)",
+    "the trace and the Sim for inspection"
+   ],
+   "uses": [
+    "gamelab/sim/world.py",
+    "gamelab/sim/harness.py",
+    "gamelab/sim/scenarios.py",
+    "gamelab/sim/fakes.py",
+    "gamelab/attack/danger.py",
+    "gamelab/behavior/grind.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/telemetry.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "MISS",
+     "value": "0.04",
+     "meaning": "a star's miss chance in these scenes (a clear pick that shows nothing at a Green live: 42 of 1,058)"
+    },
+    {
+     "name": "FAULT_SHARE",
+     "value": "0.6",
+     "meaning": "of the recording's attacks at nothing, for a scene's runs to show its fault"
+    },
+    {
+     "name": "SHIFTS",
+     "value": "late/early 0.1 s, her +/-6 units",
+     "meaning": "what the frames can't rule out"
+    },
+    {
+     "name": "WORLD",
+     "value": "zero-walls, near-misses, walkers, spawn-fade, map-drops, drop-takers, near-misses-exact",
+     "meaning": "the harness's standard thief's worlds"
+    },
+    {
+     "name": "Scene.seconds",
+     "value": "15.0",
+     "meaning": "a scene's default length"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-05",
+     "what": "Scenes from the failsafe's recordings, run with the full stack, outside SCENARIOS",
+     "why": "The user: \"maybe create scene in simulation to verify they work/solve the problem\"; whole-run tables need ~160 seeds to see the effect"
+    },
+    {
+     "date": "2026-11-05",
+     "what": "Monsters near her walk recorded rails until her first hit, then the world's AI",
+     "why": "With the AI alone, 081701's slime is past her by the second attack and the fault doesn't reproduce"
+    }
+   ],
+   "gotchas": [
+    "A verdict holds at the recorded phase only: most SHIFTS don't keep it (README).",
+    "A scene tests an attack or two, not a stuck run.",
+    "Rails are applied by swapping the monster's class in place (_place), so a rail monster still has the world's chase and knock-back once hit.",
+    "tests/test_no_hit_scenes.py marks the unsolved scenes as strict expected failures (OPEN, 8 of 11 today), to flip as fixes land.",
+    "HER_35 here and world.HER_35 hold the same numbers; the harness's `--world her-35` is this one.",
+    "tests/test_no_hit_scenes.py runs the scenes with GAMELAB_JUMP_ASIDE=1 and GAMELAB_HOP_UP=1, the stance fixes for them that are off by default (attack.stance)."
+   ],
+   "tests": [
+    "tests/test_no_hit_scenes.py",
+    "tests/test_key_pick.py"
+   ]
+  },
+  {
+   "path": "gamelab/sim/hunt_scenes.py",
+   "title": "Hunt journeys",
+   "tagline": "Live journeys between platforms (2026-11-05) replayed in the world with the full stack",
+   "summary": "Each case from tests/fixtures/hunt_journeys_2026-11-05.json becomes a short grind: her start where the journey set off, the monsters seen on the way, her patrol round frozen. run_journey reports the platforms she stood on, her first attack's platform and whether she got where the live journey went, to judge stopping at landings (behavior.targeting.stay_or_go).",
+   "details_md": "**Why it exists.** The user, 2026-11-05, on why she goes down to the low platforms and stays, and skips busy areas when travelling (\"when you travel to another platform, especially when down jumping, you seem to skip an area with large amount of mobs which could potentially more beneficial\"). The fix (`behavior.targeting.stay_or_go`: ask, at a landing inside a chain of moves, whether to stop there) is judged on real journeys.\n\n**What it does.** The journeys of the tours of 2026-11-05 are stored in `tests/fixtures/hunt_journeys_2026-11-05.json` (`JOURNEYS`). Each case has where the journey set off (`start`), the platforms it passed, its target or the pile it went for (`kind` \"loot\"), the monsters the perception service saw on the way (`mobs`), her patrol round and its rate, and how long it took live (`seconds`).\n\n`scenario_of(case, seed)` turns one into a world: the harness's `loop-grind` scenario on Tree Dungeon (`scenarios.TREE`) in the `crowd` preset with the worlds in `WORLD` (the thief's standard plus `live-floors`, which puts her at level 35: `HER_35` with Lucky Seven's stars 166-333 and a star's miss chance of 0.04; its other players are dropped here), only the monsters on the platforms it passed (and the target's), no other players and no respawn within it (`respawn_tick` 0, `respawn` 600 s), lasting the live time plus `AFTER_S` (8 s). Its run function builds the real hunter, navigator, tour and `Grind`, freezes the patrol's plan to the journey's round and rate (`replan` disabled), has her first ground decision find her already visiting her start place with the round's first stop as her stop, and for a loot journey seeds a remembered pile of mesos at its target.\n\n`run_journey` runs it with the harness's measured look costs, captures telemetry, and returns the platforms she stood on in order (`path`, from `scene` records), the platform of her first attack, whether she got where the journey went (`got_there`), her kills and touches, how many times the landing question was asked (log lines with \"at a landing\"), and the log. `tests/test_stay_or_go.py` runs three of the fixture's 11 journeys with the question off and on (`GAMELAB_STAY_OR_GO` 0 and 1: the question is off by default until a live trial reports).\n\nLike the no-hit scenes, these are not in `scenarios.SCENARIOS`: no golden, no effect on other runs.\n",
+   "lines": 84,
+   "key_items": [
+    {
+     "name": "scenario_of",
+     "kind": "function",
+     "line": 28,
+     "signature": "def scenario_of(case: dict, seed: int = 1)",
+     "summary": "Journey `case` in world `seed`: the loop-grind crowd scenario on Tree Dungeon with the live-floors worlds, only the monsters on the platforms it passed (and its target's), no camps or respawn, and a run function that freezes her patrol to the journey's round."
+    },
+    {
+     "name": "run_journey",
+     "kind": "function",
+     "line": 60,
+     "signature": "def run_journey(case: dict, seed: int = 1) -> dict",
+     "summary": "Runs a journey with measured look costs and telemetry captured; returns path, first_attack, got_there, kills, asked (landing questions), touches and the log."
+    },
+    {
+     "name": "cases",
+     "kind": "function",
+     "line": 24,
+     "signature": "def cases() -> dict[str, dict]",
+     "summary": "The journeys by name, read from the fixture file."
+    },
+    {
+     "name": "JOURNEYS",
+     "kind": "constant",
+     "line": 19,
+     "signature": "JOURNEYS = Path(__file__).parents[2] / \"tests\" / \"fixtures\" / \"hunt_journeys_2026-11-05.json\"",
+     "summary": "The fixture of the tours' journeys."
+    },
+    {
+     "name": "WORLD",
+     "kind": "constant",
+     "line": 20,
+     "signature": "WORLD = (\"zero-walls\", \"near-misses\", \"walkers\", \"spawn-fade\", \"map-drops\", \"drop-takers\", \"near-misses-exact\", \"live-floors\")",
+     "summary": "The worlds a journey runs in: the thief's standard plus live-floors."
+    },
+    {
+     "name": "AFTER_S",
+     "kind": "constant",
+     "line": 21,
+     "signature": "AFTER_S = 8.0",
+     "summary": "Seconds of a scene past what the journey took live."
+    }
+   ],
+   "inputs": [
+    "tests/fixtures/hunt_journeys_2026-11-05.json (the journeys, made by scripts outside the repo)",
+    "harness.scenario, harness.WORLDS['live-floors'] and harness.COSTS['measured']",
+    "the real stack: hunter, navigator, tour, Grind and its patrol"
+   ],
+   "outputs": [
+    "per journey: path of platforms, first attack's platform, got_there, kills, landing questions asked, touches, log"
+   ],
+   "uses": [
+    "gamelab/sim/harness.py",
+    "gamelab/sim/scenarios.py",
+    "gamelab/sim/fakes.py",
+    "gamelab/telemetry.py",
+    "gamelab/attack/danger.py",
+    "gamelab/attack/spots.py",
+    "gamelab/behavior/hunt.py",
+    "gamelab/behavior/ledger.py",
+    "gamelab/behavior/patrol.py",
+    "gamelab/behavior/grind.py"
+   ],
+   "files_io": [
+    {
+     "path": "tests/fixtures/hunt_journeys_2026-11-05.json",
+     "mode": "read",
+     "what": "the live journeys"
+    }
+   ],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "AFTER_S",
+     "value": "8.0 s",
+     "meaning": "how long past the live journey's time a run goes on"
+    },
+    {
+     "name": "potion_hp",
+     "value": "0.45",
+     "meaning": "the hunter's potion threshold in these runs (an argument to sim.hunter, not a module constant)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-05",
+     "what": "Journeys put in the world with the full stack, outside SCENARIOS",
+     "why": "The user: \"We can do all 1, 2, 3, 4\" on the report of where she hunts; she seemed to skip busy areas when travelling"
+    }
+   ],
+   "gotchas": [
+    "The patrol's replan is disabled and its first ground look is faked as already at the stop she set off from, so the run starts mid-tour.",
+    "A loot journey seeds a remembered pile of mesos (worth 30) at its target and a mesos drop lying there.",
+    "`asked` is counted from log lines containing \"at a landing\": a change of that wording breaks the count.",
+    "Whether the landing question is asked at all depends on the GAMELAB_STAY_OR_GO environment switch (off by default); the test sets it per run."
+   ],
+   "tests": [
+    "tests/test_stay_or_go.py"
+   ]
+  }
+ ],
+ "data_types": [
+  {
+   "name": "Noise",
+   "module": "gamelab/sim/world.py",
+   "line": 979,
+   "summary": "The real game's and perception's errors, all off by default; each draw seeded by the world's seed and the moment it's for. Read by World (stars, lags, taps) and FakeEyes (what a look misses or misreads).",
+   "fields": [
+    {
+     "name": "miss",
+     "type": "float",
+     "meaning": "chance a star that would hit misses (lab/shots.jsonl: 72.5% of 204 hit)"
+    },
+    {
+     "name": "lag_sd",
+     "type": "float",
+     "meaning": "the key lags' spread around their medians, times the measured sd"
+    },
+    {
+     "name": "tap_lost",
+     "type": "float",
+     "meaning": "chance an arrow tap of 50 ms or less turns her without walking her"
+    },
+    {
+     "name": "walk_jitter",
+     "type": "float",
+     "meaning": "units: letting go stops her up to this early or late"
+    },
+    {
+     "name": "dot_px",
+     "type": "bool",
+     "meaning": "her minimap dot read to whole pixels"
+    },
+    {
+     "name": "tag_hidden / dot_hidden / exp_hidden / unfound",
+     "type": "tuple",
+     "meaning": "(from, to) s spells when her tag, dot or EXP number can't be seen, or the localizer hasn't found her"
+    },
+    {
+     "name": "hit_hidden",
+     "type": "tuple",
+     "meaning": "(shortest, longest) s a hit monster can't be seen"
+    },
+    {
+     "name": "detect_miss",
+     "type": "float",
+     "meaning": "chance a look misses a monster that shows"
+    },
+    {
+     "name": "near_seen / off_seen",
+     "type": "tuple / float | None",
+     "meaning": "chance a look finds a monster by distance on her platform / on another"
+    },
+    {
+     "name": "near_spell / off_spell",
+     "type": "tuple / float",
+     "meaning": "misses come in spells of that many s"
+    },
+    {
+     "name": "spawn_found",
+     "type": "tuple",
+     "meaning": "(alpha, share) table: when a fading newborn is first found"
+    },
+    {
+     "name": "air_squash / air_short / air_under / air_turn_lost",
+     "type": "float",
+     "meaning": "the air pick's fitted noise (TREE_AIR)"
+    },
+    {
+     "name": "pose_wrong / heading_unsure / heading_wrong",
+     "type": "float / tuple",
+     "meaning": "monsters' poses and her heading read wrong"
+    },
+    {
+     "name": "regular_miss / miss_unseen",
+     "type": "float",
+     "meaning": "an extra miss chance for the regular attack's star; the chance a missed star's MISS popup isn't seen"
+    },
+    {
+     "name": "dot_under",
+     "type": "float",
+     "meaning": "units: another player's minimap dot this near hers is hidden under it"
+    },
+    {
+     "name": "turned",
+     "type": "tuple",
+     "meaning": "((at, side), ...): moments something other than her keys turns her"
+    },
+    {
+     "name": "exact",
+     "type": "bool",
+     "meaning": "the feed has the exact finder (NEAR_SEEN_1104's rates; not the default until it has run live)"
+    }
+   ]
+  },
+  {
+   "name": "Realism",
+   "module": "gamelab/sim/world.py",
+   "line": 1082,
+   "summary": "How busy and hard the map is, and the unknowns of the game run either way. The defaults are the simulator's own world; the harness's --world names switch fields.",
+   "fields": [
+    {
+     "name": "respawn_tick / respawn / respawn_cap",
+     "type": "float / float / float | None",
+     "meaning": "the map's pass period (0: each monster back `respawn` s after its death), and the cap (None: the server's formula)"
+    },
+    {
+     "name": "rival_every / rival_owns / rival_takes / rival_stay",
+     "type": "float",
+     "meaning": "another player's kills, ownership of its drops, its pick-up delay, its stay at a place"
+    },
+    {
+     "name": "camps",
+     "type": "tuple[Camp, ...]",
+     "meaning": "other players camping platforms"
+    },
+    {
+     "name": "potions / darts",
+     "type": "int | None",
+     "meaning": "her stock (None: endless)"
+    },
+    {
+     "name": "drops / drop_mix / drop_takers",
+     "type": "tuple | str / DropMix | None / bool",
+     "meaning": "what kills drop, and others taking her drops"
+    },
+    {
+     "name": "full_tabs / fills_after / room_at",
+     "type": "tuple / tuple / float | None",
+     "meaning": "her inventory filling up"
+    },
+    {
+     "name": "lock_arrows",
+     "type": "bool",
+     "meaning": "arrows pressed during an attack are swallowed"
+    },
+    {
+     "name": "sides / zero_walls / rope_reach",
+     "type": "str / bool / float",
+     "meaning": "the map's sides, group 0's walls, how high a rope can be grabbed"
+    },
+    {
+     "name": "her_box / knock / rope_knocks / knock_turns",
+     "type": "tuple | None / tuple | None / bool / bool",
+     "meaning": "her touch body and knock-back"
+    },
+    {
+     "name": "chase / invulnerable / newborns_touch",
+     "type": "bool / float / bool",
+     "meaning": "aggro, invulnerability after a touch, newborns touching"
+    },
+    {
+     "name": "dies_late / damage_ms / air_pick / hit_inside / skill_row",
+     "type": "bool / int | None / str | None / bool / float | None",
+     "meaning": "attack timing and picking variants"
+    },
+    {
+     "name": "splices",
+     "type": "bool",
+     "meaning": "the player takes splices (False: every replanned chain a cut and a resend)"
+    },
+    {
+     "name": "game_keys / stat_key / chat / pets",
+     "type": "tuple / str | None / str | None / int",
+     "meaning": "the game's own key bindings, her stat window key, her chat box, pets looting"
+    },
+    {
+     "name": "vacant / first_pass",
+     "type": "tuple / float | None",
+     "meaning": "a scenario's set-up of the map's pass: monsters dead from the start, and when the first pass comes"
+    },
+    {
+     "name": "spawn_share / hurt",
+     "type": "float / tuple",
+     "meaning": "share of spawn points with a monster; kinds that start with part of their HP gone"
+    },
+    {
+     "name": "shared_exp",
+     "type": "bool",
+     "meaning": "another player's kill of a monster she hurt gives her its EXP times the share she took (unknown in game)"
+    },
+    {
+     "name": "bars_empty",
+     "type": "bool",
+     "meaning": "a hurt monster's HP bar reads empty, as the stack read them at 1366x768 until 2026-10-25"
+    },
+    {
+     "name": "stat_detail / stat_stuck / chat_stuck",
+     "type": "bool",
+     "meaning": "her stat window opens with its DETAIL panel; it or her chat box won't respond to its key (tests)"
+    }
+   ]
+  },
+  {
+   "name": "Her",
+   "module": "gamelab/sim/world.py",
+   "line": 1232,
+   "summary": "The character as the simulator plays her: HP, level and EXP at the start, how touches hurt her, her pet, her attacks and MP, and her true walk and climb. Presets LEVEL_19, LEVEL_23, LEVEL_24, LEVEL_25, MAGE_32; HER_35 as a dict.",
+   "fields": [
+    {
+     "name": "max_hp / level / exp",
+     "type": "float / int / int",
+     "meaning": "her HP, level and EXP into it at the start"
+    },
+    {
+     "name": "defence / evade / avoid",
+     "type": "float | None / float / float | None",
+     "meaning": "how touches hurt her and how often she evades"
+    },
+    {
+     "name": "pet / pet_mp / potion / mp_potion",
+     "type": "float | None / float | None / float | None / float",
+     "meaning": "her pet's HP and MP warnings, potion sizes"
+    },
+    {
+     "name": "stars / skill / skill_star / star / claw / spread",
+     "type": "float / float | None / tuple | None / tuple | None / tuple | None / bool",
+     "meaning": "what her attacks do"
+    },
+    {
+     "name": "mp / cast_mp / mp_regen",
+     "type": "float",
+     "meaning": "her MP, a cast's cost, regeneration per second"
+    },
+    {
+     "name": "walk_speed / climb_speed / planned",
+     "type": "float | None / float | None / tuple | None",
+     "meaning": "her true walk and climb, and an optionally held planner speed"
+    },
+    {
+     "name": "magic",
+     "type": "SimMagic | None",
+     "meaning": "the magician's Magic Claw"
+    }
+   ]
+  },
+  {
+   "name": "SimMonster",
+   "module": "gamelab/sim/world.py",
+   "line": 1550,
+   "summary": "A monster in the world; FakeEyes draws it from World.visible_monsters, the scenes place it, the harness reads its fate.",
+   "fields": [
+    {
+     "name": "idx / name / kind",
+     "type": "int / str / str",
+     "meaning": "its index, game name, kind"
+    },
+    {
+     "name": "platform / home",
+     "type": "Platform / float",
+     "meaning": "where it walks and its spawn x"
+    },
+    {
+     "name": "speed / half / height / flinch_top",
+     "type": "float",
+     "meaning": "walk speed and body for picking"
+    },
+    {
+     "name": "hp / hp_max",
+     "type": "float",
+     "meaning": "HP in stars"
+    },
+    {
+     "name": "alive / died_at / died_x / killed_by / drawn_alive / bar_drawn",
+     "type": "bool / float | None / float / str / float | None / float",
+     "meaning": "its death and how it's drawn"
+    },
+    {
+     "name": "hit_at / flinch_at / pushed",
+     "type": "float | None / float | None / tuple | None",
+     "meaning": "its last hit, flinch and push"
+    },
+    {
+     "name": "aggro_until / chase_dir",
+     "type": "float | None / int",
+     "meaning": "its chase of her"
+    },
+    {
+     "name": "info / born / life / point",
+     "type": "MobInfo | None / float | None / int / int | None",
+     "meaning": "game data, birth, lives, spawn point"
+    }
+   ]
+  },
+  {
+   "name": "MobInfo",
+   "module": "gamelab/sim/world.py",
+   "line": 1398,
+   "summary": "A monster as the game data has it (from Mob/<id>.img, cached): touch damage, accuracy, frames standing, walking and flinching, HP, defence and push threshold.",
+   "fields": [
+    {
+     "name": "pad",
+     "type": "float",
+     "meaning": "PADamage, its touch damage before her defence"
+    },
+    {
+     "name": "acc",
+     "type": "float",
+     "meaning": "accuracy, against her evasion"
+    },
+    {
+     "name": "stand / move",
+     "type": "tuple[Frame, ...]",
+     "meaning": "animation frames with their boxes"
+    },
+    {
+     "name": "hit",
+     "type": "Frame | None",
+     "meaning": "its hit1 frame while flinching"
+    },
+    {
+     "name": "hp / pdd",
+     "type": "float",
+     "meaning": "maxHP and PDDamage"
+    },
+    {
+     "name": "pushed",
+     "type": "float",
+     "meaning": "least damage that pushes it back"
+    }
+   ]
+  },
+  {
+   "name": "SimMagic",
+   "module": "gamelab/sim/world.py",
+   "line": 496,
+   "summary": "Magic Claw as the world casts it (Her.magic, MAGE_32), apart from the stack's own belief in attack.magic.",
+   "fields": [
+    {
+     "name": "search",
+     "type": "character.Search",
+     "meaning": "the client's aimed-spell search (classes.magician.SEARCH)"
+    },
+    {
+     "name": "hits / hit",
+     "type": "int / tuple[int, int]",
+     "meaning": "2 hits a cast of 157-181 before MDDamage"
+    },
+    {
+     "name": "lock_s / shows_s",
+     "type": "float",
+     "meaning": "0.80 s lock; the hit shows 0.53 s after the key"
+    },
+    {
+     "name": "hidden",
+     "type": "tuple[float, float]",
+     "meaning": "0.4-1.0 s a hit monster is lost to the looks"
+    },
+    {
+     "name": "miss",
+     "type": "float",
+     "meaning": "0: none measured"
+    }
+   ]
+  },
+  {
+   "name": "Drop",
+   "module": "gamelab/sim/world.py",
+   "line": 2094,
+   "summary": "A drop on the ground; FakeEyes draws live ones as perception.loot.Item, her pick-up and pets take them.",
+   "fields": [
+    {
+     "name": "kind",
+     "type": "str",
+     "meaning": "\"mesos\" or an item kind"
+    },
+    {
+     "name": "x / y / platform",
+     "type": "float / float / int",
+     "meaning": "where it lies"
+    },
+    {
+     "name": "since / life",
+     "type": "float",
+     "meaning": "when it lands, and how long it lies"
+    },
+    {
+     "name": "owner",
+     "type": "str",
+     "meaning": "\"her\" or \"rival\""
+    },
+    {
+     "name": "gone / taken_at / taken_by / pet",
+     "type": "bool / float | None / str / bool",
+     "meaning": "who took it, when"
+    },
+    {
+     "name": "amount",
+     "type": "int",
+     "meaning": "mesos amount (Realism.drop_mix)"
+    }
+   ]
+  },
+  {
+   "name": "Event",
+   "module": "gamelab/sim/world.py",
+   "line": 2139,
+   "summary": "One entry in the world's time-ordered queue: keys from FakePlayer and the world's own scheduled happenings.",
+   "fields": [
+    {
+     "name": "ms / seq",
+     "type": "int",
+     "meaning": "the tick it takes effect on, and the order pushed"
+    },
+    {
+     "name": "kind",
+     "type": "str",
+     "meaning": "'down', 'up', 'release', 'click' (keys from FakePlayer) or the world's own: 'seen', 'unlock', 'liftoff', 'drop', 'aim', 'star', 'struck', 'loot', 'respawn', 'map_tick', 'rival...', 'camp...', 'others_take', 'turned', 'call'"
+    },
+    {
+     "name": "data",
+     "type": "object",
+     "meaning": "the key name or the event's payload"
+    },
+    {
+     "name": "tag",
+     "type": "str",
+     "meaning": "the plan a key event belongs to (for withdraw)"
+    },
+    {
+     "name": "at",
+     "type": "float",
+     "meaning": "the clock time it was sent for, before rounding to a tick"
+    }
+   ]
+  },
+  {
+   "name": "Plan",
+   "module": "gamelab/sim/fakes.py",
+   "line": 886,
+   "summary": "A key plan as FakePlayer runs it: its events, timing, state and the Lie Detector's answer.",
+   "fields": [
+    {
+     "name": "id / index / name / events",
+     "type": "str / int / str / list",
+     "meaning": "identity and [ms, key, down|up] events"
+    },
+    {
+     "name": "lead / length / sent / start / end",
+     "type": "float",
+     "meaning": "timing on the fake clock"
+    },
+    {
+     "name": "state",
+     "type": "str",
+     "meaning": "queued, withdrawn, cut, spliced or untaken"
+    },
+    {
+     "name": "error / kind / alarm",
+     "type": "str | None",
+     "meaning": "validation error, the plan's kind, the Lie Detector error it's answered with"
+    },
+    {
+     "name": "parent / spliced / held",
+     "type": "str | None / dict | None / tuple",
+     "meaning": "splice bookkeeping"
+    }
+   ]
+  },
+  {
+   "name": "Screen",
+   "module": "gamelab/sim/fakes.py",
+   "line": 260,
+   "summary": "What is drawn in a fake frame, as data: the fake detectors, heading and touch watches read it instead of pixels.",
+   "fields": [
+    {
+     "name": "mobs",
+     "type": "list[Mob]",
+     "meaning": "monsters drawn (perception.mobs.Mob)"
+    },
+    {
+     "name": "items",
+     "type": "list[Item]",
+     "meaning": "drops drawn (perception.loot.Item)"
+    },
+    {
+     "name": "heading",
+     "type": "Reading",
+     "meaning": "which way her picture shows her facing"
+    },
+    {
+     "name": "popups",
+     "type": "list[tuple[int, str]]",
+     "meaning": "touch popups over her: (touch index, MISS or damage)"
+    }
+   ]
+  },
+  {
+   "name": "Scene",
+   "module": "gamelab/sim/no_hit_scenes.py",
+   "line": 85,
+   "summary": "A no-hit scene: a recorded moment and what solving it means.",
+   "fields": [
+    {
+     "name": "name / clip",
+     "type": "str",
+     "meaning": "its name and the recording's frames"
+    },
+    {
+     "name": "saw",
+     "type": "tuple[float, int, int]",
+     "meaning": "in the recording: seconds, attacks, at nothing"
+    },
+    {
+     "name": "start / facing",
+     "type": "tuple[int, float] / str",
+     "meaning": "her platform, x and facing"
+    },
+    {
+     "name": "mobs / target",
+     "type": "tuple[Mob, ...] / int",
+     "meaning": "monsters on screen and which she goes at"
+    },
+    {
+     "name": "hp / mp / inv / locked / misses",
+     "type": "float / float / float / float / int",
+     "meaning": "her state at the start"
+    },
+    {
+     "name": "others / script",
+     "type": "tuple / Callable | None",
+     "meaning": "other players' dots; extra events"
+    },
+    {
+     "name": "fault / solved",
+     "type": "Callable | None / tuple",
+     "meaning": "how the fault shows; what solved means"
+    }
+   ]
+  },
+  {
+   "name": "Mob",
+   "module": "gamelab/sim/no_hit_scenes.py",
+   "line": 74,
+   "summary": "A monster at a no-hit scene's start.",
+   "fields": [
+    {
+     "name": "name / platform / x",
+     "type": "str / int / float",
+     "meaning": "who and where"
+    },
+    {
+     "name": "rails",
+     "type": "tuple",
+     "meaning": "its recorded walk as (s, way) stretches"
+    },
+    {
+     "name": "hp",
+     "type": "float",
+     "meaning": "share of HP left (its bar)"
+    },
+    {
+     "name": "chasing",
+     "type": "bool",
+     "meaning": "already hit by her: chases her, and her belief has it so"
+    }
+   ]
+  }
+ ],
+ "flows": [
+  {
+   "id": "sim-key-to-motion",
+   "title": "How a key plan moves her in the world",
+   "summary": "The stack's key plan goes through the faked client into timed world events; the world only runs when something looks.",
+   "trigger": "The stack (Actions, Mover, Navigator) calls control.client.send, patched to FakePlayer.send",
+   "steps": [
+    {
+     "module": "gamelab/sim/fakes.py",
+     "symbol": "FakePlayer.send",
+     "text": "Validates the plan with the real player's rules, records it in the Trace, and schedules it to start 10 ms after hand-over and after the plans before it.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/fakes.py",
+     "symbol": "FakePlayer._schedule",
+     "text": "Pushes each event onto the world at start + lead + its ms (World.key, World.click), skipping a down of a key already held, and a release of every key at the plan's end.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/fakes.py",
+     "symbol": "FakeEyes.look",
+     "text": "The stack's next look (or glance) first runs the world up to the fake clock: World.advance calls World._tick every 5 ms of the way.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World._handle",
+     "text": "Each due key event becomes a press or release of an action (her GameKeys mapped by _actions); _pressed queues a 'seen' event when the game will notice the arrow (Lags.on less half a step, at its next 30 ms step).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World._seen",
+     "text": "The game now sees the arrow: she turns that way (in the air, maybe not: Noise.air_turn_lost); the arrow pressed last counts.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World._ground",
+     "text": "At each game step body.ground_step accelerates her toward the seen arrow or brakes her; she glides a sixth of the step per 5 ms tick, and flies off an unwalled end.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/fakes.py",
+     "symbol": "FakeEyes._observation",
+     "text": "Back in the same look, the screen is drawn from the world as it now stands (her true place via TRUE_PLACE, the monsters and drops into the frame's Screen) for the stack's perception; then the look's LOOK_S is charged to the clock.",
+     "process": ""
+    }
+   ]
+  },
+  {
+   "id": "sim-attack",
+   "title": "An attack, from key to kill",
+   "summary": "The world resolves an attack on the game's timeline: pick at 65 ms, damage at 290 ms, the star landing at 520 ms, the death drawn later.",
+   "trigger": "An attack or Lucky Seven key event reaches the world outside the attack lock",
+   "steps": [
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World._pressed",
+     "text": "Starts the 0.73 s lock, spends a cast's MP if it's Lucky Seven (or refuses: too little MP, no darts, on a rope), and queues 'aim' at JUMP_LAG (65 ms).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World._aim",
+     "text": "Picks the target from where she is now: a claw stance's swipe up close, else the star's band search; from a jump, the search from her feet with the fitted air noise. The line to a star's pick is checked (sight_stop). Queues 'star' at DAMAGE_SHOWS_MS (290 ms).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World._attack",
+     "text": "Applies the server's damage: a miss (Noise.miss), HP off in stars, or the kill; a hit that doesn't kill queues 'struck' at STAR_DELAY_MS (520 ms).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World._struck",
+     "text": "The star lands: the monster's damage numbers (it may hide under them), its flinch and push-back if the damage reaches its 'pushed', and its chase of her for 180-240 s.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World._kill",
+     "text": "If the damage kills it, _attack calls this at the 290 ms mark instead of queuing 'struck': EXP from the map's table, the monster drawn alive until the star lands (0.75 s + distance / 1490), drops landing 2 s later; by default it comes back at a later pass of the map's respawn.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/fakes.py",
+     "symbol": "FakeEyes._draw",
+     "text": "Looks show the hurt monster's HP bar as real pixels (read by Eyes.bar), the dying monster until DIE_LOST_S, then nothing; FakeDeaths reports the death on 83% of deaths.",
+     "process": ""
+    }
+   ]
+  },
+  {
+   "id": "sim-touch",
+   "title": "A monster touches her",
+   "summary": "Every tick the world checks monsters' frame boxes against her touch line; a touch costs HP or is a MISS, knocks her back and may make her pet drink.",
+   "trigger": "World._tick, every 5 ms, when she isn't invulnerable",
+   "steps": [
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World._touch",
+     "text": "Collects monsters on platforms near her (and jumpers in the air), skips newborns fading in, and tests each one's current frame box against her body (default a line 50 tall at her x).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World._hit_by",
+     "text": "Starts 1.5 s of invulnerability; draws a MISS by evade_chance, else takes touch_damage of her HP; at 0 HP she dies (SimDied at the next advance).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World._pet_drinks",
+     "text": "Her pet drinks a potion if she's under its warning, at least 0.2 s after its last, and isn't too hungry.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World._launch",
+     "text": "Unless she's on a rope, she is knocked away and up at 270 units/s (adding to her own sideways speed, landing at her walk's speed at most), unsteerable until she lands.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/fakes.py",
+     "symbol": "FakeTouches.update",
+     "text": "The next frames carry the touch's popup (MISS or the damage number) for 1 s; the touch watch tells it once, as the stack's own reads it live.",
+     "process": ""
+    }
+   ]
+  },
+  {
+   "id": "sim-lie-detector",
+   "title": "The Lie Detector in a simulated hunt",
+   "summary": "A scenario sets FakePlayer.alarm_at; from then on the fake player refuses and cuts plans by the real elevated player's own rule (control.player.alarm_refusal).",
+   "trigger": "A scenario or test sets sim.player.alarm_at (e.g. scenarios.lie_detector, tests/test_retreat.py)",
+   "steps": [
+    {
+     "module": "gamelab/sim/fakes.py",
+     "symbol": "FakePlayer._cutoff",
+     "text": "Decided as each plan is scheduled: a plan already running at the sighting is cut there and answered with alarm.LIE_DETECTOR_ERROR; nothing it has after the cutoff is played.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/fakes.py",
+     "symbol": "FakePlayer.check_alarm",
+     "text": "Any new plan without a kind, and every look of the hunter through client.check_alarm, raises client.LieDetectorAlarm: the hunt stops.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/fakes.py",
+     "symbol": "FakePlayer._cutoff",
+     "text": "Plans of a kind in alarm.PLAN_KINDS (pet food, retreat, the solver's lie_cursor and lie_ok) go through the real control.player.alarm_refusal; retreat moves are cut at RETREAT_WINDOW_S (12 s) after the sighting, pet food is counted; any other plan is refused.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/fakes.py",
+     "symbol": "FakePlayer.wait",
+     "text": "A plan answered with the alarm raises LieDetectorAlarm from wait, as the real client would.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/sim/world.py",
+     "symbol": "World.call_at",
+     "text": "The scenario looks at the world 10 s after the sighting (whatever the retreat is doing) to check she is on a safe place.",
+     "process": ""
+    }
+   ]
+  }
+ ],
+ "not_done": [
+  "The game's respawn isn't settled: RESPAWN (8 s per monster) is a guess, and the map's pass with the server's cap is measured on Tree Dungeon only; the map was never seen whole to count its monsters.",
+  "DROP_LIFE (180 s), EXPIRE_PASS_S (60 s) and TAKE_RATE (0.05 a minute) are guesses inside what the live evidence bounds.",
+  "Which touch-damage form holds on Tree Dungeon (a share of PADamage or meowdb's formula with DEF 75) isn't known; one Horny touch's pixels on her HP bar would tell.",
+  "What an arrow held during a knock's flight does isn't measured (KNOCK_STEERS False); whether a knock turns her isn't either (Realism.knock_turns).",
+  "An attack picks by each kind's walking height (World.top) while touches use the frame boxes: the two don't agree yet (README: Found offline).",
+  "Arrows pressed 0.63-0.78 s after an attack key, and arrows held through the key, are unmeasured for lock_arrows.",
+  "Other than lock_arrows and the respawn, none of Realism's knobs is measured (its docstring); the chase (AGGRO_S) and the monsters' AI come from v83 client sources (HeavenClient as RustMS ports it), not this game's own client.",
+  "Her HP regeneration isn't kept (for either character); the magician's misses aren't (too few to fit); her MP's extra +9 steps aren't explained.",
+  "Whether the game takes a portal in the air, and what happens when she falls below the map's lowest floor, aren't known: the world ends the run either way.",
+  "The pets' follow isn't read from the client: a coarse grid fit; the world's pets take 7% of her drops 45-150 units from her where live 23%.",
+  "The touch popup's 1 s (POPUP_S) is v83's, unconfirmed in this game; the exact finder's detection rates (NEAR_SEEN_1104) aren't measured live.",
+  "No-hit scenes: a verdict holds at the recorded phase, and most shifts don't keep it; 8 of the 11 scenes stay open (strict expected failures) even with the stance fixes for them switched on (GAMELAB_JUMP_ASIDE, GAMELAB_HOP_UP: off by default in play)."
+ ]
+}

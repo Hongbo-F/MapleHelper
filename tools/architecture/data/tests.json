@@ -1,0 +1,2164 @@
+{
+  "id": "tests",
+  "layer": "tests",
+  "title": "Tests and quality gates",
+  "tagline": "How every change is checked offline: pytest guard rails, test data, layer rules",
+  "summary": "About 3,800 pytest tests check the whole stack without the game: on made-up maps and frames, saved game frames, cuts of live telemetry and the offline simulator. A shared conftest makes every test offline and deterministic, a small module finds the big labelled frame sets that live outside git, and a code-reading test enforces the layer rules and keeps the elevated key player lean. Golden traces and harness tables sit beside the suite as the next gates.",
+  "details_md": "The suite is plain pytest over `tests/`: 145 `test_*.py` files and 3,818 collected tests on 2026-11-16, 64 of them marked `slow`. `python -m pytest` runs the rest on 8 pytest-xdist workers (pytest-xdist is the plugin that spreads tests over parallel worker processes) in about a minute (README.md); `python -m pytest --slow` runs everything, about 3 minutes, and is what the top-level README.md asks for before a commit. Nothing in the suite needs the game: no test may press a key, look at the screen or write into the live lab (`gamelab/lab`, the git-ignored folder of learned models, logs, recordings and the notes the running processes leave each other).\n\n**Three layers of protection.** First, `tests/conftest.py` sets environment variables at import, before gamelab loads: her stats as measured (`GAMELAB_FIXED_STATS`), the thief as the character, one OpenBLAS thread, the GPU off and no phone pushes. Second, its autouse `offline` fixture (autouse: pytest wraps every test in it without the test asking) refuses or redirects, for each test, every way out of the process the code knows of: key sends, window calls, screen capture (DXGI desktop duplication, Windows' screen-copy API, and the `mss` screenshot library), plans to the key player (the separate administrator process that presses the keys), paging the phone, starting the perception service, and every lab note (alarm, guard, stop, touches, stats, damage), plus a write guard on `gamelab/lab`. Third, simulator runs put their own fakes in place (`gamelab/sim/fakes.py`'s `patched`: fake clock, fake player, lab paths moved to a temp folder) and raise `SimViolation` if anything slips past.\n\n**Three kinds of test data.**\n\n- Small fixtures in git: `tests/fixtures` (235 files, about 36 MB): crops and frames of the game (capture, heading, touches, misses, deaths, the Lie Detector, Violetta), label files, and JSON cut from live telemetry and logs (e.g. `hunt_stays_2026-11-05.json`, `regular_live_2026-10-28.json`). Six folders carry a README saying where each frame came from.\n- Big labelled frame sets outside git, found by `tests/testdata.py` in `gamelab/lab/testdata` (or `GAMELAB_TESTDATA`). A missing set makes its tests fail, not skip, unless `GAMELAB_NO_TESTDATA=1`.\n- The game's own data (`gamedata/data`, not in git): real-map tests, including every simulator scenario on Tree Dungeon, skip without it.\n\n**Code-reading gates.** Several tests read the source rather than run it: `test_architecture.py` (layer imports, the elevated player's imports, one capturing process), `test_rate.py` (one perception rate, no other frames-a-second constant), `test_geometry.py` (nothing but the simulator assumes the 1920x1080 window), `test_testdata.py` (no test reads frames from a scratch folder or a pruned lab folder) and `test_review_pages.py` (no path tied to one PC).\n\n**The simulator in the suite.** `test_sim.py` runs every registered scenario and checks it shows what it's there for (`scenarios.unmet` empty), that runs are deterministic, and that a trip stepped as the hunt loop drives it gives the same trace. Many other files (test_harness, test_retreat, test_statcheck, test_target...) build small worlds or frozen scenes on Tree Dungeon's data. The golden traces, the exact record of what every scenario did (its key plans, log lines and results), are checked outside pytest with `python -m gamelab.sim.golden check`.\n\n**Shared helpers.** `tests/` has no `__init__.py`, so pytest puts it on `sys.path` and test files import each other's helpers: test_sim's made-up map (`tree`, `model`, `plat`, `KEYS`, `tap`, `still`), test_worldstate's `small_map` and `Drawn` eyes, test_danger's `build` and `HER`, test_attack's `PLAT`, `target` and `step_map`, test_navigation's `tree` and `by_y`, test_pasted's `frame` and `FRAMES`, test_fight's `EMPTY_MAP`, `_Eyes` and `hunter`, test_alarm's fake game. Besides `testdata.py` there is no separate helpers module.\n\n**The order to check a change** (gamelab/README.md, from 2026-10-28): targeted tests while working and the fast suite before a commit (the top-level README.md asks for `--slow` there: the two disagree); the goldens of the map worked on, on a pool (`golden check NAMES --jobs 2`); the smallest harness table that answers the question against master's cached baseline (`harness ab`); for a perception change, her recordings replayed and scored (`sim.replay`); and a reviewer's spot checks of the author's seeds.",
+  "groups": [
+    {
+      "id": "runner",
+      "title": "Running the suite safely",
+      "summary": "pytest's configuration, the worker count and --slow, and the autouse fixtures that keep every test away from the game and the live lab.",
+      "modules": [
+        "tests/conftest.py"
+      ]
+    },
+    {
+      "id": "test-data",
+      "title": "Test data outside git",
+      "summary": "Where the big labelled frame sets live, how they're found, and how a missing or lost set is reported.",
+      "modules": [
+        "tests/testdata.py"
+      ]
+    },
+    {
+      "id": "architecture",
+      "title": "Architecture rules",
+      "summary": "The code-reading test that keeps gamelab's layers importing downwards and the elevated player small.",
+      "modules": [
+        "tests/test_architecture.py"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "path": "tests/conftest.py",
+      "title": "The suite's guard rails (conftest)",
+      "tagline": "Makes every test offline, deterministic and harmless; runs the suite on 8 workers",
+      "summary": "pytest loads this file before any test. At import it fixes the environment (her measured stats, one OpenBLAS thread, GPU off, no phone pushes) before anything imports gamelab. Its hooks add `--slow`, pick the number of xdist workers and leave the slow tests out by default. Its autouse `offline` fixture stops every test from pressing a key, touching the game window, capturing the screen, sending a plan to the player, paging anyone or writing under the real `gamelab/lab`.",
+      "details_md": "**At import, before gamelab loads.** Five environment settings come first because gamelab reads them once, when it's first imported:\n\n- `GAMELAB_FIXED_STATS=1`: `motion.physics` works out her walk and jumps from her stats once at import. With this set it takes the measured defaults (`physics.FIXED_STATS`), not `config.toml`'s `[character]`. Before it (2026-10-20), setting SPEED 125 in the file failed 16 tests and changed every golden trace.\n- `GAMELAB_CHARACTER` is removed: the tests play the thief, whoever the shell names.\n- `OPENBLAS_NUM_THREADS=1` (unless set): with OpenBLAS's 24 threads a bare `import numpy` committed about 3 GB a process.\n- `GAMELAB_GPU=0` (unless set): the re-finds' GPU path stays off unless a test turns it on.\n- `GAMELAB_NO_PUSH=1`: `control.notify` never reads the lab's own push and mail files. On 2026-10-29 ~05:35 the suite in the main checkout texted the user a Lie Detector alert from a test's fake screen.\n\n**Hooks.** `pytest_addoption` adds `--slow`. `pytest_collection_modifyitems` deselects every item marked `slow` unless `--slow` is given (they are reported as deselected, not skipped). `pytest_xdist_auto_num_workers` answers pyproject's `-n auto`: 0 workers (one process) when every command-line argument is a file or a test inside one, since a worker takes about 4 s to start; otherwise 8, not one per core, because each worker commits about half a GB. pyproject.toml adds `--dist worksteal` (long tests handed to workers as they come free) and `-rfEs` (the summary lists failures, errors and every skip with its reason).\n\n**`offline` (autouse, every test).** It uses `monkeypatch` (pytest's fixture that replaces an attribute for one test and puts the original back afterwards), so everything is undone after the test, and a test that needs one of these replaces it with its own fake later, which wins. A refused call raises `AssertionError(\"<name> called in a test\")`.\n\n- Keys and windows: `maplehelper.win32.send_key` and `foreground_title`; 15 functions of `gamelab.window` (`bring_to_front`, `move_cursor`, `find_game`, `client_rect`, ...).\n- Capture: `capture.Dxgi` (desktop duplication) and `capture._open_mss` refused; `capture._SHARED` cleared so no grabber outlives its test.\n- The key player: `client.INBOX` / `OUTBOX` moved into the test's `tmp_path`; the Lie Detector alarm file (`ALARM`) moved in `paths`, `alarm`, `client` and `player`; `alarm.page` refused.\n- Lab notes: `paths.VITALS`, `HUNT`, `STOP_HUNT`, `PARK_NOTE`, `PARKED`, `GUARD`, `GUARD_MODE`, `TOUCHES`, `STATS`, `STAT_WINDOW`, `STAT_TEMPLATES`, `DAMAGE` (and `Files.damage`) all moved to `tmp_path`; `guard.LOOP_STOP` too (the grind-loop scripts' stop file, outside the lab at `D:/MapleHelper-scratch/mageq/empty/STOP`, so the write guard below would not catch it); `character.CHOSEN` to `tmp_path/character.json` and `character._ACTIVE` copied so who plays is the test's own.\n- Processes and mutexes: `service._start_detached` refused (no perception service started); the window-size fix's `WINDOW_TRIES` file and `LOCK` mutex, and the rolling recorder's `MUTEX`, renamed per process id and `tmp_path` so parallel workers never share one.\n- `damage.THREADED = False`: her damage fits run at once, the same every run.\n- `locate.build` wrapped by `_own_lab`: a lab folder under the live lab becomes the same folder under `tmp_path/lab` (2026-11-03: 7 tests failed only in the main checkout because the live lab had her plate model and Tree Dungeon's art cached).\n- Finally `sim.fakes._write_guards(paths.LAB)`: `open`, `io.open`, `os.open` in a write mode, and `os.replace`, `rename`, `remove`, `unlink`, `mkdir`, `rmdir`, `utime` raise `SimViolation` for any path under `gamelab/lab`. Reading the lab stays allowed.\n\n**`her_profile_speed` (autouse).** After each test it calls `motion.physics.reset()`, putting her planner's walk and climb back to her profile's SPEED, so a test that set another (`physics.set_speed`, a hunter that read her stat window) doesn't leak it into the next.\n\n**`config_data`.** A deep copy of `BASE_CONFIG`, a fixed stand-in for `config.toml`, so editing her real keys never breaks a test. Used by `test_config`, `test_controller` and `test_character`.",
+      "lines": 163,
+      "key_items": [
+        {
+          "name": "offline",
+          "kind": "function",
+          "line": 71,
+          "signature": "@pytest.fixture(autouse=True)\ndef offline(monkeypatch, tmp_path)",
+          "summary": "Runs around every test: refuses keys, windows, screen capture and paging, moves every lab file a test could touch into its tmp_path, and installs the write guard on gamelab/lab.",
+          "details_md": "Refusals raise `AssertionError(\"<what> called in a test\")`. Redirections cover the inbox and outbox (plans go nowhere a player looks), the alarm file in four modules (a lab copied while the alarm was up once had every test plan refused, 2026-10-24), the guard's and stop's notes, her touches, stats, stat window calibration and damage, and who plays. Named mutexes get `-test-<pid>-<tmp_path.name>` suffixes."
+        },
+        {
+          "name": "pytest_xdist_auto_num_workers",
+          "kind": "function",
+          "line": 34,
+          "signature": "def pytest_xdist_auto_num_workers(config)",
+          "summary": "How many xdist workers `-n auto` means: 0 when the run names only files or tests, else 8.",
+          "details_md": "`all(Path(arg.split('::')[0]).is_file() for arg in config.args)`. A folder or the whole suite gets 8; `-n 8` or `-n 0` on the command line says it outright."
+        },
+        {
+          "name": "pytest_collection_modifyitems",
+          "kind": "function",
+          "line": 41,
+          "signature": "def pytest_collection_modifyitems(config, items)",
+          "summary": "Without `--slow`, removes every item marked `slow` and reports them as deselected.",
+          "details_md": "On 2026-11-16 that's 64 of 3,818 collected tests (test_no_hit_scenes 23, test_sim 20, test_probe 13, test_retreat 3, test_stat_window 2, test_records, test_replay and test_sim_magic 1 each)."
+        },
+        {
+          "name": "pytest_addoption",
+          "kind": "function",
+          "line": 29,
+          "signature": "def pytest_addoption(parser)",
+          "summary": "Adds the `--slow` flag: also run the tests marked slow, for before a commit."
+        },
+        {
+          "name": "GAMELAB_FIXED_STATS",
+          "kind": "constant",
+          "line": 10,
+          "signature": "os.environ[\"GAMELAB_FIXED_STATS\"] = \"1\"",
+          "summary": "Her stats as measured, not config.toml's, set before anything imports gamelab.",
+          "details_md": "The goldens and the harness restart themselves with the same setting, so tests, traces and harness tables all plan with the same walk and jumps."
+        },
+        {
+          "name": "GAMELAB_NO_PUSH",
+          "kind": "constant",
+          "line": 16,
+          "signature": "os.environ[\"GAMELAB_NO_PUSH\"] = \"1\"",
+          "summary": "No Lie Detector push or text from the lab's own Bark and mail files (control.notify.NO_PUSH_ENV)."
+        },
+        {
+          "name": "OPENBLAS_NUM_THREADS",
+          "kind": "constant",
+          "line": 12,
+          "signature": "os.environ.setdefault(\"OPENBLAS_NUM_THREADS\", \"1\")",
+          "summary": "One OpenBLAS thread, so each worker doesn't commit about 3 GB when numpy loads."
+        },
+        {
+          "name": "GAMELAB_GPU",
+          "kind": "constant",
+          "line": 13,
+          "signature": "os.environ.setdefault(\"GAMELAB_GPU\", \"0\")",
+          "summary": "The re-finds' GPU matching off unless a test turns it on, whatever the lab's GPU file says."
+        },
+        {
+          "name": "BASE_CONFIG",
+          "kind": "constant",
+          "line": 19,
+          "signature": "BASE_CONFIG = {...}",
+          "summary": "A fixed stand-in for config.toml: window title, keys, hotkeys, control keys and the throw gap."
+        },
+        {
+          "name": "config_data",
+          "kind": "function",
+          "line": 52,
+          "signature": "@pytest.fixture\ndef config_data()",
+          "summary": "A fresh deep copy of BASE_CONFIG for a test to edit."
+        },
+        {
+          "name": "_own_lab",
+          "kind": "function",
+          "line": 56,
+          "signature": "def _own_lab(build, live: Path, own: Path)",
+          "summary": "Wraps localization.locate.build so a lab folder under the live lab is read from the test's own lab instead.",
+          "details_md": "Paths are compared with `os.path.normcase(os.path.abspath(...))`; anything equal to or under `live` is rebased onto `own` with `os.path.relpath`. Tests that want a locator save the models in their own folder and are untouched."
+        },
+        {
+          "name": "her_profile_speed",
+          "kind": "function",
+          "line": 155,
+          "signature": "@pytest.fixture(autouse=True)\ndef her_profile_speed()",
+          "summary": "After every test, `physics.reset()` puts her walk and climb back to her profile's SPEED."
+        }
+      ],
+      "inputs": [
+        "pytest's command line (the paths named, `--slow`, `-n`)",
+        "pyproject.toml's `[tool.pytest.ini_options]`: `-n auto --dist worksteal -rfEs`, the `slow` marker, `testpaths = [\"tests\"]`, `pythonpath = [\".\"]`",
+        "each test's `monkeypatch` and `tmp_path`"
+      ],
+      "outputs": [
+        "an environment where gamelab plans with her measured stats and never pushes to the phone",
+        "the worker count for pytest-xdist and the deselected slow items",
+        "per test: refused or redirected game, window, capture, player and lab entry points; the `config_data` fixture"
+      ],
+      "uses": [
+        "maplehelper/win32.py",
+        "gamelab/window.py",
+        "gamelab/capture.py",
+        "gamelab/paths.py",
+        "gamelab/control/alarm.py",
+        "gamelab/control/client.py",
+        "gamelab/control/player.py",
+        "gamelab/sim/fakes.py",
+        "gamelab/behavior/guard.py",
+        "gamelab/localization/service.py",
+        "gamelab/control/window_size.py",
+        "gamelab/control/rolling.py",
+        "gamelab/character.py",
+        "gamelab/motion/physics.py",
+        "gamelab/behavior/damage.py",
+        "gamelab/localization/locate.py"
+      ],
+      "files_io": [
+        {
+          "path": "<tmp_path>/inbox, <tmp_path>/outbox",
+          "mode": "read-write",
+          "what": "where a test's key plans go instead of lab/inbox and lab/outbox"
+        },
+        {
+          "path": "<tmp_path>/ALARM.json and the other lab notes",
+          "mode": "read-write",
+          "what": "the test's own alarm, guard, stop, touches, stats, stat window and damage files"
+        },
+        {
+          "path": "gamelab/lab/",
+          "mode": "read",
+          "what": "may be read; any write under it raises SimViolation (the write guards)"
+        }
+      ],
+      "concurrency": "Runs inside each pytest-xdist worker process (8 for the whole suite or a folder, none when files or tests are named). Named Windows mutexes are renamed per worker process and test so workers never collide.",
+      "tunables": [
+        {
+          "name": "workers (pytest_xdist_auto_num_workers)",
+          "value": "8, or 0 when only files/tests are named",
+          "meaning": "8 because each worker commits about half a GB; 0 because a worker takes about 4 s to start"
+        },
+        {
+          "name": "addopts (pyproject.toml)",
+          "value": "-n auto --dist worksteal -rfEs",
+          "meaning": "xdist on, long tests handed out as workers free up, every skip listed with its reason"
+        },
+        {
+          "name": "--slow",
+          "value": "off",
+          "meaning": "the 64 tests marked slow run only with it (README: about 3 minutes in all, about 1 without)"
+        },
+        {
+          "name": "OPENBLAS_NUM_THREADS",
+          "value": "1",
+          "meaning": "keeps numpy's per-process commit small"
+        },
+        {
+          "name": "GAMELAB_GPU",
+          "value": "0",
+          "meaning": "GPU re-finds off by default in tests"
+        },
+        {
+          "name": "BASE_CONFIG timing.throw_gap",
+          "value": "650",
+          "meaning": "the fixed throw gap the maplehelper tests' config carries"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-19",
+          "what": "The autouse `offline` fixture and the simulator's write guards arrive with the split into layers.",
+          "why": "No test may reach the game, the player or the real lab (commit bd88d67d)."
+        },
+        {
+          "date": "2026-10-20",
+          "what": "GAMELAB_FIXED_STATS set before gamelab is imported.",
+          "why": "Editing config.toml's [character] for her gear (SPEED 125) failed 16 tests and changed every golden trace."
+        },
+        {
+          "date": "2026-10-24",
+          "what": "8 xdist workers, slow tests only with --slow.",
+          "why": "The suite took about 10 minutes in one process; about 40 s this way (commit fddb2db3)."
+        },
+        {
+          "date": "2026-10-24",
+          "what": "OPENBLAS_NUM_THREADS=1 unless set.",
+          "why": "With 24 threads a numpy import committed about 3 GB; the PC ran out of commit charge and the player's Lie Detector check failed."
+        },
+        {
+          "date": "2026-10-24",
+          "what": "The alarm file moved into tmp_path.",
+          "why": "A lab copied while the alarm was up had every plan a test sent refused."
+        },
+        {
+          "date": "2026-10-29",
+          "what": "GAMELAB_NO_PUSH set.",
+          "why": "The suite in the main checkout texted the user a Lie Detector alert from a test's fake screen (~05:35)."
+        },
+        {
+          "date": "2026-11-02",
+          "what": "her_profile_speed resets physics after each test.",
+          "why": "Her walk and climb now come from her stat window's SPEED; a test that sets another must not leave it for the next."
+        },
+        {
+          "date": "2026-11-03",
+          "what": "locate.build wrapped by _own_lab.",
+          "why": "7 tests (test_framecheck, test_bench, test_window_size) failed in the main checkout only: the live lab's plate model and map art made a locator place her where the frames expect her dot and tag."
+        },
+        {
+          "date": "2026-11-05",
+          "what": "What the phone's been told, the running hunt's note, `gamelab stop`'s request and the guard's notes (VITALS, HUNT, STOP_HUNT, PARK_NOTE, PARKED, GUARD, GUARD_MODE, guard.LOOP_STOP) moved too (commit b3db4874).",
+          "why": "A suite in the main checkout read them live, a hunt's stop among them."
+        }
+      ],
+      "gotchas": [
+        "The environment lines only work because conftest is imported before any test imports gamelab; setting GAMELAB_FIXED_STATS later in a test changes nothing already computed.",
+        "Names imported by value (`from ..paths import ALARM`) are copies, so the fixture patches each module holding one (ALARM in paths, alarm, client and player). A new module that imports a lab path by name isn't redirected unless added here; the write guard is the backstop.",
+        "The write guard raises `SimViolation` with the simulator's wording (\"during a simulated run\") even in a plain test.",
+        "Running one file or test uses no workers; pass `-n 8` to spread it anyway.",
+        "Slow tests are deselected, not skipped, so they don't appear in the `-rfEs` skip list.",
+        "Only `gamelab/lab` has the write guard: a file elsewhere (like `guard.LOOP_STOP` in the scratch folder) is safe only because `offline` redirects it by name."
+      ],
+      "tests": [
+        "tests/test_config.py",
+        "tests/test_controller.py",
+        "tests/test_character.py",
+        "tests/test_notify.py",
+        "tests/test_window_size.py",
+        "tests/test_sim.py"
+      ]
+    },
+    {
+      "path": "tests/testdata.py",
+      "title": "Test data outside git",
+      "tagline": "Finds big labelled frame sets outside git; a missing set fails loudly, never silently",
+      "summary": "Saved game frames too big for git live in `gamelab/lab/testdata/<set>`, their hand-made labels in `tests/fixtures`. This module lists the sets, finds them (an environment variable, this checkout, then the main checkout of a git worktree), and makes a test whose set is missing fail saying where it looked. `GAMELAB_NO_TESTDATA=1` turns those failures into skips, and a set known to be lost skips with \"NEEDS A NEW CAPTURE\".",
+      "details_md": "**Why it exists.** Until 2026-10-28 tests read labelled frames from `D:/MapleHelper-scratch`. A cleanup that day deleted them, and the 11 tests on them skipped without a word. The labelled HP-bar clips went from `lab/recent`, which the rolling recorder prunes to its newest saves (`rolling.RECENT_KEEP_BYTES`: 20 GB today, 5 GB until 2026-10-29); `lab/lie_detector` is pruned the same way (`lie_recorder.prune`). So: sets live in `gamelab/lab/testdata/<set>` (git-ignored like the rest of the lab), a missing set is a failure, and `tests/test_testdata.py` fails if any test file names a scratch folder or one of the pruned lab folders.\n\n**The sets.**\n\n| Set | What | Labels (tests/fixtures) |\n|---|---|---|\n| `tree_dungeon_native` | 24 lossless 1366x768 frames of Tree Dungeon (map 10002073), saved 2026-10-28 19:17-19:19 on a crowded channel, 3 on each of platforms 13, 16, 18, 20, 21, 23, 25, 30 (`td_p<platform>_<i>.png`) | `tree_dungeon_native_monsters.json`: every monster (118), player and pet; no drops |\n| `tree_dungeon_drops` | 7 frames of the 2026-10-24 hunts with drops lying (`hp0_*.png` from lab/shots) | `tree_dungeon_drops.json`: 45 drop sightings |\n\nLost and to be captured again: `tree_dungeon_clips`, 609 JPEG frames of her Tree Dungeon hunts of 2026-10-24/25 with labelled HP bars at 1366x768, pruned from lab/recent. The first map's `hp_bars_1920x1080` and West Rocky Mountain II's sets are no test's since 2026-10-31.\n\n**Lookup.** `roots()` is `GAMELAB_TESTDATA` split on `os.pathsep` if set; otherwise `<repo>/gamelab/lab/testdata`, then the same folder in the main checkout when this checkout is a git worktree (a worktree's lab is a copy without the sets). `main_checkout()` reads the worktree's `.git` file (`gitdir: <main>/.git/worktrees/<name>`), follows git's `commondir` pointer to the shared `.git`, and returns its parent. `find(name, files)` returns the first root holding the set's folder with every named file.\n\n**Failing loudly.** `folder(name, files, what)` returns the folder or calls `missing()` with every place it looked, each marked \"(not there)\" or \"(without a.png, b.png, c.png ...)\" (the first 3 missing files). `missing(why)` does `pytest.fail(\"TEST DATA MISSING: ...\", pytrace=False)`, naming both environment variables, unless `GAMELAB_NO_TESTDATA` is set to anything but \"\" or \"0\", when it skips with \"no test data (...)\". `labelled(name)` reads the set's label file's `\"frames\"` and requires every frame it names. `lost(...)` is for a set whose frames are gone: its folder if they're back under the same names, else a skip saying \"NEEDS A NEW CAPTURE\" and how to make one (new labels too: the old ones fit only the lost frames).\n\n**Who reads it.** test_bench, test_gates, test_loot, test_minimap_picture, test_perception (both sets, and `lost` for the HP-bar clips) and test_search_c. The `-rfEs` in pyproject.toml puts every such skip and its reason in the run's summary.",
+      "lines": 136,
+      "key_items": [
+        {
+          "name": "folder",
+          "kind": "function",
+          "line": 91,
+          "signature": "def folder(name: str, files=(), what: str = \"\") -> Path",
+          "summary": "A set's folder with every named file in it; otherwise the test fails (or skips) listing every place it looked."
+        },
+        {
+          "name": "labelled",
+          "kind": "function",
+          "line": 107,
+          "signature": "def labelled(name: str) -> tuple[dict, dict]",
+          "summary": "A set's labels by frame from its fixture file, and the path of every frame they name; the test fails without them."
+        },
+        {
+          "name": "missing",
+          "kind": "function",
+          "line": 115,
+          "signature": "def missing(why: str)",
+          "summary": "Fails with \"TEST DATA MISSING: ...\" (no traceback), or skips when GAMELAB_NO_TESTDATA is set to something other than empty or 0."
+        },
+        {
+          "name": "lost",
+          "kind": "function",
+          "line": 126,
+          "signature": "def lost(name: str, files=(), what: str = \"\", labels: str = \"\", gone: str = SCRATCH_CLEANUP) -> Path",
+          "summary": "For a set whose frames were lost: its folder if they're back, else a skip saying it NEEDS A NEW CAPTURE and how."
+        },
+        {
+          "name": "roots",
+          "kind": "function",
+          "line": 71,
+          "signature": "def roots() -> list[Path]",
+          "summary": "The folders looked in, in order: GAMELAB_TESTDATA's, else this checkout's gamelab/lab/testdata then the main checkout's."
+        },
+        {
+          "name": "find",
+          "kind": "function",
+          "line": 82,
+          "signature": "def find(name: str, files=()) -> Path | None",
+          "summary": "The first root whose `name` folder holds every one of `files`, else None."
+        },
+        {
+          "name": "main_checkout",
+          "kind": "function",
+          "line": 47,
+          "signature": "def main_checkout(repo: Path = REPO) -> Path | None",
+          "summary": "The main checkout of a git worktree, read off its `.git` file and git's `commondir`; None for the main checkout itself."
+        },
+        {
+          "name": "LABELS",
+          "kind": "constant",
+          "line": 42,
+          "signature": "LABELS = {TREE_DUNGEON: \"tree_dungeon_native_monsters.json\", TREE_DUNGEON_DROPS: \"tree_dungeon_drops.json\"}",
+          "summary": "Which file under tests/fixtures holds each set's labels."
+        },
+        {
+          "name": "WHAT",
+          "kind": "constant",
+          "line": 43,
+          "signature": "WHAT = {TREE_DUNGEON: ..., TREE_DUNGEON_DROPS: ...}",
+          "summary": "Each set described in words, for the failure message."
+        },
+        {
+          "name": "ENV",
+          "kind": "constant",
+          "line": 33,
+          "signature": "ENV = \"GAMELAB_TESTDATA\"",
+          "summary": "The environment variable naming the folder (or os.pathsep-separated folders) that hold the sets."
+        },
+        {
+          "name": "OFF",
+          "kind": "constant",
+          "line": 34,
+          "signature": "OFF = \"GAMELAB_NO_TESTDATA\"",
+          "summary": "Set to 1 on a computer without the sets: their tests skip instead of failing."
+        },
+        {
+          "name": "LAB_TESTDATA",
+          "kind": "constant",
+          "line": 36,
+          "signature": "LAB_TESTDATA = Path(\"gamelab\") / \"lab\" / \"testdata\"",
+          "summary": "Where the sets live inside a checkout (git-ignored)."
+        },
+        {
+          "name": "SCRATCH_CLEANUP",
+          "kind": "constant",
+          "line": 123,
+          "signature": "SCRATCH_CLEANUP = \"deleted from D:/MapleHelper-scratch on 2026-10-28\"",
+          "summary": "The default 'how it was lost' for `lost`'s message."
+        }
+      ],
+      "inputs": [
+        "GAMELAB_TESTDATA and GAMELAB_NO_TESTDATA from the environment",
+        "the label files in tests/fixtures (in git)",
+        "the frame folders in gamelab/lab/testdata (not in git), here or in the main checkout",
+        "a worktree's .git file and git's commondir pointer"
+      ],
+      "outputs": [
+        "folder paths and {frame: path} maps for the tests that read frames",
+        "pytest failures (\"TEST DATA MISSING\") or skips (\"no test data\", \"NEEDS A NEW CAPTURE\") with the reason"
+      ],
+      "uses": [],
+      "files_io": [
+        {
+          "path": "gamelab/lab/testdata/<set>/",
+          "mode": "read",
+          "what": "the saved frames of each set"
+        },
+        {
+          "path": "tests/fixtures/tree_dungeon_native_monsters.json",
+          "mode": "read",
+          "what": "labels of the 24 Tree Dungeon frames"
+        },
+        {
+          "path": "tests/fixtures/tree_dungeon_drops.json",
+          "mode": "read",
+          "what": "labels of the 7 frames with drops"
+        },
+        {
+          "path": ".git (file, in a worktree) and <gitdir>/commondir",
+          "mode": "read",
+          "what": "to find the main checkout"
+        }
+      ],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "ENV",
+          "value": "GAMELAB_TESTDATA",
+          "meaning": "folders to look in first (os.pathsep-separated)"
+        },
+        {
+          "name": "OFF",
+          "value": "GAMELAB_NO_TESTDATA",
+          "meaning": "anything but empty or 0 skips instead of failing"
+        },
+        {
+          "name": "LAB_TESTDATA",
+          "value": "gamelab/lab/testdata",
+          "meaning": "the default home of the sets in each checkout"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-28",
+          "what": "Test data out of scratch: sets in gamelab/lab/testdata, a missing set fails, GAMELAB_NO_TESTDATA=1 skips, lost sets say they need a new capture.",
+          "why": "The D: cleanup deleted the labelled frames tests read from D:/MapleHelper-scratch, and those 11 tests skipped without a word."
+        },
+        {
+          "date": "2026-10-28",
+          "what": "Tree Dungeon's tests moved to 24 new lossless frames labelled offline (tree_dungeon_native).",
+          "why": "The old frames were gone. The new ones were labelled by eye on gridded tiles and zooms, checked by fitting each kind's sprites around each label, and her platform taken from the map's footholds (commit 15c224fc: 118 monsters, 75 player and 74 pet sightings)."
+        },
+        {
+          "date": "2026-10-31",
+          "what": "The first map's and West Rocky Mountain II's sets no longer used.",
+          "why": "Those maps' tests went: the bot plays only Tree Dungeon."
+        }
+      ],
+      "gotchas": [
+        "In a git worktree the lab is a copy without the sets, so the lookup falls back to the main checkout's gamelab/lab/testdata.",
+        "`GAMELAB_NO_TESTDATA=0` counts as unset: the tests still fail.",
+        "Never point a test at lab/recent, lab/lie_detector or lab/alarm_clips: the recorders prune them, and test_testdata fails on such a path (comments and docstrings may mention them).",
+        "A test's labels are tied to its frames: a lost set needs new labels as well as new frames.",
+        "The module's docstring still says lab/recent is pruned to its newest 5 GB; `rolling.RECENT_KEEP_BYTES` has been 20 GB since 2026-10-29."
+      ],
+      "tests": [
+        "tests/test_testdata.py",
+        "tests/test_bench.py",
+        "tests/test_gates.py",
+        "tests/test_loot.py",
+        "tests/test_minimap_picture.py",
+        "tests/test_perception.py",
+        "tests/test_search_c.py"
+      ]
+    },
+    {
+      "path": "tests/test_architecture.py",
+      "title": "The architecture rules",
+      "tagline": "Reads every gamelab import to keep the layers pointing downwards",
+      "summary": "A code-reading test: it parses every module under gamelab's layer packages and fails if one imports a layer above it. It also checks that the character profiles are data only, that the elevated key player loads none of the hunting stack, that only the perception service captures the game, and that no command has its own look flags.",
+      "details_md": "**The rule.** gamelab is layered like a self-driving stack, and a layer imports only the layers below it plus the shared modules. `ALLOWED` is the whole policy:\n\n| Layer | May import (besides itself and the shared modules) |\n|---|---|\n| perception | nothing |\n| localization | perception |\n| motion | localization |\n| attack | perception, localization, motion |\n| control | perception, localization, motion |\n| behavior | perception, localization, motion, attack, control |\n| ui | localization, motion, attack |\n| analysis | perception, motion, control |\n| sim | everything but ui |\n\n`SHARED` are gamelab's top-level modules every layer may use: capture, character, classes, directions, gcstats, native, paths, screen, telemetry, window.\n\n**How imports are read.** `gamelab_imports(path)` parses the file with `ast` and walks every node, so imports inside functions count too. A relative import is resolved against the file's own package (`from ..motion import x` in `gamelab/attack/` becomes `gamelab.motion`). A `from` import with nothing after the dots counts each imported name as a module (`from .. import paths, native` in `gamelab/attack/` gives `gamelab.paths` and `gamelab.native`). Only the second part of the dotted name is kept, which is the layer or shared module.\n\n**The six tests.**\n\n1. `test_layers_only_import_downwards`: one test per `.py` file under the nine layer packages (`LAYER_FILES`: 159 files on 2026-11-16), each asserting its imports minus `SHARED` and its own layer are within `ALLOWED`.\n2. `test_every_module_belongs_to_a_layer`: every top-level `gamelab/*.py` except `__init__` and `__main__` must be in `SHARED`.\n3. `test_her_profiles_are_data_only`: `character.py` and `classes/*.py` import nothing of gamelab but `paths`, `character` and `classes`, so any layer may read them.\n4. `test_the_elevated_player_loads_only_what_it_needs`: a fresh Python imports `gamelab.__main__`, calls `build_parser()`, imports the player, the alarm and `perception.lie_detector`, and prints the loaded `gamelab*`, `gamedata*` and `tkinter*` modules. None may be from behavior, motion, localization, attack, ui, sim, gamedata or tkinter, and `gamelab.native` (it loads a DLL built from the tree) must not be loaded. The player runs as administrator and loads its code once, so it should carry as little as possible.\n5. `test_only_the_perception_service_captures_the_game`: a plain text search of every gamelab file; `ScreenFrames(` may appear only in `localization/service.py` and `capture.shared()` only in `perception/frames.py`. One process holds the screen copy because a third DXGI duplication failed with 0x887A0022 when `watch`, the pet's babysitter and a hunt each held one (the test's docstring). The offline tools that time or read captures (bench-capture, bench-look --live) make their own `capture.Grabber` and don't trip it.\n6. `test_no_command_looks_for_itself`: no subcommand of `build_parser()` has `--feed`, `--no-feed`, `--sweep` or `--no-sweep` (gone 2026-10-25: every look is the perception service's).\n\n**What the rule forces elsewhere.** Control may not import attack, so the navigator asks behavior through a callback (docs/hunt-modes.md). Analysis may import neither localization nor sim, which is why the recordings' replay kit lives in `gamelab/sim` (README, Replaying the recordings).",
+      "lines": 115,
+      "key_items": [
+        {
+          "name": "ALLOWED",
+          "kind": "constant",
+          "line": 17,
+          "signature": "ALLOWED = {\"perception\": set(), \"localization\": {\"perception\"}, ...}",
+          "summary": "Each layer and the gamelab layers it may import, besides itself and SHARED: the whole layering policy in one table."
+        },
+        {
+          "name": "test_layers_only_import_downwards",
+          "kind": "function",
+          "line": 58,
+          "signature": "@pytest.mark.parametrize(\"layer,path\", LAYER_FILES, ...)\ndef test_layers_only_import_downwards(layer, path)",
+          "summary": "One test per layer file: its gamelab imports, minus SHARED and its own layer, must be within ALLOWED[layer]."
+        },
+        {
+          "name": "gamelab_imports",
+          "kind": "function",
+          "line": 30,
+          "signature": "def gamelab_imports(path: Path) -> set[str]",
+          "summary": "The gamelab packages and top-level modules a file imports, relative or absolute, found by walking its AST.",
+          "details_md": "For `ImportFrom` with a level, the base is the file's package minus `level - 1` parts; absolute `gamelab.*` imports are taken as they are; other packages are ignored. Plain `import gamelab.x.y` gives `x`."
+        },
+        {
+          "name": "test_the_elevated_player_loads_only_what_it_needs",
+          "kind": "function",
+          "line": 76,
+          "signature": "def test_the_elevated_player_loads_only_what_it_needs()",
+          "summary": "Imports the player's code path in a fresh subprocess and fails if any of the hunting stack, gamedata, tkinter or gamelab.native came along."
+        },
+        {
+          "name": "test_only_the_perception_service_captures_the_game",
+          "kind": "function",
+          "line": 92,
+          "signature": "def test_only_the_perception_service_captures_the_game()",
+          "summary": "Only localization/service.py makes ScreenFrames and only perception/frames.py calls capture.shared(): one process holds the screen duplication."
+        },
+        {
+          "name": "test_her_profiles_are_data_only",
+          "kind": "function",
+          "line": 68,
+          "signature": "def test_her_profiles_are_data_only()",
+          "summary": "character.py and classes/*.py import only paths, character and classes."
+        },
+        {
+          "name": "test_every_module_belongs_to_a_layer",
+          "kind": "function",
+          "line": 63,
+          "signature": "def test_every_module_belongs_to_a_layer()",
+          "summary": "No top-level gamelab module outside SHARED (besides __init__ and __main__)."
+        },
+        {
+          "name": "test_no_command_looks_for_itself",
+          "kind": "function",
+          "line": 108,
+          "signature": "def test_no_command_looks_for_itself()",
+          "summary": "No subcommand offers --feed/--no-feed/--sweep/--no-sweep: every command's looks are the perception service's."
+        },
+        {
+          "name": "SHARED",
+          "kind": "constant",
+          "line": 14,
+          "signature": "SHARED = {\"capture\", \"character\", \"classes\", \"directions\", \"gcstats\", \"native\", \"paths\", \"screen\", \"telemetry\", \"window\"}",
+          "summary": "gamelab's shared top-level modules, importable by every layer."
+        },
+        {
+          "name": "LAYER_FILES",
+          "kind": "constant",
+          "line": 54,
+          "signature": "LAYER_FILES = [(layer, f) for layer in ALLOWED for f in sorted((PKG / layer).rglob(\"*.py\"))]",
+          "summary": "Every Python file of every layer package, recursively: the parameters of the import test."
+        }
+      ],
+      "inputs": [
+        "the source text of every .py file under gamelab/",
+        "gamelab.__main__.build_parser()'s subcommands and their flags",
+        "the module list of a fresh Python process that imports the player's code path"
+      ],
+      "outputs": [
+        "pass/fail per layer file (164 collected tests in all on 2026-11-16)",
+        "failure messages naming the file and the layers it shouldn't import"
+      ],
+      "uses": [
+        "gamelab/__main__.py",
+        "gamelab/control/player.py",
+        "gamelab/control/alarm.py",
+        "gamelab/perception/lie_detector.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamelab/**/*.py",
+          "mode": "read",
+          "what": "parsed for imports, and searched as text for ScreenFrames( and capture.shared()"
+        }
+      ],
+      "concurrency": "One child process (`sys.executable -c ...`, run in the repository root) for the elevated-player import check.",
+      "tunables": [
+        {
+          "name": "ALLOWED",
+          "value": "9 layers (see the table)",
+          "meaning": "the layering policy"
+        },
+        {
+          "name": "SHARED",
+          "value": "10 modules",
+          "meaning": "what every layer may import"
+        },
+        {
+          "name": "stack prefixes",
+          "value": "gamelab.behavior, .motion, .localization, .attack, .ui, .sim, gamedata, tkinter",
+          "meaning": "must not be loaded by the elevated player's imports"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-19",
+          "what": "gamelab split into layers like a self-driving stack; the import test and the elevated player's import test added.",
+          "why": "The flat modules had grown (hunt.py alone was 1,276 lines); the player runs elevated and should load as little as before."
+        },
+        {
+          "date": "2026-10-20",
+          "what": "capture and native join SHARED; analysis may import motion; the elevated player must never load gamelab.native.",
+          "why": "Screen capture became one shared grabber (gamelab/capture.py). The C pieces moved out of perception into the shared gamelab/native.py because motion may not import perception, and native loads a DLL built from the tree. analysis sits above control, which imports motion, and physics_check replays recordings through the movement engine."
+        },
+        {
+          "date": "2026-10-25",
+          "what": "Only the perception service captures the game; --feed/--sweep flags gone.",
+          "why": "Every look is the service's; a third DXGI duplication failed with 0x887A0022 when several commands each held one."
+        },
+        {
+          "date": "2026-10-26",
+          "what": "gcstats added to SHARED.",
+          "why": "gcstats.py was new and shared: Python's garbage collections counted and timed per reader, for the service and the commands that record (the writes-off-the-loops work)."
+        },
+        {
+          "date": "2026-10-27",
+          "what": "character and classes checked to be data only.",
+          "why": "Every layer may read her profile (localization's trackers take its Shape)."
+        }
+      ],
+      "gotchas": [
+        "Imports inside functions count: a lazy import can't dodge the rule.",
+        "The capture check is a plain substring search, so even a comment or docstring writing `ScreenFrames(` or `capture.shared()` in another file fails it.",
+        "motion may import only localization (not perception directly), and control may not import attack: the navigator reaches behavior through a callback.",
+        "analysis may not import localization or sim, so code that replays recordings through perception belongs in sim.",
+        "The elevated-player check runs in a subprocess, so it sees real import side effects, not this test process's already-loaded modules.",
+        "Only the nine layer packages are scanned. `gamelab/__main__.py` and the shared modules are not: `__main__` imports analysis, control and perception at the top and every other layer inside its command functions, which is why the subprocess test, not the import rule, keeps the elevated player lean."
+      ],
+      "tests": [
+        "tests/test_architecture.py"
+      ]
+    }
+  ],
+  "data_types": [
+    {
+      "name": "BASE_CONFIG",
+      "module": "tests/conftest.py",
+      "line": 19,
+      "summary": "The tests' fixed stand-in for config.toml, handed out as a deep copy by the `config_data` fixture to test_config, test_controller and test_character, which parse it with `maplehelper.config.parse`.",
+      "fields": [
+        {
+          "name": "game_window_title",
+          "type": "str",
+          "meaning": "\"MapleStory\""
+        },
+        {
+          "name": "keys",
+          "type": "dict",
+          "meaning": "left, right, jump alt, attack ctrl, lucky_seven shift"
+        },
+        {
+          "name": "hotkeys",
+          "type": "dict",
+          "meaning": "jump_throw f1, back_off f2, hop_back f3, jump_back_shot f5"
+        },
+        {
+          "name": "control",
+          "type": "dict",
+          "meaning": "abort esc, slow_mode f12"
+        },
+        {
+          "name": "timing",
+          "type": "dict",
+          "meaning": "throw_gap 650"
+        }
+      ]
+    },
+    {
+      "name": "LABELS",
+      "module": "tests/testdata.py",
+      "line": 42,
+      "summary": "Maps each test-data set to its label file in tests/fixtures. Each label file is a JSON record with `about` (how it was made) and `frames` (frame file name -> what's on it); `labelled()` returns those `frames` and the frames' paths.",
+      "fields": [
+        {
+          "name": "tree_dungeon_native: frames[f].her, her_tag, her_platform, camera",
+          "type": "list/int",
+          "meaning": "her feet and name tag in screen px, the platform under her (null in the air), the map-to-screen camera"
+        },
+        {
+          "name": "tree_dungeon_native: frames[f].monsters[]",
+          "type": "list[dict]",
+          "meaning": "kind, x, y (feet), facing, state (normal, hit, spawning, dying, frozen), hidden/hidden_by, visible_rows, frame and fit of the best sprite, certain, platform, note"
+        },
+        {
+          "name": "tree_dungeon_native: frames[f].players[], pets[]",
+          "type": "list[dict]",
+          "meaning": "name, feet, tag (null where hidden), owner for pets; none of them is a monster"
+        },
+        {
+          "name": "tree_dungeon_drops: frames[f][]",
+          "type": "list[dict]",
+          "meaning": "kind, x, y of each drop's picture centre; coin for mesos; optional where it may or may not be found"
+        }
+      ]
+    },
+    {
+      "name": "ALLOWED",
+      "module": "tests/test_architecture.py",
+      "line": 17,
+      "summary": "The layering policy as data: layer package name -> the set of other gamelab layers it may import. Read only by the import test; the README's layer table says the same in words.",
+      "fields": [
+        {
+          "name": "perception",
+          "type": "set[str]",
+          "meaning": "empty: pixels only"
+        },
+        {
+          "name": "localization",
+          "type": "set[str]",
+          "meaning": "perception"
+        },
+        {
+          "name": "motion",
+          "type": "set[str]",
+          "meaning": "localization"
+        },
+        {
+          "name": "attack / control",
+          "type": "set[str]",
+          "meaning": "perception, localization, motion"
+        },
+        {
+          "name": "behavior",
+          "type": "set[str]",
+          "meaning": "perception, localization, motion, attack, control"
+        },
+        {
+          "name": "ui",
+          "type": "set[str]",
+          "meaning": "localization, motion, attack"
+        },
+        {
+          "name": "analysis",
+          "type": "set[str]",
+          "meaning": "perception, motion, control"
+        },
+        {
+          "name": "sim",
+          "type": "set[str]",
+          "meaning": "every layer but ui"
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "suite-run",
+      "title": "What happens when you type `python -m pytest`",
+      "summary": "How the suite is configured, spread over workers, trimmed of slow tests, and kept away from the game for every single test.",
+      "trigger": "A developer runs `python -m pytest` (or `--slow` before a commit).",
+      "steps": [
+        {
+          "module": "tests/conftest.py",
+          "symbol": "GAMELAB_FIXED_STATS",
+          "text": "pytest imports conftest first. It sets GAMELAB_FIXED_STATS=1 and GAMELAB_NO_PUSH=1, drops GAMELAB_CHARACTER, and defaults OPENBLAS_NUM_THREADS to 1 and GAMELAB_GPU to 0, all before any test imports gamelab.",
+          "process": "pytest"
+        },
+        {
+          "module": "tests/conftest.py",
+          "symbol": "pytest_xdist_auto_num_workers",
+          "text": "pyproject's `-n auto` asks how many workers: 8 for the suite or a folder, 0 when only files or tests are named. `--dist worksteal` hands the long tests round as workers come free.",
+          "process": "pytest"
+        },
+        {
+          "module": "tests/conftest.py",
+          "symbol": "pytest_collection_modifyitems",
+          "text": "Without `--slow`, the items marked slow are deselected (64 of 3,818 on 2026-11-16).",
+          "process": "pytest workers"
+        },
+        {
+          "module": "tests/conftest.py",
+          "symbol": "offline",
+          "text": "Before each test: keys, window calls, DXGI and mss capture and paging refused; inbox, outbox, alarm and lab notes moved into the test's tmp_path; mutexes renamed per worker; locate.build reads only the test's own lab.",
+          "process": "pytest workers"
+        },
+        {
+          "module": "gamelab/sim/fakes.py",
+          "symbol": "_write_guards",
+          "text": "The last step of `offline`: open() and the os calls that change files refuse any path under gamelab/lab with SimViolation.",
+          "process": "pytest workers"
+        },
+        {
+          "module": "tests/conftest.py",
+          "symbol": "her_profile_speed",
+          "text": "After the test, physics.reset() puts her walk and climb back to her profile's SPEED; monkeypatch undoes everything `offline` did.",
+          "process": "pytest workers"
+        },
+        {
+          "module": "tests/testdata.py",
+          "symbol": "missing",
+          "text": "At the end pytest's summary (`-rfEs` in pyproject.toml) lists every failure, error and skip with its reason: a test-data set missing (`TEST DATA MISSING`, or `no test data` under GAMELAB_NO_TESTDATA=1), a lost one (`NEEDS A NEW CAPTURE`), no game data copy.",
+          "process": "pytest"
+        }
+      ]
+    },
+    {
+      "id": "testdata-lookup",
+      "title": "A test reads a labelled frame set",
+      "summary": "How a perception test gets Tree Dungeon's 24 labelled frames, and what happens when they aren't on this computer.",
+      "trigger": "A test such as test_minimap_picture calls `testdata.labelled(testdata.TREE_DUNGEON)`.",
+      "steps": [
+        {
+          "module": "tests/test_minimap_picture.py",
+          "symbol": "",
+          "text": "The test asks for the set's labels and the path of every frame.",
+          "process": "pytest worker"
+        },
+        {
+          "module": "tests/testdata.py",
+          "symbol": "labelled",
+          "text": "Reads tests/fixtures/tree_dungeon_native_monsters.json and takes its `frames` (24 names).",
+          "process": "pytest worker"
+        },
+        {
+          "module": "tests/testdata.py",
+          "symbol": "folder",
+          "text": "Asks for the set's folder with every one of those frame files in it, passing the set's description (`WHAT`) for the message.",
+          "process": "pytest worker"
+        },
+        {
+          "module": "tests/testdata.py",
+          "symbol": "roots",
+          "text": "Lists where to look: GAMELAB_TESTDATA's folders if set, else this checkout's gamelab/lab/testdata, then the main checkout's when this is a git worktree (main_checkout).",
+          "process": "pytest worker"
+        },
+        {
+          "module": "tests/testdata.py",
+          "symbol": "find",
+          "text": "Returns the first root whose tree_dungeon_native folder holds all 24 frames.",
+          "process": "pytest worker"
+        },
+        {
+          "module": "tests/testdata.py",
+          "symbol": "missing",
+          "text": "If none does, `folder` walks the roots again to say what each lacked (\"not there\", or \"without\" its first 3 missing files) and calls `missing`: the test fails with \"TEST DATA MISSING\" and each place it looked, or skips if GAMELAB_NO_TESTDATA is set to anything but empty or 0.",
+          "process": "pytest worker"
+        }
+      ]
+    },
+    {
+      "id": "layer-check",
+      "title": "How the layer rules are enforced",
+      "summary": "test_architecture turns the README's layer diagram into one test per source file, plus a subprocess check of what the elevated player loads.",
+      "trigger": "Any pytest run (these tests are fast and always in).",
+      "steps": [
+        {
+          "module": "tests/test_architecture.py",
+          "symbol": "LAYER_FILES",
+          "text": "Collects every .py under the nine layer packages, one parametrized test each.",
+          "process": "pytest worker"
+        },
+        {
+          "module": "tests/test_architecture.py",
+          "symbol": "gamelab_imports",
+          "text": "Parses the file and resolves every import, relative or absolute, to a gamelab layer or shared module.",
+          "process": "pytest worker"
+        },
+        {
+          "module": "tests/test_architecture.py",
+          "symbol": "test_layers_only_import_downwards",
+          "text": "Removes SHARED and the file's own layer; anything left must be in ALLOWED for that layer, or the test names the offending layers.",
+          "process": "pytest worker"
+        },
+        {
+          "module": "tests/test_architecture.py",
+          "symbol": "test_the_elevated_player_loads_only_what_it_needs",
+          "text": "Starts a fresh Python that imports the command line, the player, the alarm and the Lie Detector spotter, then fails if any stack layer, gamedata, tkinter or gamelab.native got loaded.",
+          "process": "child python"
+        },
+        {
+          "module": "gamelab/__main__.py",
+          "symbol": "build_parser",
+          "text": "Its subcommands are also checked for the old --feed/--sweep flags, which must stay gone.",
+          "process": "pytest worker"
+        }
+      ]
+    },
+    {
+      "id": "sim-in-pytest",
+      "title": "The simulator as a test bench",
+      "summary": "How the offline simulator's scenarios are checked inside pytest, and how that differs from the golden traces outside it.",
+      "trigger": "test_sim's scenario tests in a pytest run; `python -m gamelab.sim.golden check` by hand.",
+      "steps": [
+        {
+          "module": "tests/test_sim.py",
+          "symbol": "test_real_map_scenarios_show_what_they_are_there_for",
+          "text": "One test per registered scenario (48 on Tree Dungeon), skipped without the map's game data; the 10 in `SLOW_SCENARIOS` (the tours end to end, those over 15 s, the key-following grinds) only with --slow.",
+          "process": "pytest worker"
+        },
+        {
+          "module": "gamelab/sim/scenarios.py",
+          "symbol": "run",
+          "text": "Runs the scenario's real stack against the simulated world with a fake clock, a fake key player and fake eyes.",
+          "process": "pytest worker"
+        },
+        {
+          "module": "gamelab/sim/fakes.py",
+          "symbol": "patched",
+          "text": "While it runs, time, the player client and every lab path point at fakes and a temp folder; anything reaching the game or writing under gamelab/lab raises SimViolation.",
+          "process": "pytest worker"
+        },
+        {
+          "module": "gamelab/sim/scenarios.py",
+          "symbol": "unmet",
+          "text": "Lists what the scenario says it shows but the trace doesn't; the test asserts the list is empty.",
+          "process": "pytest worker"
+        },
+        {
+          "module": "tests/test_sim.py",
+          "symbol": "test_a_trip_stepped_one_pass_at_a_time_is_the_same_trip",
+          "text": "Replays each nav_* scenario with Navigator.go written as begin/step (as the hunt loop drives it) and requires the same trace; 3 in the fast suite, the other 10 --slow.",
+          "process": "pytest worker"
+        },
+        {
+          "module": "gamelab/sim/golden.py",
+          "symbol": "check",
+          "text": "Outside pytest: re-runs scenarios and compares each with its trace recorded in gamelab/lab/golden (git-ignored), part by part, every part but the scenario's `doc` (key plans, log, results, the world's summary); exit 1 on any difference, 2 when nothing could be run. tests/test_golden.py only checks that the --jobs pool gives the same bytes and output as one process.",
+          "process": "golden"
+        }
+      ]
+    }
+  ],
+  "not_done": [
+    "The golden traces are not part of pytest: they are recorded and checked by hand (`python -m gamelab.sim.golden check --jobs N`) and live in gamelab/lab/golden, git-ignored, so a fresh checkout has none.",
+    "Real-map tests need the game data copy (gamedata/data, not in git): without it they skip with \"needs Tree Dungeon's game data\"; with it but broken they fail rather than skip (test_sim checks this).",
+    "Lost test data: `tree_dungeon_clips`, 609 frames of 1366x768 hunts with labelled HP bars, was pruned from lab/recent; its tests skip saying NEEDS A NEW CAPTURE until a hunt's frames are saved and labelled again.",
+    "The replay kit's tests on her recordings (golden-clips, 6.6 GB, outside git) skip without them.",
+    "test_no_hit_scenes keeps strict expected failures (`OPEN`) for scenes whose fault isn't fixed yet; each is meant to be flipped as its fix lands.",
+    "There is no CI configuration in the repository (no .github or other pipeline): the suite runs only when someone runs it. README.md asks for `python -m pytest --slow` (about 3 minutes) before a commit; gamelab/README.md's check order of 2026-10-28 asks for the fast suite.",
+    "The tests on the first map's (Thicket Around the Beach II) and West Rocky Mountain II's data went on 2026-10-31, with those maps' 90 simulator scenarios (the bot plays only Tree Dungeon). Their sets outside git (`hp_bars_1920x1080`, `west_rocky_native`, `west_rocky`) are no test's now; West Rocky's three frames kept in git (`tests/fixtures/native`) are still read by the 1366x768 tests (test_resolution, test_pasted and others)."
+  ],
+  "test_index": [
+    {
+      "path": "tests/test_actions.py",
+      "covers": [
+        "maplehelper/actions.py"
+      ],
+      "summary": "maplehelper's moves press the right keys for their measured lengths.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_aggro.py",
+      "covers": [
+        "gamelab/localization/aggro.py"
+      ],
+      "summary": "Her aggro belief: who she hurt and who chases her, kept through missed looks and new tracker ids, on a made-up map.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_alarm.py",
+      "covers": [
+        "gamelab/control/alarm.py",
+        "gamelab/control/player.py",
+        "gamelab/perception/lie_detector.py"
+      ],
+      "summary": "Lie Detector auto-stop: spotting it, stopping the key player, refusing to run until it's cleared.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_architecture.py",
+      "covers": [
+        "gamelab/__main__.py",
+        "gamelab/control/player.py",
+        "gamelab/localization/service.py",
+        "gamelab/perception/frames.py"
+      ],
+      "summary": "Code-reading gate: layers import only downwards, profiles are data only, the elevated player loads little, one process captures.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_attack.py",
+      "covers": [
+        "gamelab/attack/reach.py",
+        "gamelab/attack/stance.py",
+        "gamelab/attack/spots.py"
+      ],
+      "summary": "Attack decisions from map positions: where a star reaches, which monster first, what a jump attack hits, where to stand.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_baseline.py",
+      "covers": [
+        "gamelab/sim/baseline.py",
+        "gamelab/sim/harness.py"
+      ],
+      "summary": "The harness's baseline cache: run --cache, cached, compare on a cache folder, and ab's escalation.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_bench.py",
+      "covers": [
+        "gamelab/analysis/bench.py"
+      ],
+      "summary": "bench-look times a look on saved frames touching no window; live it refuses unless the game is already in front (reads tree_dungeon_native).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_bodies.py",
+      "covers": [
+        "gamelab/analysis/bodies.py"
+      ],
+      "summary": "Following monsters from frame to frame offline, and how far their x strays.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_body.py",
+      "covers": [
+        "gamelab/motion/body.py"
+      ],
+      "summary": "The movement engine: her shoe from Physics.img, ground and air steps, the jump's kick, closed forms against the steps.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_bootstrap.py",
+      "covers": [
+        "gamelab/behavior/bootstrap.py",
+        "gamelab/behavior/hunter.py"
+      ],
+      "summary": "Her max HP, level and DEF from perception, and the safety stop's reserve worked out again when one changes.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_camreg.py",
+      "covers": [
+        "gamelab/localization/mapart.py",
+        "gamelab/localization/camreg.py"
+      ],
+      "summary": "The map's art drawn from the game data and the camera registered against it frame by frame (costs in C).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_capture.py",
+      "covers": [
+        "gamelab/capture.py",
+        "gamelab/perception/eyes.py"
+      ],
+      "summary": "Screen capture with DXGI's COM calls faked: the black first frame, a lost duplication, the fall back to mss.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_census.py",
+      "covers": [
+        "gamelab/behavior/patrol.py"
+      ],
+      "summary": "The census of the map's monsters by spawn point and the trips it leads (the pile-up study, from 2026-11-03).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_character.py",
+      "covers": [
+        "gamelab/character.py",
+        "gamelab/classes/thief.py",
+        "gamelab/classes/magician.py",
+        "maplehelper/config.py"
+      ],
+      "summary": "Who plays, her profile as data, config.toml's [characters] tables, the thief's profile equal to the old constants.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_chatbox.py",
+      "covers": [
+        "gamelab/perception/chatbox.py",
+        "gamelab/behavior/chatcheck.py"
+      ],
+      "summary": "Her chat box collapsed at a hunt's start if it's expanded; the reader on real crops of the box.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_choice.py",
+      "covers": [
+        "gamelab/attack/choice.py",
+        "gamelab/behavior/attacks.py"
+      ],
+      "summary": "Which attack a throw is (Lucky Seven or the regular attack) and the hunter's bookkeeping of HP left and her MP.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_clawed.py",
+      "covers": [
+        "gamelab/behavior/fight.py",
+        "gamelab/attack/stance.py"
+      ],
+      "summary": "Cornered study R1: after a touch no monster about her explains, a throw past the claw's edge goes from a jump in place.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_clearance.py",
+      "covers": [
+        "gamelab/attack/stance.py",
+        "gamelab/attack/reach.py",
+        "gamelab/behavior/fight.py"
+      ],
+      "summary": "Clearance kept ahead of time: where a monster will be at her next attack, and jump throws on a slope.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_config.py",
+      "covers": [
+        "maplehelper/config.py"
+      ],
+      "summary": "maplehelper's config.toml: keys, hotkeys and timing parsed, bad configs explained, her stats defaulting to the measured.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_control.py",
+      "covers": [
+        "gamelab/control/actions.py"
+      ],
+      "summary": "Her actions as key plans, without the player.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_controller.py",
+      "covers": [
+        "maplehelper/controller.py"
+      ],
+      "summary": "maplehelper's hotkeys: a hotkey in the game starts its combo and is hidden from the game; other keys pass through.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_cornered_aim.py",
+      "covers": [
+        "gamelab/attack/reach.py",
+        "gamelab/attack/stance.py"
+      ],
+      "summary": "Her aim up close by a wall (cornered study R6, R8): the star's line checked to the client's own hit point too.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_coverage.py",
+      "covers": [
+        "gamelab/analysis/coverage.py"
+      ],
+      "summary": "The route coverage report: which move of a chain a miss goes on, and its picture of moves taken and planned.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_damage.py",
+      "covers": [
+        "gamelab/behavior/damage.py",
+        "gamelab/attack/stance.py"
+      ],
+      "summary": "Her attacks' damage learned from the monsters' bars and kept between runs; her wounds finished first unless danger is near.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_danger.py",
+      "covers": [
+        "gamelab/attack/danger.py"
+      ],
+      "summary": "The danger of a place on synthetic maps (spawn points, hard hitters, hoppers), and what's decided by it.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_darts.py",
+      "covers": [
+        "gamelab/behavior/darts.py"
+      ],
+      "summary": "Out of darts: Lucky Seven presses that take no MP and kill nothing end the hunt as the safety stop does.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_deaths.py",
+      "covers": [
+        "gamelab/perception/deaths.py"
+      ],
+      "summary": "A monster's death seen: the game data's die1 frames matched where a track's feet are, on recording crops.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_disk.py",
+      "covers": [
+        "gamelab/analysis/disk.py",
+        "gamelab/telemetry.py"
+      ],
+      "summary": "What gamelab leaves on disk stays bounded: telemetry parts and cap, the player's log, cancel files, lab-usage.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_drop_worlds.py",
+      "covers": [
+        "gamelab/sim/world.py"
+      ],
+      "summary": "The simulator's drops fitted to the live service's sightings, and her drops taken by others past her ownership.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_engine.py",
+      "covers": [
+        "maplehelper/engine.py",
+        "maplehelper/combos.py"
+      ],
+      "summary": "maplehelper's combo engine: each combo's key steps by facing, early presses dropped and late ones queued, slow mode, abort.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_evade.py",
+      "covers": [
+        "gamelab/control/navigator.py",
+        "gamelab/control/mover.py",
+        "gamelab/behavior/walk.py"
+      ],
+      "summary": "The evade work (2026-10-28): the navigator's evade step, the mover's moves watched, the stand check, ways around.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_exact.py",
+      "covers": [
+        "gamelab/perception/exact.py",
+        "gamelab/localization/worldstate.py"
+      ],
+      "summary": "The exact finder (exact.c): a monster's picture found by its exact pixels however much of it is covered.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_exp_number.py",
+      "covers": [
+        "gamelab/perception/exp_number.py"
+      ],
+      "summary": "Her EXP number read glyph by glyph on saved bars and drawn glyphs: a wrong value must never come out.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_feed.py",
+      "covers": [
+        "gamelab/localization/feed.py"
+      ],
+      "summary": "The continuous feed: the shared-memory frame ring, only fresh checked frames, one pass a frame at the one rate.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_fight.py",
+      "covers": [
+        "gamelab/behavior/fight.py"
+      ],
+      "summary": "The fight loop (fight.clear) on prepared looks and a fake clock: hidden monsters, kills from EXP, the shot log.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_flow.py",
+      "covers": [
+        "gamelab/motion/flow.py"
+      ],
+      "summary": "Chained moves on a small made-up map: timelines, variants, monsters, plan watching.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_framecheck.py",
+      "covers": [
+        "gamelab/perception/framecheck.py",
+        "gamelab/localization/placecheck.py",
+        "gamelab/localization/senses.py"
+      ],
+      "summary": "Looks that aren't of the game as expected: refused saying why, recovered where possible, never acted on.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_gains.py",
+      "covers": [
+        "gamelab/localization/gains.py"
+      ],
+      "summary": "Her EXP gains: a gain's size names the kind killed, double kills split, level-ups, unreadable changes waited out.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_gamedata.py",
+      "covers": [
+        "gamedata/wz.py",
+        "gamedata/canvas.py",
+        "gamedata/tables.py",
+        "gamedata/ms.py"
+      ],
+      "summary": "gamedata's readers on small packages built here in the game's formats (no game files needed).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_gamelab.py",
+      "covers": [
+        "gamelab/control/player.py",
+        "gamelab/control/timeline.py",
+        "gamelab/analysis/track.py"
+      ],
+      "summary": "gamelab parts that don't need the game: plan validation, timelines and the image analysis.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_gates.py",
+      "covers": [
+        "gamelab/perception/gates.py",
+        "gamelab/perception/mobs.py",
+        "gamelab/perception/sprites.py"
+      ],
+      "summary": "Learned colour gates per monster kind, kinds sharing a body told apart, background colours learned (reads tree_dungeon_native).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_geometry.py",
+      "covers": [
+        "gamelab/screen.py"
+      ],
+      "summary": "Screen geometry follows the client size; plus code-reading checks that nothing but the simulator assumes the 1920x1080 window.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_golden.py",
+      "covers": [
+        "gamelab/sim/golden.py"
+      ],
+      "summary": "golden on a pool of processes (--jobs): the same traces to the byte and the same output as one process.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_gpumatch.py",
+      "covers": [
+        "gamelab/native.py",
+        "gamelab/perception/match.py"
+      ],
+      "summary": "The re-finds' matches on the GPU (Direct3D 11) against the CPU's, to the bit; late answers and lost devices.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_grind.py",
+      "covers": [
+        "gamelab/behavior/patrol.py",
+        "gamelab/behavior/grind.py"
+      ],
+      "summary": "Grinding: the loop chosen against camping, the next stop, other players' areas, spawn-point beliefs, pauses.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_guard.py",
+      "covers": [
+        "gamelab/behavior/guard.py",
+        "gamelab/behavior/retreat.py",
+        "gamelab/behavior/vitals.py"
+      ],
+      "summary": "A stop that parks, the guard between hunts, her potions and her death on the phone.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_harness.py",
+      "covers": [
+        "gamelab/sim/harness.py",
+        "gamelab/sim/world.py"
+      ],
+      "summary": "The simulator's realism knobs and the results harness that compares hunting policies on the same seeds.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_heading.py",
+      "covers": [
+        "gamelab/perception/heading.py",
+        "gamelab/control/actions.py"
+      ],
+      "summary": "Which way she faces, from her picture above her name tag, on labelled frames; her keys going by it.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_her_cues.py",
+      "covers": [
+        "gamelab/localization/her_cues.py"
+      ],
+      "summary": "Her cues' models made at calibration: her feet's offset from her plate's centre, her tag template.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_hp_number.py",
+      "covers": [
+        "gamelab/perception/hp_number.py"
+      ],
+      "summary": "Her HP number ('[624/840]') read glyph by glyph on saved lossless frames; garbage and impossible numbers refused.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_hunt.py",
+      "covers": [
+        "gamelab/behavior/hunt.py"
+      ],
+      "summary": "The hunt loop's rules and its loot sweep's, on stand-ins: no map, no simulator.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_jump_reach.py",
+      "covers": [
+        "gamelab/attack/reach.py"
+      ],
+      "summary": "What her attacks reach from the ground and from each kind of jump, on synthetic maps.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_key_pick.py",
+      "covers": [
+        "gamelab/attack/reach.py",
+        "gamelab/behavior/hunter.py"
+      ],
+      "summary": "What her attack key would pick, asked of the game's search: a telemetry 'key_pick' record, nothing changed in her play.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_keybindings.py",
+      "covers": [
+        "gamelab/perception/keybindings.py"
+      ],
+      "summary": "The game's KEY BINDINGS window read, on the live window of 2026-10-28 and saved crops.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_keycheck.py",
+      "covers": [
+        "gamelab/behavior/keycheck.py"
+      ],
+      "summary": "Her regular attack's key doubted, checked and set right; the live runs of 2026-10-25 to 28 replayed through it.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_keymap.py",
+      "covers": [
+        "gamelab/control/keymap.py"
+      ],
+      "summary": "Her keys followed to where the game has them, the binding remembered, and published for the player.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_keys_win32.py",
+      "covers": [
+        "maplehelper/keys.py",
+        "maplehelper/win32.py"
+      ],
+      "summary": "Key names parsed and labelled, extended keys, scan codes, Windows input struct sizes.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_kill_credit.py",
+      "covers": [
+        "gamelab/localization/tracking.py",
+        "gamelab/behavior/ledger.py"
+      ],
+      "summary": "Her kill's monster by Magic Claw's own search band order, and the hunt following the tracker's corrections.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_knock.py",
+      "covers": [
+        "gamelab/attack/knock.py"
+      ],
+      "summary": "Where a touch's knock puts her and what it costs, flown as the simulator's world flies it.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_landing.py",
+      "covers": [
+        "gamelab/attack/stance.py",
+        "gamelab/motion/flow.py",
+        "gamelab/behavior/fight.py"
+      ],
+      "summary": "Landings priced by what her first attack there surely takes, chains landing cheapest, moving away to attack.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_ledger.py",
+      "covers": [
+        "gamelab/behavior/ledger.py"
+      ],
+      "summary": "The hunt's bookkeeping: every EXP gain a kill placed by her stars, every pile she knows of.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_lie_recording.py",
+      "covers": [
+        "gamelab/control/lie_recorder.py"
+      ],
+      "summary": "The Lie Detector's whole cycle recorded in an index and a summary, under a disk cap, in temp folders.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_lie_target.py",
+      "covers": [
+        "gamelab/perception/lie_target.py"
+      ],
+      "summary": "The Lie Detector target tracker: outline score, the white target's template, the board's scroll, a drawn round.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_lie_tracking.py",
+      "covers": [
+        "gamelab/control/lie_tracking.py"
+      ],
+      "summary": "The mini-game's target followed live on the service's frames while the alarm is up, with trail-based cursor moves.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_locate.py",
+      "covers": [
+        "gamelab/localization/locate.py"
+      ],
+      "summary": "Her place from the scene: camera registered to the map's art, her feet by tag, plate, body, or carried by the filter.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_loot.py",
+      "covers": [
+        "gamelab/perception/loot.py",
+        "gamelab/behavior/looting.py"
+      ],
+      "summary": "Seeing loot on synthetic frames and going back for it (reads tree_dungeon_native and tree_dungeon_drops).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_loot_chain.py",
+      "covers": [
+        "gamelab/behavior/lootchain.py"
+      ],
+      "summary": "The loot chain: a few loot targets planned ahead as walk legs, so there's no pause between them.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_lv_number.py",
+      "covers": [
+        "gamelab/perception/lv_number.py"
+      ],
+      "summary": "Her level off the bottom bar's 'LV.' digits; read only when its box changes; the service's lv_read event.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_magician_hunt.py",
+      "covers": [
+        "gamelab/classes/magician.py",
+        "gamelab/attack/magic.py"
+      ],
+      "summary": "The magician hunting with her profile: her keys, Magic Claw's search as the attack layer's constants.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_memory.py",
+      "covers": [
+        "gamelab/localization/memory.py",
+        "gamelab/localization/senses.py"
+      ],
+      "summary": "Her memory of the monsters and the sweep that keeps it up, on made-up maps and frames.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_minimap.py",
+      "covers": [
+        "gamelab/perception/minimap.py",
+        "gamelab/localization/players.py"
+      ],
+      "summary": "Other players' minimap markers found and followed, never her dot, an NPC or a portal.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_minimap_picture.py",
+      "covers": [
+        "gamelab/perception/minimap.py"
+      ],
+      "summary": "Where the map's own minimap picture is and her dot read by it, scrolling on tall maps (reads tree_dungeon_native).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_misses.py",
+      "covers": [
+        "gamelab/perception/misses.py"
+      ],
+      "summary": "Her attack's MISS popup read on saved crops; look-alikes (damage numbers, a hand) refused.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_mouse_trail.py",
+      "covers": [
+        "maplehelper/mouse_trail.py",
+        "gamelab/window.py"
+      ],
+      "summary": "Human-like mouse trails and gamelab's playback of them.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_native.py",
+      "covers": [
+        "gamelab/native.py"
+      ],
+      "summary": "gamelab's C pieces: built once per source, old builds cleaned up, turned off cleanly.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_native_match.py",
+      "covers": [
+        "gamelab/perception/match.py",
+        "gamelab/native.py"
+      ],
+      "summary": "The masked colour match in C against OpenCV's on the monster, re-find and drop search windows.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_native_search.py",
+      "covers": [
+        "gamelab/perception/mobs.py",
+        "gamelab/perception/loot.py"
+      ],
+      "summary": "Monsters and drops at 1366x768 from the game's own pictures; the monster search coarse to fine.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_navigation.py",
+      "covers": [
+        "gamelab/localization/mapdata.py",
+        "gamelab/motion/route.py",
+        "gamelab/control/navigator.py"
+      ],
+      "summary": "Map model, localization and route planning on a small made-up map (no game data needed).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_no_hit_scenes.py",
+      "covers": [
+        "gamelab/sim/no_hit_scenes.py"
+      ],
+      "summary": "The no-hit scenes: recorded failsafe moments in the world, whether each fault shows and is solved; 23 tests --slow, strict xfails for open ones.",
+      "slow": true
+    },
+    {
+      "path": "tests/test_notify.py",
+      "covers": [
+        "gamelab/control/notify.py"
+      ],
+      "summary": "The Lie Detector sent to the phone: Bark alerts, the text's mail, failed pushes; nothing from the lab's files under GAMELAB_NO_PUSH.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_ocr_capture.py",
+      "covers": [
+        "maplehelper/ocr/capture.py"
+      ],
+      "summary": "The OCR's screen box: cut to its visible part, refused when too far off screen, the monitor showing most.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_ocr_cli.py",
+      "covers": [
+        "maplehelper/ocr/__main__.py"
+      ],
+      "summary": "The OCR command's output: repeats rewritten in place, a row memory against OCR jitter, loot messages listed once.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_ocr_engine.py",
+      "covers": [
+        "maplehelper/ocr/__init__.py",
+        "maplehelper/ocr/engine.py"
+      ],
+      "summary": "The real OCR models on samples/loot_test.png (skipped when the OCR packages aren't installed).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_ocr_loot.py",
+      "covers": [
+        "maplehelper/ocr/loot.py"
+      ],
+      "summary": "The loot reader: OCR jitter tolerated, static interface text skipped, pickup messages never skipped.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_ocr_parse.py",
+      "covers": [
+        "maplehelper/ocr/parse.py",
+        "maplehelper/ocr/item_names.py"
+      ],
+      "summary": "OCR rows parsed: HP/MP/EXP with misread digits folded, the level from EXP, item names matched.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_ocr_regions.py",
+      "covers": [
+        "maplehelper/ocr/regions.py",
+        "maplehelper/ocr/engine.py"
+      ],
+      "summary": "OCR regions scale with the picture, the content box trims pillarbox and letterbox, upscale and row order.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_panel_speed.py",
+      "covers": [
+        "gamelab/motion/physics.py",
+        "gamelab/behavior/statcheck.py"
+      ],
+      "summary": "Her walk and climb from her stat window's SPEED by the client's formula; the doubt when they disagree.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_pasted.py",
+      "covers": [
+        "gamelab/analysis/pasted.py"
+      ],
+      "summary": "bench-paste: the game's pictures drawn onto frames at known places, and what the searches make of them.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_perception.py",
+      "covers": [
+        "gamelab/perception/eyes.py",
+        "gamelab/perception/hud.py",
+        "gamelab/perception/mobs.py"
+      ],
+      "summary": "Perception without the game: HP/MP bars, the ground, monster HP bars, touches, the monster detector (reads both test data sets).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_pet.py",
+      "covers": [
+        "gamelab/behavior/pet.py"
+      ],
+      "summary": "Her pet kept fed: its fullness read off her Character Info, fed while low, the window closed.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_plate.py",
+      "covers": [
+        "gamelab/perception/plate.py"
+      ],
+      "summary": "Her name plate's exact-colour match: the C counts against numpy and a brute-force count.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_player_read.py",
+      "covers": [
+        "gamelab/control/player.py"
+      ],
+      "summary": "A claimed plan file Windows refuses for a moment is read again, not failed (2026-10-29).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_player_splice.py",
+      "covers": [
+        "gamelab/control/player.py",
+        "gamelab/control/client.py"
+      ],
+      "summary": "A plan that takes over from the running one (a splice) with no key let go between.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_poses.py",
+      "covers": [
+        "gamelab/perception/poses.py"
+      ],
+      "summary": "Her body's search by her poses: the C pixel checks against numpy, found by anchor or colour mass.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_presence.py",
+      "covers": [
+        "gamelab/behavior/presence.py"
+      ],
+      "summary": "Her throws at monsters no look has, by each look's evidence and their price; the frozen scenes of 2026-11-04.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_probe.py",
+      "covers": [
+        "gamelab/behavior/probe.py"
+      ],
+      "summary": "The in-game probes offline: what a probe throws at, what it reads after, its scorer. The whole file is --slow.",
+      "slow": true
+    },
+    {
+      "path": "tests/test_rate.py",
+      "covers": [
+        "gamelab/localization/rate.py"
+      ],
+      "summary": "Code-reading gate: perception's one rate (HZ 15); no other frames-a-second constant in localization, perception or control.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_recordings_physics.py",
+      "covers": [
+        "gamelab/analysis/physics_check.py",
+        "gamelab/motion/body.py"
+      ],
+      "summary": "The movement engine against her tracked movement in six 60 fps recordings and the two jump sweeps of 2026-10-21.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_records.py",
+      "covers": [
+        "gamelab/behavior/hunter.py",
+        "gamelab/telemetry.py"
+      ],
+      "summary": "The records a run leaves: run summary, trips' end places, the loop's promise against delivery; one simulated grind --slow.",
+      "slow": true
+    },
+    {
+      "path": "tests/test_refind.py",
+      "covers": [
+        "gamelab/perception/mobs.py"
+      ],
+      "summary": "A followed monster re-found near where it should be first, the wider REFIND_PAD window only when that fails.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_replan.py",
+      "covers": [
+        "gamelab/control/navigator.py"
+      ],
+      "summary": "Replanning at every state while a chain runs, spliced in with no key let go (REPLAN, 2026-10-30).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_replay.py",
+      "covers": [
+        "gamelab/sim/replay.py",
+        "gamelab/sim/replay_score.py"
+      ],
+      "summary": "The replay kit: labels in git, scores on made-up dumps, a few recording frames run twice to the byte (--slow, needs the clips).",
+      "slow": true
+    },
+    {
+      "path": "tests/test_resolution.py",
+      "covers": [
+        "gamelab/screen.py",
+        "gamelab/perception/eyes.py"
+      ],
+      "summary": "The stack at the game's own 1366x768: what a look reads off native frames, pixel for pixel.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_respawn.py",
+      "covers": [
+        "gamelab/analysis/respawn.py"
+      ],
+      "summary": "The respawn and drop-life report's survival estimate.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_retreat.py",
+      "covers": [
+        "gamelab/behavior/retreat.py"
+      ],
+      "summary": "On the Lie Detector, away to a safe place within 10 s; three seed sweeps in the simulator are --slow.",
+      "slow": true
+    },
+    {
+      "path": "tests/test_review.py",
+      "covers": [
+        "gamelab/ui/review.py"
+      ],
+      "summary": "The web UI's overlaid recordings: sets, a set's viewer, frames and files, video byte ranges, nothing outside a set.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_review_pages.py",
+      "covers": [
+        "tools/review_pages/build.py",
+        "tools/review_pages/ld/clip_range.py"
+      ],
+      "summary": "The review pages' builders: no path tied to one PC, clips.json, a clip's range, never writing over a page.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_rolling.py",
+      "covers": [
+        "gamelab/control/rolling.py"
+      ],
+      "summary": "The rolling recording: 10 a second, the last 5 minutes as JPEG in memory, saved on demand or on an alarm, bounded.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_rope_hang.py",
+      "covers": [
+        "gamelab/control/navigator.py"
+      ],
+      "summary": "Hanging under a rope's top until the way up clears (ROPE_HANG), from the 2026-11-02 recordings.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_rope_top.py",
+      "covers": [
+        "gamelab/behavior/darts.py",
+        "gamelab/perception/messages.py"
+      ],
+      "summary": "The top of a rope (2026-10-26): refused Lucky Seven presses read off the message bar, on the saved recording's frames.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_ropes.py",
+      "covers": [
+        "gamelab/attack/ropes.py"
+      ],
+      "summary": "Ropes as places to wait out monsters: which kinds can reach her on a rope, getting on and back off.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_safety.py",
+      "covers": [
+        "gamelab/behavior/safety.py"
+      ],
+      "summary": "The safety stop: her HP under her reserve over several looks ends the hunt and sends her to a safe place.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_screen_frames.py",
+      "covers": [
+        "gamelab/perception/frames.py"
+      ],
+      "summary": "ScreenFrames for the service: a picture never written over while held, an old held frame given with its own time.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_search_c.py",
+      "covers": [
+        "gamelab/perception/mobs.py",
+        "gamelab/native.py"
+      ],
+      "summary": "The monster search's step 1 in C (search.c) against numpy and OpenCV, to the bit (reads tree_dungeon_native).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_service.py",
+      "covers": [
+        "gamelab/localization/service.py"
+      ],
+      "summary": "The perception service: one process looking at the game, any number of clients attached; killed and restarted.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_service_recorder.py",
+      "covers": [
+        "gamelab/control/recording.py"
+      ],
+      "summary": "The rolling recording kept by the service: difference chains read back exactly, saves, the mutex.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_sim.py",
+      "covers": [
+        "gamelab/sim/world.py",
+        "gamelab/sim/fakes.py",
+        "gamelab/sim/scenarios.py"
+      ],
+      "summary": "The simulator: physics against the planner's, the fake player, the fakes in and out, every scenario deterministic and showing its purpose (20 tests --slow).",
+      "slow": true
+    },
+    {
+      "path": "tests/test_sim_her.py",
+      "covers": [
+        "gamelab/sim/world.py",
+        "gamelab/sim/scenarios.py"
+      ],
+      "summary": "The simulator's her: her keys, a touch's damage by her defence, the pet's potions and food, stars to kill.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_sim_magic.py",
+      "covers": [
+        "gamelab/sim/world.py"
+      ],
+      "summary": "The magician in the simulator: Magic Claw as the game casts it; a 45-s grind of hers --slow.",
+      "slow": true
+    },
+    {
+      "path": "tests/test_sim_mobs.py",
+      "covers": [
+        "gamelab/sim/world.py"
+      ],
+      "summary": "The simulator's monsters moved as the v83 client's AI moves them (RustMS's copy of HeavenClient).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_sim_tree.py",
+      "covers": [
+        "gamelab/sim/world.py",
+        "gamelab/sim/scenarios.py"
+      ],
+      "summary": "The simulator on Tree Dungeon and the world's switches for unknown physics (world.Realism).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_soak.py",
+      "covers": [
+        "gamelab/sim/soak.py"
+      ],
+      "summary": "The soak tool's own workings; the soak runs themselves take minutes and aren't part of pytest.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_spawnclock.py",
+      "covers": [
+        "gamelab/localization/spawnclock.py",
+        "gamelab/attack/danger.py"
+      ],
+      "summary": "The map's spawn pass learned from births she sees, free spawn points and their newborns' price, the spawn guard.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_spawns.py",
+      "covers": [
+        "gamelab/perception/spawns.py"
+      ],
+      "summary": "Monsters fading in at their spawn points: the blend fit in C and numpy, newborns found at their first faint frames.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_sprites.py",
+      "covers": [
+        "gamedata/canvas.py",
+        "gamelab/perception/sprites.py"
+      ],
+      "summary": "Picture decoding and sprite-based monster templates, without game files.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_stance_aside.py",
+      "covers": [
+        "gamelab/attack/stance.py"
+      ],
+      "summary": "The jump aside and the hop up, on frozen looks of the failsafe's recordings.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_stat_window.py",
+      "covers": [
+        "gamelab/perception/stat_window.py"
+      ],
+      "summary": "Her stat window read off frames made of the game data's pictures; the real OCR in 2 tests --slow.",
+      "slow": true
+    },
+    {
+      "path": "tests/test_statcheck.py",
+      "covers": [
+        "gamelab/behavior/statcheck.py"
+      ],
+      "summary": "Her stat window opened, read and closed at a hunt's start, in the simulator with a stand-in OCR.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_stay_or_go.py",
+      "covers": [
+        "gamelab/behavior/targeting.py"
+      ],
+      "summary": "Stay or go: her long stays of 2026-11-05 replayed on what her chooser made of the looks she had.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_steady.py",
+      "covers": [
+        "gamelab/motion/steady.py"
+      ],
+      "summary": "Her steady walks and climbs estimated from a run's places, on her recordings.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_stranger_take.py",
+      "covers": [
+        "gamelab/behavior/patrol.py"
+      ],
+      "summary": "The stranger's cut: at the logged moments of 2026-11-04/05 the real Patrol no longer sends her to an all-low round.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_sweep.py",
+      "covers": [
+        "gamelab/behavior/sweep.py"
+      ],
+      "summary": "The loot sweep: its exact solve against brute force, each pile within its allowance.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_target.py",
+      "covers": [
+        "gamelab/attack/target.py",
+        "gamelab/behavior/targeting.py"
+      ],
+      "summary": "The target-first planner on frozen Tree Dungeon scenes, for both characters where it differs.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_testdata.py",
+      "covers": [
+        "tests/testdata.py"
+      ],
+      "summary": "tests/testdata.py's lookup and its fail, skip and lost-set messages; no test reads frames from a scratch or pruned folder.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_tls.py",
+      "covers": [
+        "gamelab/ui/tls/decrypt.py",
+        "gamelab/ui/tls/access.py",
+        "gamelab/ui/tls/view.py"
+      ],
+      "summary": "The web UI's decrypted captures: HPACK, who may read /tls/, a TLS 1.3 capture decrypted end to end.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_touches.py",
+      "covers": [
+        "gamelab/perception/touches.py"
+      ],
+      "summary": "Her touches: the violet popup over her name tag, MISS or the damage she took, on recording crops and drawn sprites.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_tracking.py",
+      "covers": [
+        "gamelab/localization/tracking.py"
+      ],
+      "summary": "Monsters followed frame to frame on made-up detection sequences at 15 a second: one id across walks and turns.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_ui.py",
+      "covers": [
+        "gamelab/ui/render.py",
+        "gamelab/ui/state.py",
+        "gamelab/ui/sources.py",
+        "gamelab/telemetry.py"
+      ],
+      "summary": "Telemetry and the mini-map offline: records in, pictures out (no window, no game).",
+      "slow": false
+    },
+    {
+      "path": "tests/test_unseen.py",
+      "covers": [
+        "gamelab/localization/unseen.py"
+      ],
+      "summary": "The monsters about her a look didn't find, and the fights and pickups decided by them.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_violetta.py",
+      "covers": [
+        "gamelab/perception/violetta.py",
+        "gamelab/control/violetta_live.py"
+      ],
+      "summary": "The Lie Detector's Violetta game: the solver, the answer window's cue, the model on real frames, clicks through the player.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_walk_speed.py",
+      "covers": [
+        "gamelab/motion/body.py",
+        "gamelab/motion/physics.py"
+      ],
+      "summary": "Her walk as planned against as measured: walkSpeed 125 x (SPEED + 20)/100.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_walkfit.py",
+      "covers": [
+        "gamelab/analysis/walkfit.py"
+      ],
+      "summary": "analysis.walkfit over two cut stretches of the 2026-11-02 records.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_window_size.py",
+      "covers": [
+        "gamelab/control/window_size.py"
+      ],
+      "summary": "A client of the wrong size set right with Alt+Enter twice, on a fake window and a fake clock.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_worldstate.py",
+      "covers": [
+        "gamelab/localization/worldstate.py"
+      ],
+      "summary": "Perception's per-frame pass on made-up frames: each detection with its track's id, the drops' rotation.",
+      "slow": false
+    },
+    {
+      "path": "tests/test_writers.py",
+      "covers": [
+        "gamelab/telemetry.py",
+        "gamelab/gcstats.py"
+      ],
+      "summary": "Telemetry and the console written off the loops: a stalled disk holds up nothing, bounded queues, a full disk.",
+      "slow": false
+    }
+  ]
+}

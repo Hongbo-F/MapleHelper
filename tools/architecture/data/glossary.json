@@ -1,0 +1,1457 @@
+{
+  "id": "glossary",
+  "glossary": [
+    {
+      "term": "MapleStory (the game)",
+      "meaning": "The game the stack plays. It runs as administrator on Windows, so gamelab gets keys into it only through one elevated process, the key player. Rules the screen doesn't show come from the game's own data files, from a decompile of the older v83 client and from meowdb's pages; the code calls the character 'she'.",
+      "see": [
+        "gamelab/README.md",
+        "gamelab/control/player.py"
+      ]
+    },
+    {
+      "term": "Lie Detector",
+      "meaning": "The game's anti-bot test. It comes in several forms: a countdown window with a yellow 'LIE DETECTOR' title, the mouse mini-game and the notice 10 s before it, the image quiz and its warning 30 s before it, the Violetta game, and the Truth Booth a failed test sends her to. The player's watchdog looks for them 4 times a second. On a sighting it stops all input within about 10 ms, raises the alarm, pages whoever is at the PC and records the cycle, and any hunt retreats.",
+      "see": [
+        "gamelab/perception/lie_detector.py",
+        "gamelab/control/player.py",
+        "gamelab/control/alarm.py",
+        "gamelab/behavior/retreat.py"
+      ]
+    },
+    {
+      "term": "Mouse mini-game",
+      "meaning": "A Lie Detector form: 'use the mouse to follow the fading figure'. Since 2026-11-02 the perception service follows the figure on its own frames by its outline (`TargetTracker`). It can move the cursor there through the player with `lie_cursor` plans, which the player confines to the mini-game's board (`alarm.LIE_CURSOR_BOX`).",
+      "see": [
+        "gamelab/perception/lie_target.py",
+        "gamelab/control/lie_tracking.py",
+        "gamelab/control/alarm.py"
+      ]
+    },
+    {
+      "term": "Image quiz",
+      "meaning": "A Lie Detector form first met on 2026-10-25. A see-through box first warns 'Question in 30 seconds / Answer within 10 seconds', then 'Click all matching images' shows three pictures and a Confirm button. The spotter has its own half-size templates for the warning and the quiz, so either one raises the alarm. Nothing in gamelab answers the quiz.",
+      "see": [
+        "gamelab/perception/lie_detector.py"
+      ]
+    },
+    {
+      "term": "Violetta game",
+      "meaning": "The Lie Detector's shuffle game: 'Keep your eyes on the Violetta who's wearing make-up'. Since 2026-11-03 the perception service finds every Violetta with a YOLO model on each frame. It fits each round to the client's own shuffle rules and clicks the answer's button through the player while the buttons are lit. After a pass it clicks the OK of the 'successfully passed' dialog.",
+      "see": [
+        "gamelab/perception/violetta.py",
+        "gamelab/control/violetta_live.py",
+        "gamelab/control/alarm.py"
+      ]
+    },
+    {
+      "term": "Truth Booth",
+      "meaning": "Where a failed Lie Detector test sends her. The spotter recognises it by its 'Time Left' clock together with the Maple Administrator's name tag. The clock alone also shows on other timed maps, and since 2026-11-03 the name tag is required too. A cycle that saw the Truth Booth stays locked until `clear-alarm` and a person starts the player again.",
+      "see": [
+        "gamelab/perception/lie_detector.py",
+        "gamelab/control/player.py"
+      ]
+    },
+    {
+      "term": "Lucky Seven",
+      "meaning": "The thief's attack skill (skill 4001003). One cast throws two strong stars, measured at 96-192 damage each before defence at skill level 16, and costs 8-16 MP depending on the skill level. `attack/choice.py` makes each throw Lucky Seven unless her MP can't pay for a cast, or the regular attack would finish the monster about as fast.",
+      "see": [
+        "gamelab/attack/choice.py",
+        "gamelab/behavior/attacks.py"
+      ]
+    },
+    {
+      "term": "Regular attack",
+      "meaning": "Her plain attack key: one star (20-140 damage before defence, measured live at level 25) and no MP. From the ground, a monster close in front is swiped by her claw instead of taking a star. The key check makes sure the game still has ATTACK on the key she presses.",
+      "see": [
+        "gamelab/attack/choice.py",
+        "gamelab/attack/reach.py",
+        "gamelab/behavior/keycheck.py"
+      ]
+    },
+    {
+      "term": "Stars (darts)",
+      "meaning": "The thief's ammunition, thrown from her claw. A star reaches 400 units to the near side of a body: 200 from the claw plus 200 from the Keen Eyes skill (`reach.STAR_RANGE`). How many she has left is never on screen, so running out has to be inferred (see out of darts). MapleHelper's README calls her a 'dart thief'.",
+      "see": [
+        "gamelab/attack/reach.py",
+        "gamelab/behavior/darts.py",
+        "README.md"
+      ]
+    },
+    {
+      "term": "Claw (the claw's swipe)",
+      "meaning": "The thief's weapon. From the ground, a monster close in front is whacked by the claw instead of taking a star; `reach.claw_edge` gives how far off a monster must be for a throw. In the air the client never swipes, so a jump throw throws a star even point-blank. Don't confuse it with Magic Claw, the magician's spell.",
+      "see": [
+        "gamelab/attack/reach.py",
+        "gamelab/control/actions.py"
+      ]
+    },
+    {
+      "term": "Magic Claw",
+      "meaning": "The magician's aimed spell. The client's search runs from 50 to 300 units ahead in bands 20 wide. It is cast from the ground only, hits one monster twice, and nothing stops it, neither walls nor floors. Her MP is her ammunition. `attack/magic.py` swaps reach's constants to this search at a command's start.",
+      "see": [
+        "gamelab/attack/magic.py",
+        "gamelab/classes/magician.py"
+      ]
+    },
+    {
+      "term": "Thief and magician (characters, her profile)",
+      "meaning": "The two characters gamelab plays, since 2026-10-27; a process plays one. It is chosen by `--character`, else GAMELAB_CHARACTER, else `character use` (lab/character.json), else config.toml, and otherwise it's the thief. Her profile is plain data: stats, keys, attacks, safety hits, pet, and the `Shape` localization takes of her attacks (how near and how far they pick).",
+      "see": [
+        "gamelab/character.py",
+        "gamelab/classes/thief.py",
+        "gamelab/classes/magician.py"
+      ]
+    },
+    {
+      "term": "Platform",
+      "meaning": "A walkable stretch of ground: footholds joined end to end, left to right, with no wall between them (`mapdata.Platform`). Platforms are numbered by their index in the map. The logs, scenarios and README name them by that number ('Tree Dungeon's 23 is shot from 24').",
+      "see": [
+        "gamelab/localization/mapdata.py"
+      ]
+    },
+    {
+      "term": "Foothold",
+      "meaning": "One of the map data's straight line segments that make up floors and walls (`mapdata.Segment`). Footholds are joined to their neighbours by prev and next links. A foothold may forbid dropping through it (forbidFallDown), and plans respect that.",
+      "see": [
+        "gamelab/localization/mapdata.py",
+        "gamelab/motion/route.py"
+      ]
+    },
+    {
+      "term": "Foothold group",
+      "meaning": "The (layer, group) a foothold belongs to: one floating block's floor plus the walls hanging from its ends. The client's collisions go by it. In the air only walls of her own group stop her, and by the live logs only walls of her platform's group stop a star.",
+      "see": [
+        "gamelab/localization/mapdata.py",
+        "gamelab/attack/reach.py",
+        "gamelab/motion/body.py"
+      ]
+    },
+    {
+      "term": "Rope (and ladder)",
+      "meaning": "A climbable line from the map data (`mapdata.Rope`: its x, top and bottom, and whether it's a ladder). Routes climb ropes, grab them on the run and jump off them, and perception finds them on screen by colour to place her. A rope nothing can reach is a safe place to wait out the Lie Detector or a stop (`retreat.ROPE_SAFE`).",
+      "see": [
+        "gamelab/localization/mapdata.py",
+        "gamelab/perception/terrain.py",
+        "gamelab/behavior/retreat.py"
+      ]
+    },
+    {
+      "term": "Spawn point and the respawn pass",
+      "meaning": "A place where the map data puts monsters (`mapdata.Spawn`). About every 7.1 s the server refills the free points, up to the map's cap. The interval was learned live as 7.1146 s (`spawnclock.PERIOD_S`). The cap is the map's area times its mobRate (`MapModel.mob_cap`: 22 on Tree Dungeon), and a point within 100 units of a monster isn't refilled. Grinding's stops, the danger model and the spawn guard are built on spawn points.",
+      "see": [
+        "gamelab/localization/mapdata.py",
+        "gamelab/localization/spawnclock.py",
+        "gamelab/behavior/patrol.py"
+      ]
+    },
+    {
+      "term": "Minimap dot",
+      "meaning": "Her yellow dot in the minimap window at the top left; other players have markers of their own colours. `perception/minimap.py` reads the dot against the map's own minimap picture, and `localization/pose.py` turns it into map units. Placing her by her dot was the original way, and it's still used where the scene locator isn't.",
+      "see": [
+        "gamelab/perception/minimap.py",
+        "gamelab/localization/pose.py",
+        "gamelab/localization/players.py"
+      ]
+    },
+    {
+      "term": "Name tag (and name plate)",
+      "meaning": "Her name under her feet, which perception finds her by: a template match, searched near where she was last (`nametag.py`). Since 2026-10-29 her tag is a plate item the game draws bit-exact. So when the template isn't sure, counting the plate's exact colours still finds her half covered (`plate.py`).",
+      "see": [
+        "gamelab/perception/nametag.py",
+        "gamelab/perception/plate.py",
+        "gamelab/localization/locate.py"
+      ]
+    },
+    {
+      "term": "EXP number",
+      "meaning": "Her EXP as the status bar shows it, e.g. '13,549[67.02%]'. `perception/exp_number.py` reads it exactly, glyph by glyph, by drawing the game's own glyphs; a reading that isn't clear gives no value rather than a wrong one. The same reader does her HP number ('[624/840]') and her level.",
+      "see": [
+        "gamelab/perception/exp_number.py",
+        "gamelab/perception/hp_number.py",
+        "gamelab/perception/lv_number.py"
+      ]
+    },
+    {
+      "term": "EXP gain (and kill credit)",
+      "meaning": "A rise of her EXP number. The game never says which monster died. So `localization/gains.py` turns each gain into kills by kind, from the game data's EXP per kill. The tracker then binds it to the monster her attack took at the key (`MonsterTracker._bind`), and the ledger books the kill.",
+      "see": [
+        "gamelab/localization/gains.py",
+        "gamelab/localization/tracking.py",
+        "gamelab/behavior/ledger.py"
+      ]
+    },
+    {
+      "term": "Kind",
+      "meaning": "Two meanings. (1) A monster's or drop's name in lower case with dashes ('orange-mushroom'). It is made in one place (`perception/kinds.py`), so templates, EXP tables, the tracker and decisions agree. (2) A key plan's kind (`client.send(kind=...)`). With the Lie Detector alarm up, the player plays only the kinds `pet_food`, `retreat`, `lie_cursor` and `lie_ok` (`alarm.PLAN_KINDS`).",
+      "see": [
+        "gamelab/perception/kinds.py",
+        "gamelab/control/alarm.py",
+        "gamelab/control/client.py"
+      ]
+    },
+    {
+      "term": "Touch",
+      "meaning": "A monster's body meeting hers. It takes HP by the monster's touch damage (PADamage), run through the game's damage-taken formula (`danger.touch_taken`), or shows MISS. Perception reads the violet popup over her head (`perception/touches.py`). After a touch she can't be touched again for 1.5 s; that's been the simulator's default since 2026-11-03. Her own attack's miss is a different popup: an orange MISS over the monster (`perception/misses.py`).",
+      "see": [
+        "gamelab/perception/touches.py",
+        "gamelab/attack/danger.py",
+        "gamelab/sim/world.py",
+        "gamelab/perception/misses.py"
+      ]
+    },
+    {
+      "term": "Knock-back",
+      "meaning": "A touch that does damage pushes her away from the monster. In this game, unlike v83, it doesn't knock her off a rope. `attack/knock.py` flies the knock as the simulator does (270 units/s away and up) and prices a knock off her platform in EXP. That price isn't used by any decision yet.",
+      "see": [
+        "gamelab/attack/knock.py",
+        "gamelab/sim/world.py"
+      ]
+    },
+    {
+      "term": "Drops, mesos, piles and bunches",
+      "meaning": "Drops are what dead monsters leave on the ground: items, and mesos (the game's money). `perception/loot.py` finds them in strips just above the platforms. Drops lying within 15 units of each other are a pile (hunt-modes.md), and close ones a bunch (`lootchain.bunches`). Drops are priced in mesos (`looting.Worth`, `PRICES`).",
+      "see": [
+        "gamelab/perception/loot.py",
+        "gamelab/behavior/looting.py",
+        "gamelab/behavior/lootchain.py",
+        "gamelab/docs/hunt-modes.md"
+      ]
+    },
+    {
+      "term": "Pet, pet food and potions",
+      "meaning": "Her pet drinks her HP and MP potions for her, but a hungry pet stops. `behavior/pet.py` reads the pet's fullness off her Character Info window. It feeds Pet Food (config.toml `pet_food`, U) under 70 until 80, then follows fullness in time (a point every 55 s) and feeds under 60. With the Lie Detector alarm up, the player still takes `pet_food` taps, 3 a minute at most.",
+      "see": [
+        "gamelab/behavior/pet.py",
+        "gamelab/control/alarm.py",
+        "config.toml"
+      ]
+    },
+    {
+      "term": "Stat window and SPEED",
+      "meaning": "Her stat window is opened, read and closed at a hunt's start for her W.DEF (`behavior/statcheck.py`). Its SPEED sets her walk by the client's formula, 125 x (SPEED + 20)/100 units/s, and her climb, SPEED + 20 (`physics.walk_of`, since 2026-11-02).",
+      "see": [
+        "gamelab/perception/stat_window.py",
+        "gamelab/behavior/statcheck.py",
+        "gamelab/motion/physics.py"
+      ]
+    },
+    {
+      "term": "Key Bindings window",
+      "meaning": "The game's KEY BINDINGS window, opened with `\\`. When her presses are doubted (5 presses without effect), the key check opens it and reads which key ATTACK and the other functions are on. Her keys are remembered per character in lab/keybindings-<her>.json.",
+      "see": [
+        "gamelab/perception/keybindings.py",
+        "gamelab/behavior/keycheck.py",
+        "gamelab/control/keymap.py"
+      ]
+    },
+    {
+      "term": "Chat box, message bar and pickup log",
+      "meaning": "An expanded chat box can hide monsters, so a hunt collapses it at its start (`behavior/chatcheck.py`, since 2026-10-30). The message bar's pink game line carries the game's refusals, such as having no stars. The pickup log's rows tell what she picked up and when an inventory tab is full (`perception/messages.py`).",
+      "see": [
+        "gamelab/perception/chatbox.py",
+        "gamelab/behavior/chatcheck.py",
+        "gamelab/perception/messages.py"
+      ]
+    },
+    {
+      "term": "Tree Dungeon (and the other maps)",
+      "meaning": "Tree Dungeon, Forest Up North II is map 10002073 (`harness.TREE`), where she hunts Green and Horny Mushrooms; every simulator scenario has been on it since 2026-10-31. The other maps gamelab knows are Thicket Around the Beach II (10000012, the commands' default: `__main__.DEFAULT_MAP`) and West Rocky Mountain II (10004021). Commands take `--map`.",
+      "see": [
+        "gamelab/sim/scenarios.py",
+        "gamelab/sim/harness.py",
+        "gamelab/__main__.py"
+      ]
+    },
+    {
+      "term": "Game data (.wz, .ms, Physics.img)",
+      "meaning": "The game's own data packages, read by the `gamedata` package from a copy of the install: .wz (Wizet PKG1) and the newer ChaCha20-encrypted .ms packs. Maps, monsters (EXP, speed, touch damage, bodies), skills, sprites and HUD glyphs come from them. Physics.img holds the movement constants the engine is built from.",
+      "see": [
+        "gamedata/wz.py",
+        "gamedata/ms.py",
+        "gamedata/tables.py",
+        "gamelab/motion/body.py"
+      ]
+    },
+    {
+      "term": "Client size (1366x768, Alt+Enter)",
+      "meaning": "The game draws a 1366x768 view and stretches it to its window's client area. gamelab looks at the client at 1366x768 full size, or at 1920x1080 half size. `window_size.py` sets the size back with Alt+Enter twice, at most 4 tries an hour.",
+      "see": [
+        "gamelab/screen.py",
+        "gamelab/control/window_size.py"
+      ]
+    },
+    {
+      "term": "v83 client and meowdb",
+      "meaning": "The v83 client is an older game client. Its decompile, mostly through the RustMS port, is what the code follows for rules the screen can't show: the star's search, the line a star flies, knock-back. meowdb is the community database the code reads for drop lists, formulas and stats.",
+      "see": [
+        "gamelab/attack/reach.py",
+        "gamelab/perception/drops.py"
+      ]
+    },
+    {
+      "term": "gamelab",
+      "meaning": "The autonomous player: a Python package laid out like a self-driving car's stack, run as `python -m gamelab <command>`. Its layers are perception, localization, motion, attack, control and behavior, with ui, sim and analysis on the side. It began on 2026-10-18 as a way to measure MapleHelper's combos in the game.",
+      "see": [
+        "gamelab/README.md",
+        "gamelab/__main__.py"
+      ]
+    },
+    {
+      "term": "MapleHelper (maplehelper)",
+      "meaning": "The original one-button combo helper for a dart thief. F1-F4 play escape combos (Jump-Throw, Back Off & Throw, Hop Back & Throw, Jump-Back Shot) from a keyboard hook, Esc stops one, and an on-screen coach narrates each step. gamelab grew out of measuring its timing, and still plays its combo scripts.",
+      "see": [
+        "README.md",
+        "maplehelper/combos.py",
+        "maplehelper/hook.py",
+        "maplehelper/coach.py"
+      ]
+    },
+    {
+      "term": "Combo",
+      "meaning": "A MapleHelper move script: a plain function of a `Ctx`, whose down, up, tap and wait press keys and sleep (`maplehelper/engine.py`). gamelab runs the same scripts on a virtual clock (`control/timeline.py`) to get exact key timelines for tests and for the `combo` and `do` commands.",
+      "see": [
+        "maplehelper/engine.py",
+        "maplehelper/combos.py",
+        "gamelab/control/timeline.py"
+      ]
+    },
+    {
+      "term": "Layer",
+      "meaning": "One package of gamelab's stack. Perception is at the bottom, then localization and motion, then attack and control, with behavior on top. Each layer imports only the layers below it, and `tests/test_architecture.py` reads every import to keep it so. The shared modules (paths, screen, telemetry, window, capture, native, character) can be used by every layer.",
+      "see": [
+        "tests/test_architecture.py",
+        "gamelab/README.md"
+      ]
+    },
+    {
+      "term": "Look",
+      "meaning": "One decision-ready view of the game. `Senses.look()` returns, as a Scene, the newest perception state shown late enough to include the effect of her last key (at least 68 ms after it). A look that fails its checks is retried. After 3 s of failures it raises `LookLost`, and trips and hunts stand still until looks work again.",
+      "see": [
+        "gamelab/localization/senses.py",
+        "gamelab/perception/framecheck.py"
+      ]
+    },
+    {
+      "term": "Glance",
+      "meaning": "A cheap look at just her minimap dot and HP from the newest frame, at most every 63 ms (`Senses.glance`, `Eyes.glance`). The mover and the navigator glance while a key plan plays, to watch the move and cut it short if it goes wrong.",
+      "see": [
+        "gamelab/localization/senses.py",
+        "gamelab/perception/eyes.py",
+        "gamelab/control/mover.py"
+      ]
+    },
+    {
+      "term": "Observation",
+      "meaning": "What one frame shows, in screen terms, before any map knowledge: her name tag, HP and MP, the ground under her, the minimap dots, ropes, and the boxes her numbers are read from (`perception.eyes.Observation`). A Scene is an Observation placed on the map.",
+      "see": [
+        "gamelab/perception/eyes.py"
+      ]
+    },
+    {
+      "term": "Eyes",
+      "meaning": "Perception's only door to pixels (`perception/eyes.py`): a frame goes in and an Observation comes out. Localization asks Eyes questions about that frame (monsters, re-finds, drops, HP bars, her heading) instead of reading pixels itself. That's what lets the simulator's FakeEyes stand in for the game.",
+      "see": [
+        "gamelab/perception/eyes.py",
+        "gamelab/sim/fakes.py"
+      ]
+    },
+    {
+      "term": "Scene",
+      "meaning": "A look placed on the map (`localization/scene.py`). It holds her place with how it was found and how sure it is, the monsters on their platforms, drops, other players, and the feed's events, touches and tracks. It also converts between screen px and map units. Every decision works from a Scene.",
+      "see": [
+        "gamelab/localization/scene.py"
+      ]
+    },
+    {
+      "term": "Senses",
+      "meaning": "The one door every look goes through (`localization/senses.py`). It takes the freshest state from the feed, checks it and places it on the map, then runs the look listeners; the Hunter wires 14 of them. It also raises `LookLost` when looks keep failing.",
+      "see": [
+        "gamelab/localization/senses.py",
+        "gamelab/behavior/hunter.py"
+      ]
+    },
+    {
+      "term": "Feed",
+      "meaning": "What the stack asks of perception (`localization/feed.py`'s `Feed`: latest, look, glance, drain_events, throw). Live, it's the perception service's client. In the simulator it's a `SyncFeed` stepped by the fake clock, and on saved frames an `InlineFeed`.",
+      "see": [
+        "gamelab/localization/feed.py",
+        "gamelab/localization/service.py"
+      ]
+    },
+    {
+      "term": "Perception service",
+      "meaning": "The one always-on process per PC that looks at the game (`python -m gamelab perceive`, `localization/service.py`). Every frame (15 a second) it hands that frame's WorldState to every attached command over a named pipe, with the frames themselves in shared memory. Since 2026-10-25 no command captures the screen itself. The service also writes telemetry, keeps the rolling recording, and follows the Lie Detector's mini-games.",
+      "see": [
+        "gamelab/localization/service.py",
+        "gamelab/localization/rate.py",
+        "gamelab/perception/frames.py"
+      ]
+    },
+    {
+      "term": "WorldState (the world step)",
+      "meaning": "`WorldStep.step` turns one frame into a `WorldState` in one pass (`localization/worldstate.py`). The state holds her place and HUD, every monster on the whole screen with its track id, the drops, and the frame's events. It runs inside the perception service, or inside SyncFeed or InlineFeed offline.",
+      "see": [
+        "gamelab/localization/worldstate.py"
+      ]
+    },
+    {
+      "term": "Track",
+      "meaning": "A monster followed from frame to frame under one id by `MonsterTracker` (`localization/tracking.py`). A track goes hidden after 0.3 s unseen and is kept 3.5 s; one gone off screen is remembered 10 s; a track can also be let go, or die. Its events (entered, spawned, back, left, bar_hit, died, victim, let_go) feed kill credit and decisions.",
+      "see": [
+        "gamelab/localization/tracking.py",
+        "gamelab/localization/worldstate.py"
+      ]
+    },
+    {
+      "term": "Re-find",
+      "meaning": "Looking for a monster seen in the last frame again, in a small window around where it should be, instead of searching the whole screen (`Eyes.refind`, `MobDetector.refind`). A frame's re-finds run in one threaded C call. The GPU can do them instead (`gpumatch.c`), but only if lab/GPU exists or GAMELAB_GPU=1.",
+      "see": [
+        "gamelab/perception/mobs.py",
+        "gamelab/native.c",
+        "gamelab/gpumatch.c"
+      ]
+    },
+    {
+      "term": "Monster detector",
+      "meaning": "`MobDetector` finds monsters in two steps. A fast match of each picture's body-colour silhouette comes first, then a full masked colour match of the game's own sprite at the best few places. Kinds without a hand-made colour gate learn one against the map's background (`perception/gates.py`).",
+      "see": [
+        "gamelab/perception/mobs.py",
+        "gamelab/perception/match.py",
+        "gamelab/perception/gates.py",
+        "gamelab/perception/sprites.py"
+      ]
+    },
+    {
+      "term": "Deaths and newborns",
+      "meaning": "`perception/deaths.py` sees a followed monster die by matching the game's die1 frames at its feet. `perception/spawns.py` (since 2026-11-01) sees newborns fading in at the spawn points in view by fitting an alpha blend over the map's art.",
+      "see": [
+        "gamelab/perception/deaths.py",
+        "gamelab/perception/spawns.py",
+        "gamelab/spawns.c"
+      ]
+    },
+    {
+      "term": "Band and whole screen",
+      "meaning": "Her band is the strip around her feet a look searches for monsters; for the thief that's 140 units up and 75 down. Since 2026-10-30 every frame's state has every monster on the whole screen. The target planner's whole-screen choice can be turned off with `GAMELAB_SCREEN=0`.",
+      "see": [
+        "gamelab/localization/senses.py",
+        "gamelab/localization/feed.py",
+        "gamelab/attack/target.py"
+      ]
+    },
+    {
+      "term": "Sweep",
+      "meaning": "Three different things. (1) The screen sweep: a band look also searched one slice of the rest of the screen in turn. It came in on 2026-10-24 and was removed on 2026-10-25, once the perception service tracked the whole screen. (2) The loot sweep (`behavior/sweep.py`): which piles to pick up on her way and in what order, solved exactly over at most 8 candidates. (3) `Tour.sweep`: the order in which a tour visits its grounds.",
+      "see": [
+        "gamelab/behavior/sweep.py",
+        "gamelab/behavior/tour.py",
+        "gamelab/localization/memory.py"
+      ]
+    },
+    {
+      "term": "Memory (of the monsters)",
+      "meaning": "Every monster any look has seen, by kind, platform and x, kept across looks (`localization/memory.py`, `Hunter.memory`). Each entry's chance of still being there falls with age, and with looks that covered its place without seeing it. The mini-map draws remembered monsters faded by age.",
+      "see": [
+        "gamelab/localization/memory.py",
+        "gamelab/behavior/hunter.py"
+      ]
+    },
+    {
+      "term": "Unseen monsters",
+      "meaning": "Monsters she knows are about but this look missed: the service's hidden tracks, and her memory's monsters seen in the last 2 s, each placed where it likely is now (`localization/unseen.py`). Presence decides whether a throw at one is worth making.",
+      "see": [
+        "gamelab/localization/unseen.py",
+        "gamelab/behavior/presence.py"
+      ]
+    },
+    {
+      "term": "Aggro",
+      "meaning": "`localization/aggro.py`, since 2026-11-03, keeps every monster she has hurt as a `Chaser` for as long as its chase lasts (180-240 s after each hit), across lost sightings and changes of track id. It also names the monster most likely to have touched her at each touch. It's passive bookkeeping: no decision reads it yet.",
+      "see": [
+        "gamelab/localization/aggro.py"
+      ]
+    },
+    {
+      "term": "Spawn clock and spawn guard",
+      "meaning": "`SpawnClock` learns the server's respawn pass (7.1146 s) from the newborns perception sees fading in. Since 2026-11-03 the spawn guard (`Hunt._respawn_guard`) can hold a trip to a pile until the next pass has been seen. It does so when standing at the pile would put her within 70 units of more free spawn points of monsters whose touch hurts than waiting would.",
+      "see": [
+        "gamelab/localization/spawnclock.py",
+        "gamelab/behavior/hunt.py",
+        "gamelab/attack/danger.py"
+      ]
+    },
+    {
+      "term": "Danger",
+      "meaning": "One number for a place (`attack/danger.py`): the expected share of her HP that monster touches would take in the next moments. It comes from each kind's touch by the game's damage formula, whether and how soon that kind can reach her, and the free spawn points. Kinds that take under 5% of her HP a touch count for nothing in hunting's choices (`DANGER_MIN`), but a retreat counts every kind.",
+      "see": [
+        "gamelab/attack/danger.py",
+        "gamelab/attack/spots.py",
+        "gamelab/behavior/retreat.py"
+      ]
+    },
+    {
+      "term": "Reach",
+      "meaning": "Whether an attack from here hits that monster, decided the way the game client does (`attack/reach.py`). Up close the claw swipes. Otherwise the star's search, in 17 bands from 65 to 400 units ahead and about 60 up or down, picks the first body it overlaps. The line from her to the pick is then checked against walls of her foothold group and against floors.",
+      "see": [
+        "gamelab/attack/reach.py"
+      ]
+    },
+    {
+      "term": "Stance",
+      "meaning": "The fight's move policy (`attack/stance.py`): given the monsters around her, one act, which is throw, jump throw, jump back, step away, close in or wait. Every decision is judged at the moment her next attack will actually start (`Pace`), so a monster walking at her counts where it will be then. Each kind's keep-off distance comes from the danger model.",
+      "see": [
+        "gamelab/attack/stance.py",
+        "gamelab/attack/danger.py"
+      ]
+    },
+    {
+      "term": "Jump throw and jump back",
+      "meaning": "Her two attacks from the air. A jump throw jumps and attacks in mid-air, so a star flies even point-blank. A jump back runs away, jumps, turns in mid-air and throws, so the star leaves as she lands about 90 units away (`Actions.jump_throw`, `Actions.jump_back`). They are the same moves as MapleHelper's F1 and F4 combos.",
+      "see": [
+        "gamelab/control/actions.py",
+        "maplehelper/combos.py"
+      ]
+    },
+    {
+      "term": "Spots",
+      "meaning": "For a platform she wants to hunt (a ground), the places on other platforms from which at least 30% of it is in a star's reach. They're scored by that coverage less the danger there, and the nearest spot within 30% of the best score wins (`attack/spots.py`). If none qualifies, she hunts the ground standing on it.",
+      "see": [
+        "gamelab/attack/spots.py"
+      ]
+    },
+    {
+      "term": "Target-first planner (primary and next)",
+      "meaning": "Grinding's planner, on by default since 2026-11-04 (`GAMELAB_TARGET=0` turns it off). At each look `attack.target.Chooser` scores every monster by EXP over the seconds needed to get an attack on it and kill it. It keeps the primary target unless another beats it by 30% or comes at her, and picks the next one. `behavior/targeting.py` then plans against the primary.",
+      "see": [
+        "gamelab/attack/target.py",
+        "gamelab/behavior/targeting.py"
+      ]
+    },
+    {
+      "term": "Presence",
+      "meaning": "This isn't about someone at the keyboard. `behavior/presence.py` turns the evidence about a monster her looks just lost into the chance that a throw at it lands, and the thief throws only where that's worth it in EXP.",
+      "see": [
+        "gamelab/behavior/presence.py"
+      ]
+    },
+    {
+      "term": "Exact finder",
+      "meaning": "`perception/exact.py` (with `exact.c`), since 2026-11-04, finds monsters near her by their pictures' exact pixels, however little of them shows. Its finds are added where the detector found nothing.",
+      "see": [
+        "gamelab/perception/exact.py",
+        "gamelab/exact.c",
+        "gamelab/localization/worldstate.py"
+      ]
+    },
+    {
+      "term": "Body (the movement engine)",
+      "meaning": "`motion/body.py`, since 2026-10-20 the one movement engine: the client's own movement re-created step by step from Physics.img. It covers her accelerations on the ground and in the air, the jump's kick, the game's 30 ms step and the key lags. The planner, the simulator and the checks against recordings all move her by it.",
+      "see": [
+        "gamelab/motion/body.py",
+        "gamelab/motion/physics.py"
+      ]
+    },
+    {
+      "term": "Kick (and its blind spot)",
+      "meaning": "The jump's kick: if she leaves the ground slower than 0.8 x her walk toward the held arrow, she gets another 0.8 x her walk, up to her walk (`body.takeoff`). The planner doesn't key a jump from standing 40-52 ms after the arrow, the kick's window (`physics.KICK_JUMPS` is False). From 150 ms after the arrow, at most 5% of such jumps leave short (`physics.BLIND_ENDS_MS`).",
+      "see": [
+        "gamelab/motion/body.py",
+        "gamelab/motion/physics.py"
+      ]
+    },
+    {
+      "term": "The 30 ms step and key lags",
+      "meaning": "The game acts on keys, sets her speed and lifts her off once every 30 ms (`body.STEP`). From a key going out to the game acting on it takes a median of 66 ms for an arrow, 65 ms for jump and 0.28 s for a drop (`body.Lags`, from recordings).",
+      "see": [
+        "gamelab/motion/body.py"
+      ]
+    },
+    {
+      "term": "Route and move",
+      "meaning": "`motion/route.py` builds, once per map, every move between platforms: climb, climb down, jump up, running jump, walk-off, drop, rope jump. Each move is simulated with the game's physics and costed in seconds. `Planner` runs Dijkstra over (platform, landing x) nodes, and a route is a trip's moves. With route diversity (`--ways N`) a trip picks among distinct ways by a softmax over their times.",
+      "see": [
+        "gamelab/motion/route.py",
+        "gamelab/analysis/coverage.py"
+      ]
+    },
+    {
+      "term": "Chain (and leg, hop)",
+      "meaning": "One key timeline for several route moves in a row, predicted with the engine so she doesn't stop between them (`Flow.chain`). Each move done one way is a leg, and a monster in the way of a run can be hopped. A chain ends after 5 legs or 3.5 s, at a move it can't predict, or at a monster. The next chain is planned while she moves.",
+      "see": [
+        "gamelab/motion/flow.py",
+        "gamelab/control/navigator.py"
+      ]
+    },
+    {
+      "term": "Mover",
+      "meaning": "`control/mover.py` carries out one route move at a time, closed loop: look, one key plan, settle, look. It moves the way a player does: run toward the end and jump on the way, or jump at a rope holding up. The navigator hands it the moves a chain can't predict.",
+      "see": [
+        "gamelab/control/mover.py"
+      ]
+    },
+    {
+      "term": "Navigator (a trip)",
+      "meaning": "`control/navigator.py`, the stack's biggest file. A trip to a platform is a loop of passes: look, plan a route, and chain as many predictable moves as possible into one key plan. Then deal with any monster in the way (shoot, go round, hop, wait, evade or pass), send the chain and watch it about 15 times a second, cutting it short or splicing in a replan.",
+      "see": [
+        "gamelab/control/navigator.py"
+      ]
+    },
+    {
+      "term": "Trip modes and the escort",
+      "meaning": "A trip runs in one of three modes (`navigator.MODES`). In `hunt` its escort (`fight.FightOnTheWay`) shoots what's in reach before each chain and what's in the way. In `transit` it shoots only what's in the way. `avoid` has no escort, only ways around, waits and hops; retreats use it.",
+      "see": [
+        "gamelab/control/navigator.py",
+        "gamelab/behavior/fight.py"
+      ]
+    },
+    {
+      "term": "Evade and refuge",
+      "meaning": "Since 2026-10-28, when a monster blocks a move and no way around or wait clears it, the navigator's evade step waits at a refuge while that stays safe. Before, the move went to the unwatched mover.",
+      "see": [
+        "gamelab/control/navigator.py"
+      ]
+    },
+    {
+      "term": "Actions (and her locks)",
+      "meaning": "`control/actions.py` turns one action at a time into a key plan and blocks until it has played: throws, jump throws, jump backs, walks, pick-ups, potions. It holds plans back for her 730 ms attack lock and the 0.8 s arrow lock after an attack key. It taps the arrow first when she faces the wrong way.",
+      "see": [
+        "gamelab/control/actions.py"
+      ]
+    },
+    {
+      "term": "Heading",
+      "meaning": "Which way she faces. Her own keys tell it, until a move leaves it unknown. Since 2026-10-24 `perception/heading.py` reads it off her picture above her tag, and `Actions.heading` takes the frame's reading where it's newer than her last arrow.",
+      "see": [
+        "gamelab/perception/heading.py",
+        "gamelab/control/actions.py"
+      ]
+    },
+    {
+      "term": "Plan (a key plan)",
+      "meaning": "A JSON list of timed key and mouse events for the key player to play: at most 400 events within 20 s (`player.MAX_EVENTS`, `MAX_PLAN_MS`). Plans are data, never code. A plan can say when it ends (`end_ms`) so the next one starts at once, be cut short (a `.cancel` file), or be replaced mid-play (a splice).",
+      "see": [
+        "gamelab/control/player.py",
+        "gamelab/control/client.py"
+      ]
+    },
+    {
+      "term": "The player (the key player)",
+      "meaning": "`python -m gamelab player --elevate`, the one administrator process; Windows blocks input from normal programs into the game's admin window. It plays plans from lab/inbox only while the game is in front, answers in lab/outbox, and runs the watchdog, a thread that looks for the Lie Detector every 0.25 s, idle or not. It loads its code once, and exits on lab/STOP or after 24 idle hours.",
+      "see": [
+        "gamelab/control/player.py",
+        "gamelab/control/lie_recorder.py"
+      ]
+    },
+    {
+      "term": "Client",
+      "meaning": "`control/client.py`, the only way the unelevated stack gets keys into the game. `send` writes a plan into lab/inbox/<id>.json, and `wait` polls lab/outbox for the answer every 10 ms. `cancel` and `splice` cut a plan short or hand over a replacement.",
+      "see": [
+        "gamelab/control/client.py"
+      ]
+    },
+    {
+      "term": "The lab folder (inbox and outbox)",
+      "meaning": "`gamelab/lab/`, which git ignores, holds everything the processes share and keep. That includes plans in inbox/ and answers in outbox/, ALARM.json, hunt.json and the stop files, the telemetry, the recordings, and her calibration, key bindings and pet state.",
+      "see": [
+        "gamelab/paths.py",
+        "gamelab/control/client.py"
+      ]
+    },
+    {
+      "term": "Alarm (ALARM.json and clear-alarm)",
+      "meaning": "lab/ALARM.json says the Lie Detector was seen. While it exists every command that sends keys or brings the game to the front refuses to run (exit code 3), and the player plays only the four allowed plan kinds. `python -m gamelab clear-alarm` deletes it, but refuses while the cycle's recording is still running. Since 2026-10-29 a Lie Detector answered without reaching the Truth Booth clears its own alarm (`player.AUTO_RESUME`). Paging whoever is at the PC means 3 beeps 0.4 s apart and a Windows notification that doesn't take focus from the game (`alarm.page`), plus phone pushes through the Bark app (`control/notify.py`).",
+      "see": [
+        "gamelab/control/alarm.py",
+        "gamelab/control/player.py",
+        "gamelab/control/notify.py"
+      ]
+    },
+    {
+      "term": "Retreat",
+      "meaning": "On the Lie Detector, or on any HuntStop, she goes to a safe place using only her moves (`behavior/retreat.py`, `on_alarm` around every hunting command). On the Lie Detector she has 10 s, and the player takes `retreat` plans for 12 s; on a stop she has 60 s. She goes to the quickest wholly safe platform or a rope nothing reaches, else to a place 'safe enough'.",
+      "see": [
+        "gamelab/behavior/retreat.py",
+        "gamelab/control/alarm.py"
+      ]
+    },
+    {
+      "term": "Park",
+      "meaning": "Moving her to the map's safe place outside a hunt, with `nav --park` (`retreat.park_place`: the retreat's choice with no time limit). `gamelab stop` parks her, and the guard starts a detached `nav --park --tell` when she's in trouble between hunts.",
+      "see": [
+        "gamelab/behavior/retreat.py",
+        "gamelab/behavior/guard.py"
+      ]
+    },
+    {
+      "term": "Guard",
+      "meaning": "Since 2026-11-05 the guard runs inside the pet feeder (`pet --every`) once a second while no hunt runs (`behavior/guard.py`). It reads the perception service's newest state and acts on any of three things: two touches within 30 s, her HP under the safety stop's rule, or a note left by a stop or by a hunt that died. Then it parks her, at most 3 times an episode, or says why it can't.",
+      "see": [
+        "gamelab/behavior/guard.py",
+        "gamelab/behavior/pet.py"
+      ]
+    },
+    {
+      "term": "Stop (`gamelab stop`)",
+      "meaning": "The way to end a hunt. It writes lab/stop_hunt.json, which the hunt reads at its next look (`StopAsked`: only her moves from then on). It also cuts the plan that's playing, and waits to say where she ended up.",
+      "see": [
+        "gamelab/behavior/guard.py",
+        "gamelab/behavior/safety.py"
+      ]
+    },
+    {
+      "term": "Babysitter",
+      "meaning": "An external PowerShell script (babysit3.ps1, not in this repo) that keeps the always-on processes running. It starts the perception service when none runs, and stops the pet feeder while a hunting command runs, starting it again after. It also hands the rolling recording over from an old recorder to the service.",
+      "see": [
+        "gamelab/behavior/guard.py",
+        "gamelab/localization/service.py"
+      ]
+    },
+    {
+      "term": "Safety stop (and her reserve)",
+      "meaning": "Since 2026-10-28 the hunt ends when her HP stays under a reserve (`behavior/safety.py`). The reserve is her profile's hits (3 by default) times the largest touch any monster on the map can deal her, worked out live from her level and DEF. Two readings under it 0.25 s apart by her HP number (0.6 s by her bar) end the hunt: she retreats, the PC is paged, and the command exits with code 4. She has not rested to recover HP since 2026-10-26.",
+      "see": [
+        "gamelab/behavior/safety.py",
+        "gamelab/behavior/hunter.py"
+      ]
+    },
+    {
+      "term": "HuntStop",
+      "meaning": "The exceptions that end a hunt for a person to put right (`behavior/safety.py`): `SafetyStop`, `OutOfDarts`, `OutOfMp` and `StopAsked`. Each one sets its exit code, what's paged and how much of the rolling recording is saved. When one is raised, `retreat.on_alarm` sends her to a safe place, or leaves that to the guard if the game isn't in front.",
+      "see": [
+        "gamelab/behavior/safety.py",
+        "gamelab/behavior/darts.py",
+        "gamelab/behavior/retreat.py"
+      ]
+    },
+    {
+      "term": "Out of darts",
+      "meaning": "Her star count is never on screen, so `DartWatch` infers it. A long run of Lucky Seven presses that take no MP and kill nothing means she's out: 20 on Tree Dungeon, scaled by the map's toughest monster. The message bar saying she has no stars also counts. It raises `OutOfDarts` (exit code 5) and saves the last 90 s of the rolling recording.",
+      "see": [
+        "gamelab/behavior/darts.py"
+      ]
+    },
+    {
+      "term": "No-hit failsafe",
+      "meaning": "Since 2026-11-04, when 4 attacks in a row hit nothing, the episode is saved from the rolling recording, 3 s either side, to lab/recent/<time>-no-hit (`behavior/attacks.py`). Hitting nothing means no monster's HP bar appears or drops and her EXP doesn't rise. Separately, two throws at one monster with nothing to show make the next throw tap the arrow first.",
+      "see": [
+        "gamelab/behavior/attacks.py",
+        "gamelab/behavior/hunter.py"
+      ]
+    },
+    {
+      "term": "Hunter (the agent)",
+      "meaning": "`behavior/hunter.py`, the agent object every hunting command builds once. It owns her Senses, Actions and Looter and her books: ledger, drops, memory, aggro, attack choice. After every look it counts EXP gains as kills, measures her HP and touches, reads her facing, and runs `health_check`, which raises the stops.",
+      "see": [
+        "gamelab/behavior/hunter.py"
+      ]
+    },
+    {
+      "term": "Hunt loop (hunt mode)",
+      "meaning": "`behavior/hunt.py`'s `Hunt`, since 2026-10-19: one decision after every look. The first rule that applies picks one step: a throw, a short walk, a navigator trip toward an objective, or a stand on a pile. She stays at a ground while it pays and leaves by the rate rule.",
+      "see": [
+        "gamelab/behavior/hunt.py",
+        "gamelab/docs/hunt-modes.md"
+      ]
+    },
+    {
+      "term": "Ground, spot, objective, visit and value map",
+      "meaning": "The hunt loop's words (hunt-modes.md). A ground is a platform worth hunting, and a spot is where she stands to shoot it. The objective is what she's heading for now: a spot, a pile, or the next ground. A visit is her time at a ground, and the value map (lab/grounds.json) keeps each ground's visits and the EXP they gave.",
+      "see": [
+        "gamelab/docs/hunt-modes.md",
+        "gamelab/behavior/hunt.py",
+        "gamelab/behavior/tour.py"
+      ]
+    },
+    {
+      "term": "Grind (grinding)",
+      "meaning": "`behavior/grind.py`, the default for `tour --loop` since 2026-10-27; `--camp` hunts one ground at a time instead. It's the hunt loop going round a loop of stops over the map's spawn points. She stays at a stop only while it gives as much EXP a second as going on would, and shoots and loots on the legs between stops.",
+      "see": [
+        "gamelab/behavior/grind.py",
+        "gamelab/behavior/patrol.py"
+      ]
+    },
+    {
+      "term": "Patrol, belief and census",
+      "meaning": "Grinding's model of the map (`behavior/patrol.py`). It holds every spawn point she hunts and a stop on each platform that reaches some. A `Belief` estimates how many monsters each point holds now and later, with a census of the whole map. From these it finds the round of 2-12 stops with the best long-run EXP a minute, and chooses the next stop.",
+      "see": [
+        "gamelab/behavior/patrol.py"
+      ]
+    },
+    {
+      "term": "Tour (and stand by)",
+      "meaning": "`behavior/tour.py` is the original sweep of hunting platforms (`tour` without `--loop`): shoot each ground clear from a safe spot, collect the drops, then stand by on the nearest safe platform. Every hunt loop is built over a Tour for its map knowledge.",
+      "see": [
+        "gamelab/behavior/tour.py"
+      ]
+    },
+    {
+      "term": "Looter and the loot chain",
+      "meaning": "The `Looter` (`behavior/looting.py`) picks up after fights and remembers drops for later. The loot sweep decides which piles to take and in what order. The loot chain (`behavior/lootchain.py`, since 2026-11-05) runs through up to 4 of them as one navigator plan, with pick-up pressed all the way.",
+      "see": [
+        "gamelab/behavior/looting.py",
+        "gamelab/behavior/sweep.py",
+        "gamelab/behavior/lootchain.py"
+      ]
+    },
+    {
+      "term": "Ledger",
+      "meaning": "The hunt's books (`behavior/ledger.py`). Every EXP gain becomes a Kill placed on the monster her attack took. It also keeps the dead tracks, the Wounds (monsters she hurt and hasn't killed) and the DropStore of every pile she knows of.",
+      "see": [
+        "gamelab/behavior/ledger.py"
+      ]
+    },
+    {
+      "term": "Fight (clear and kill)",
+      "meaning": "`behavior/fight.py`. `clear` fights the monsters in reach look by look, and finishes the ones she has hurt, until a kill count, a time limit, or nothing left in reach. `kill` shoots one target until her EXP says it died.",
+      "see": [
+        "gamelab/behavior/fight.py"
+      ]
+    },
+    {
+      "term": "Probe",
+      "meaning": "An in-game experiment that settles one open question about reach, such as the star search's window, which walls stop a star, or the claw's swipe. It stands her at a set place on Thicket Around the Beach II and throws, and `probe score` weighs the answers (`behavior/probe.py`, 11 probes).",
+      "see": [
+        "gamelab/behavior/probe.py",
+        "gamelab/attack/reach.py"
+      ]
+    },
+    {
+      "term": "Telemetry (and topics)",
+      "meaning": "Every process's record of what it saw and did. `emit(topic, **data)` adds one JSON line, `{t, topic, ...}`, to lab/telemetry/<time>-<name>.jsonl from a writer thread, in parts of 64 MB. The mini-map follows the newest file live, and the analyses read the files later.",
+      "see": [
+        "gamelab/telemetry.py",
+        "gamelab/ui/state.py"
+      ]
+    },
+    {
+      "term": "Mini-map window and web page",
+      "meaning": "Read-only views of the telemetry that never touch the game. One is a tkinter window beside the game (`ui/app.py`). The other is an HTTP server on port 8765 that pushes records to a phone over Server-Sent Events (`ui/web.py`, `python -m gamelab web`), served through a Cloudflare tunnel. The same server has /review and /tls/.",
+      "see": [
+        "gamelab/ui/app.py",
+        "gamelab/ui/web.py",
+        "gamelab/ui/render.py"
+      ]
+    },
+    {
+      "term": "Review pages (/review)",
+      "meaning": "Recordings with perception's outcome drawn on each frame, stepped through or played on a phone (`ui/review.py`). The sets for the Lie Detector's mini-games are built by `tools/review_pages`.",
+      "see": [
+        "gamelab/ui/review.py",
+        "tools/review_pages/build.py"
+      ]
+    },
+    {
+      "term": "Rolling recording",
+      "meaning": "The game's last 5 minutes, kept in memory (`control/rolling.py`). Since 2026-10-26 it's fed by the perception service's own frames, 15 a second (`control/recording.py`). It's saved into a Lie Detector's cycle and as alarm clips, after a stop, and on demand with `save-recent`.",
+      "see": [
+        "gamelab/control/rolling.py",
+        "gamelab/control/recording.py",
+        "gamelab/control/partwriter.py"
+      ]
+    },
+    {
+      "term": "Lie Detector recording",
+      "meaning": "Each cycle gets a folder, lab/lie_detector/<time>/, with an index line for every watchdog look and a summary.json of the forms seen and the outcome, plus the 5 minutes before. Since 2026-11-01 the cycle's video is the rolling recorder's clip (`control/lie_recorder.py`).",
+      "see": [
+        "gamelab/control/lie_recorder.py",
+        "gamelab/control/rolling.py"
+      ]
+    },
+    {
+      "term": "YOLO",
+      "meaning": "Small neural-network detectors (YOLO11). From 2026-10-24 a YOLO 'shadow' checked the Lie Detector's frames, until the outline tracker replaced it on 2026-11-02. Today `assets/violetta.pt`, a YOLO11n trained only on frames rendered from the game's own pictures, finds the Violettas in about 10 ms a frame on the GPU.",
+      "see": [
+        "gamelab/perception/violetta.py",
+        "gamelab/perception/lie_target.py"
+      ]
+    },
+    {
+      "term": "Simulator (the World)",
+      "meaning": "`gamelab/sim/`: an offline game on a real map, with no game and no keys. `World` holds her body, the monsters, drops, pets and other players, and runs them tick by tick (5 ms) as key events arrive after the measured lags. The game itself acts at its 30 ms steps.",
+      "see": [
+        "gamelab/sim/world.py",
+        "gamelab/sim/__init__.py"
+      ]
+    },
+    {
+      "term": "Fakes",
+      "meaning": "`sim/fakes.py`. `FakeEyes` answers perception's questions from the World. `FakePlayer` plays plans on the World as the real player would, including cancels, splices and the Lie Detector (`alarm_at`). `Clock` makes time pass only when something sleeps or looks.",
+      "see": [
+        "gamelab/sim/fakes.py"
+      ]
+    },
+    {
+      "term": "Scenario",
+      "meaning": "One of gamelab's entry points (a trip, the hunt loop, grinding, a retreat, the safety stop...) built as `__main__` builds it, but run against the simulator. It gives a deterministic trace, and each scenario says what it `expects`, which tests/test_sim.py checks (`sim/scenarios.py`).",
+      "see": [
+        "gamelab/sim/scenarios.py"
+      ]
+    },
+    {
+      "term": "Golden trace",
+      "meaning": "A scenario's recorded trace, kept in gamelab/lab/golden/<scenario>.json (`sim/golden.py`). If a change leaves every trace byte-identical, it hasn't changed what she does. `record` writes the traces and `check` compares against them, on a pool of processes.",
+      "see": [
+        "gamelab/sim/golden.py",
+        "gamelab/sim/scenarios.py"
+      ]
+    },
+    {
+      "term": "Harness (presets, worlds, seeds, ab)",
+      "meaning": "`sim/harness.py` runs a hunting policy for a fixed simulated time on many world seeds. Each run uses a preset (`game` by default) and any named world switches (`--world`), and reads about a hundred outcomes from the simulated world. `compare` applies the bar seed by seed; `ab` runs this checkout against a base commit's cached seeds (`sim/baseline.py`).",
+      "see": [
+        "gamelab/sim/harness.py",
+        "gamelab/sim/baseline.py"
+      ]
+    },
+    {
+      "term": "Replay kit",
+      "meaning": "`sim/replay.py` runs any commit's perception step over lossless recordings of the magician grinding Tree Dungeon (R1-R3, 2026-11-02). Results are cached per commit and scored against hand-checked labels.",
+      "see": [
+        "gamelab/sim/replay.py",
+        "gamelab/sim/replay_run.py",
+        "gamelab/sim/replay_score.py"
+      ]
+    },
+    {
+      "term": "Native C (and the GPU)",
+      "meaning": "`gamelab/native.py` compiles gamelab's C sources with MSVC into DLLs named for each source's hash, and wraps them with ctypes. The C covers the masked template match, the monster search's first step, a frame's re-finds, her flight, camera registration, spawn fade-ins and the exact finder. A Direct3D 11 backend can do the re-finds with the CPU's answers to the bit.",
+      "see": [
+        "gamelab/native.py",
+        "gamelab/native.c",
+        "gamelab/search.c",
+        "gamelab/gpumatch.c"
+      ]
+    },
+    {
+      "term": "Capture (DXGI)",
+      "meaning": "Screen capture through DXGI desktop duplication, falling back to mss (`gamelab/capture.py`, since 2026-10-20). Only the perception service captures the game; a command's own Eyes refuse to.",
+      "see": [
+        "gamelab/capture.py",
+        "gamelab/perception/frames.py",
+        "gamelab/perception/eyes.py"
+      ]
+    },
+    {
+      "term": "Half-size px (look-frame px)",
+      "meaning": "With a 1920x1080 client, looks are taken at half size (960x540), so many constants measured then are in 'half-size px'. At the game's own 1366x768 a look frame is full size. `screen.Geometry` converts between them: `fpx` for half-size px, `px` for full-size screen px.",
+      "see": [
+        "gamelab/screen.py",
+        "gamelab/perception/eyes.py"
+      ]
+    },
+    {
+      "term": "Map units (and game px)",
+      "meaning": "The map data's coordinates, with x to the right and y down. The game's view is 1366x768 game px at one game px per map unit, stretched to the window (1.40625 screen px a unit at 1920x1080). Everything on the map is in map units: platforms, reach, distances and speeds (units/s).",
+      "see": [
+        "gamelab/screen.py",
+        "gamelab/localization/scene.py",
+        "gamelab/localization/mapdata.py"
+      ]
+    },
+    {
+      "term": "Camera registration and the scene locator",
+      "meaning": "Since 2026-10-30 the perception service places her within a few px each frame. `camreg` finds the camera's view by matching the frame against the map's own art. Her feet then come from her name tag, her plate's exact colours or her body matched against a bank of her poses. A Kalman filter carries her through frames where nothing finds her (`localization/locate.py`).",
+      "see": [
+        "gamelab/localization/camreg.py",
+        "gamelab/localization/locate.py",
+        "gamelab/localization/mapart.py"
+      ]
+    },
+    {
+      "term": "Pass",
+      "meaning": "One round of a loop, so the word has several uses. A navigator pass is look, route, chain, send, watch; a hunt-loop pass is one look and one step; a guard pass comes once a second. The server's spawn pass is the periodic refill of the spawn points.",
+      "see": [
+        "gamelab/control/navigator.py",
+        "gamelab/behavior/hunt.py",
+        "gamelab/behavior/guard.py"
+      ]
+    },
+    {
+      "term": "GAMELAB_* switches",
+      "meaning": "Environment variables that change behaviour for a run. GAMELAB_CHARACTER says who plays. GAMELAB_TARGET, GAMELAB_SCREEN and GAMELAB_LOOT_CHAIN set to 0 turn off the target planner, its whole screen or the loot chain. GAMELAB_GPU turns on the GPU re-finds. GAMELAB_FIXED_STATS (for tests and the harness) fixes her stats and leaves config.toml unread. The harness's baseline cache keys on all of them.",
+      "see": [
+        "gamelab/character.py",
+        "gamelab/sim/baseline.py",
+        "gamelab/behavior/lootchain.py"
+      ]
+    },
+    {
+      "term": "config.toml",
+      "meaning": "The repo's settings file: her keys (including `pet_food`), MapleHelper's hotkeys, control and timing, her character's stats and the characters, and the capture and perception options. `maplehelper/config.py` validates it into frozen dataclasses.",
+      "see": [
+        "config.toml",
+        "maplehelper/config.py"
+      ]
+    }
+  ],
+  "timeline": [
+    {
+      "date": "2026-10-18",
+      "title": "MapleHelper: one-button escape combos",
+      "what": "The combo helper came first: a low-level keyboard hook that turns F1-F4 into timed escape combos for a dart thief, with a click-through coach narrating each step. On the same day it gained an OCR reader for the HUD and the pickup messages.",
+      "see": [
+        "maplehelper/combos.py",
+        "maplehelper/hook.py",
+        "maplehelper/coach.py",
+        "maplehelper/ocr/loot.py"
+      ]
+    },
+    {
+      "date": "2026-10-18",
+      "title": "gamelab: an in-game test harness for the combos",
+      "what": "gamelab began as a way to measure the combos in the game. An elevated player played exact key timelines handed over as files, and the same combo scripts ran on a virtual clock. That's how the regular attack's lock of about 730 ms was found, and that quick taps right after takeoff were missed about 6% of the time.",
+      "see": [
+        "gamelab/control/player.py",
+        "gamelab/control/client.py",
+        "gamelab/control/timeline.py"
+      ]
+    },
+    {
+      "date": "2026-10-18",
+      "title": "Stop and page on the Lie Detector",
+      "what": "The player learned to stop and page on the Lie Detector. That day the mouse mini-game form wasn't known yet: it went unanswered and she was sent to the Truth Booth. It has been recognised ever since.",
+      "see": [
+        "gamelab/perception/lie_detector.py",
+        "gamelab/control/alarm.py"
+      ]
+    },
+    {
+      "date": "2026-10-18",
+      "title": "The game's own data, maps and the first hunts",
+      "what": "`gamedata` began reading the game's .wz files. Navigation was built on the map data, with physics-simulated landings, and then made to work in the game. Monsters were recognised from the game's own sprites, kills confirmed by her EXP going up, and moves chained and watched like a player's.",
+      "see": [
+        "gamedata/wz.py",
+        "gamelab/localization/mapdata.py",
+        "gamelab/motion/route.py",
+        "gamelab/perception/sprites.py"
+      ]
+    },
+    {
+      "date": "2026-10-19",
+      "title": "Layers like a self-driving stack",
+      "what": "gamelab was split into layer packages, each importing only the ones below, with a test to keep it so. The same change added the mini-map window and the offline simulator.",
+      "see": [
+        "tests/test_architecture.py",
+        "gamelab/ui/app.py",
+        "gamelab/sim/world.py"
+      ]
+    },
+    {
+      "date": "2026-10-19",
+      "title": "Hunt mode and the results harness",
+      "what": "The tour's fixed stops and separate trips gave way to one decision after every look (`tour --loop`), designed in hunt-modes.md. The harness measured it on seeded simulated hunts: 114.2 EXP a minute against the tour's 84.8 on 10 seeds.",
+      "see": [
+        "gamelab/behavior/hunt.py",
+        "gamelab/sim/harness.py",
+        "gamelab/docs/hunt-modes.md"
+      ]
+    },
+    {
+      "date": "2026-10-19",
+      "title": "The mini-map on a phone",
+      "what": "`python -m gamelab web` serves the mini-map as a web page. From 2026-10-20 records were pushed to it live and the map drawn on the phone.",
+      "see": [
+        "gamelab/ui/web.py"
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "title": "One movement engine",
+      "what": "Her body as the game moves it, rebuilt from Physics.img and checked on her recordings. The planner, the simulator and the checks all moved onto it, along with the 30 ms step, the jump's kick and the key lags.",
+      "see": [
+        "gamelab/motion/body.py",
+        "gamelab/motion/physics.py",
+        "gamelab/analysis/physics_check.py"
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "title": "DXGI capture and the first C",
+      "what": "Capture moved to DXGI desktop duplication, with mss to fall back on. Her flight was stepped in C, so a map's moves were built in 0.07 s, and the monster search's bookkeeping moved to C as well.",
+      "see": [
+        "gamelab/capture.py",
+        "gamelab/native.py",
+        "gamelab/native.c"
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "title": "Continuous perception: the feed and the tracker",
+      "what": "Monsters were followed frame by frame with ids, along with who killed them. The world step ran in a child process with its frames in shared memory, and Senses took looks and glances from that feed.",
+      "see": [
+        "gamelab/localization/feed.py",
+        "gamelab/localization/worldstate.py",
+        "gamelab/localization/tracking.py"
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "title": "The client's own star search",
+      "what": "Reach became the client's targeting, ported: the star's banded search, the claw's swipe, and walls of her own foothold group. In-game probes to settle its open questions were built and tested offline.",
+      "see": [
+        "gamelab/attack/reach.py",
+        "gamelab/behavior/probe.py"
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "title": "Route coverage and route diversity",
+      "what": "A report of each route move planned, taken and missed, and why the others lose. Trips could also choose among the planner's distinct ways by a softmax over their times (`--ways N`, off by default).",
+      "see": [
+        "gamelab/analysis/coverage.py",
+        "gamelab/motion/route.py"
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "title": "Her EXP number, and other players",
+      "what": "Her EXP number was read glyph by glyph from the game's own status-bar pictures, and each kill put on a monster of the kind its EXP gain named. Other players were placed on the map by their minimap dots and followed from look to look.",
+      "see": [
+        "gamelab/perception/exp_number.py",
+        "gamelab/localization/gains.py",
+        "gamelab/localization/players.py"
+      ]
+    },
+    {
+      "date": "2026-10-23",
+      "title": "Any key and clicks; the game at its own 1366x768",
+      "what": "The player could press any key and click inside the game, which the key bindings window's Confirm button needs. It could also resize the client, and every look carried its window geometry, so the game could run at 1366x768. Work on West Rocky Mountain II began.",
+      "see": [
+        "gamelab/control/player.py",
+        "gamelab/screen.py",
+        "gamelab/control/window_size.py"
+      ]
+    },
+    {
+      "date": "2026-10-24",
+      "title": "The player stays up, locked, after a Lie Detector",
+      "what": "The watchdog now recorded each Lie Detector's whole cycle, and the player stayed up, locked, instead of shutting down at once. It took plans again only once the alarm was cleared and a person started it again.",
+      "see": [
+        "gamelab/control/player.py",
+        "gamelab/control/lie_recorder.py"
+      ]
+    },
+    {
+      "date": "2026-10-24",
+      "title": "Retreat on the Lie Detector, and pet care",
+      "what": "On the Lie Detector the hunt stops and she retreats to a safe place within 10 s, using her moves alone. Her pet is fed by its fullness, read off her Character Info. With the alarm up, the player still takes those two kinds of plan.",
+      "see": [
+        "gamelab/behavior/retreat.py",
+        "gamelab/behavior/pet.py",
+        "gamelab/control/alarm.py"
+      ]
+    },
+    {
+      "date": "2026-10-24",
+      "title": "Tree Dungeon, and positioning by danger",
+      "what": "Tree Dungeon, Forest Up North II (10002073) arrived in the simulator and the harness. The danger of a place was modelled from the game data, and it now chooses where she stands, waits and lets a monster come.",
+      "see": [
+        "gamelab/attack/danger.py",
+        "gamelab/attack/spots.py",
+        "gamelab/sim/scenarios.py"
+      ]
+    },
+    {
+      "date": "2026-10-24",
+      "title": "The rolling recording",
+      "what": "The game's last 5 minutes are kept in memory, 10 frames a second, so what led up to a moment can be saved after it. Something had popped up wanting an answer within 10 s, and nothing had recorded it.",
+      "see": [
+        "gamelab/control/rolling.py"
+      ]
+    },
+    {
+      "date": "2026-10-24",
+      "title": "Her heading off the frame",
+      "what": "Which way she faces is read off her own picture above her tag. Her throws tap the arrow by it, where before her facing was unknown after every move.",
+      "see": [
+        "gamelab/perception/heading.py",
+        "gamelab/control/actions.py"
+      ]
+    },
+    {
+      "date": "2026-10-24",
+      "title": "Her memory of the monsters",
+      "what": "Monsters seen anywhere are kept across looks with a fading chance of still being there, and drawn faded on the mini-map. Before this, one look's monsters, mostly her band's, were all she had.",
+      "see": [
+        "gamelab/localization/memory.py",
+        "gamelab/ui/render.py"
+      ]
+    },
+    {
+      "date": "2026-10-24",
+      "title": "Grinding over the spawn points",
+      "what": "A loop over the map's spawn points, chosen by EXP a minute, with the hunt loop going round it. `patrol` shows grinding's view of a map and of a run.",
+      "see": [
+        "gamelab/behavior/grind.py",
+        "gamelab/behavior/patrol.py"
+      ]
+    },
+    {
+      "date": "2026-10-24",
+      "title": "Lucky Seven or the regular attack, per throw",
+      "what": "Each throw became Lucky Seven or the regular attack, chosen by her MP and what the monster has left. The simulator started keeping her MP.",
+      "see": [
+        "gamelab/attack/choice.py",
+        "gamelab/behavior/attacks.py",
+        "gamelab/sim/world.py"
+      ]
+    },
+    {
+      "date": "2026-10-25",
+      "title": "The perception service",
+      "what": "One process looks at the game at all times and hands its states and frames to every attached command; every look became the service's. The screen sweep went, because every look now has the monsters the service follows on the whole screen.",
+      "see": [
+        "gamelab/localization/service.py",
+        "gamelab/localization/feed.py"
+      ]
+    },
+    {
+      "date": "2026-10-25",
+      "title": "The notice and the image quiz",
+      "what": "The alarm comes at the mouse mini-game's notice, 10 s before its board, and at the image quiz's warning, 30 s before the quiz. Their half-size templates were cut from the rolling recorder's frames.",
+      "see": [
+        "gamelab/perception/lie_detector.py"
+      ]
+    },
+    {
+      "date": "2026-10-26",
+      "title": "No resting: the safety stop, and out of darts",
+      "what": "Sitting to recover HP was removed, since her pet drinks her potions. Low HP now ends the hunt: she retreats and the PC is paged. Lucky Seven presses that take no MP and kill nothing end it as out of darts.",
+      "see": [
+        "gamelab/behavior/safety.py",
+        "gamelab/behavior/darts.py"
+      ]
+    },
+    {
+      "date": "2026-10-26",
+      "title": "Perception's hot paths in C; the recording in the service",
+      "what": "The masked colour match and a frame's re-finds moved to C, giving 30 frames a second in a crowd. The rolling recording moved into the perception service, fed from its own frames.",
+      "see": [
+        "gamelab/perception/match.py",
+        "gamelab/native.c",
+        "gamelab/control/recording.py"
+      ]
+    },
+    {
+      "date": "2026-10-27",
+      "title": "Two characters: the thief and the magician",
+      "what": "Who plays became a profile of data, so the magician's Magic Claw could stand beside the thief's stars. Localization takes a Shape of her attacks.",
+      "see": [
+        "gamelab/character.py",
+        "gamelab/classes/thief.py",
+        "gamelab/classes/magician.py"
+      ]
+    },
+    {
+      "date": "2026-10-27",
+      "title": "Grinding by default; her kill's monster",
+      "what": "`tour --loop` grinds by default (`--camp` for one ground). A gain is now bound to the monster her attack took at the key, followed by its track until its death is seen.",
+      "see": [
+        "gamelab/behavior/grind.py",
+        "gamelab/localization/tracking.py"
+      ]
+    },
+    {
+      "date": "2026-10-27",
+      "title": "Re-finds on the GPU, off by default",
+      "what": "A Direct3D 11 backend for the re-finds' matches that gives the CPU's answers. It's switched on by lab/GPU or GAMELAB_GPU=1.",
+      "see": [
+        "gamelab/gpumatch.c",
+        "gamelab/gpumatch.hlsl",
+        "gamelab/native.py"
+      ]
+    },
+    {
+      "date": "2026-10-28",
+      "title": "The safety stop in HP",
+      "what": "The stop's rule became her profile's hits times the map's largest touch, in HP. It's worked out live from the game data's touch damage, her level and DEF, and her own measured touches.",
+      "see": [
+        "gamelab/behavior/safety.py",
+        "gamelab/behavior/bootstrap.py"
+      ]
+    },
+    {
+      "date": "2026-10-28",
+      "title": "Her keys checked, her stat window read, evading",
+      "what": "Her attack key is doubted after presses without effect, and the game's Key Bindings window is read. Her stat window gives her W.DEF at a hunt's start. A monster in her way is waited out at a refuge.",
+      "see": [
+        "gamelab/behavior/keycheck.py",
+        "gamelab/behavior/statcheck.py",
+        "gamelab/control/navigator.py"
+      ]
+    },
+    {
+      "date": "2026-10-28",
+      "title": "Checking a change cheaply",
+      "what": "The goldens run on a pool of processes, master's harness results are cached per seed, and `ab` compares a checkout against them.",
+      "see": [
+        "gamelab/sim/golden.py",
+        "gamelab/sim/baseline.py",
+        "gamelab/sim/harness.py"
+      ]
+    },
+    {
+      "date": "2026-10-29",
+      "title": "The magician hunts; the player resumes by itself",
+      "what": "The magician grinds Tree Dungeon by swapping reach's constants to Magic Claw's search. An answered Lie Detector that never reached the Truth Booth now clears its own alarm, with no UAC click to start the player again.",
+      "see": [
+        "gamelab/attack/magic.py",
+        "gamelab/control/player.py"
+      ]
+    },
+    {
+      "date": "2026-10-30",
+      "title": "Her place from the scene",
+      "what": "The camera is registered against the map's own art each frame. Her feet come from her name tag, her name plate or her body, with a filter carrying her through frames where none of them finds her. The cues' inner loops are in C.",
+      "see": [
+        "gamelab/localization/camreg.py",
+        "gamelab/localization/locate.py",
+        "gamelab/perception/plate.py"
+      ]
+    },
+    {
+      "date": "2026-10-30",
+      "title": "Perception at 15 frames a second, one pass a frame",
+      "what": "Every frame now gives every monster on the whole screen. The planner's monsters come from that state, the loot sweep prices her drops in her time on it, and a hunt collapses her chat box at its start.",
+      "see": [
+        "gamelab/localization/rate.py",
+        "gamelab/localization/worldstate.py",
+        "gamelab/behavior/sweep.py",
+        "gamelab/behavior/chatcheck.py"
+      ]
+    },
+    {
+      "date": "2026-10-31",
+      "title": "The server's respawn everywhere; Tree Dungeon only",
+      "what": "Every simulation fills the map to its cap at each spawn pass, never spawning within 100 units of a monster. The first map's and West Rocky Mountain II's scenarios were removed, since she played only Tree Dungeon.",
+      "see": [
+        "gamelab/sim/world.py",
+        "gamelab/sim/scenarios.py",
+        "gamelab/localization/mapdata.py"
+      ]
+    },
+    {
+      "date": "2026-11-01",
+      "title": "Spawns seen as they fade in",
+      "what": "Every spawn point in view is watched every frame for a newborn fading in, by fitting its alpha over the map's art.",
+      "see": [
+        "gamelab/perception/spawns.py",
+        "gamelab/spawns.c"
+      ]
+    },
+    {
+      "date": "2026-11-02",
+      "title": "The roadmap's items merged",
+      "what": "Her walk and climb now come from her stat window's SPEED by the client's formula. Also merged: records to measure by with walkfit, the replay kit, the simulator's touches against live, the simulator's magician, and hanging under a rope's top until the way up clears.",
+      "see": [
+        "gamelab/motion/physics.py",
+        "gamelab/analysis/walkfit.py",
+        "gamelab/sim/replay.py"
+      ]
+    },
+    {
+      "date": "2026-11-02",
+      "title": "The mini-game's target followed live",
+      "what": "The perception service follows the mouse mini-game's figure on its own frames, replacing the YOLO shadow. Human-like mouse trails were added for the pointer.",
+      "see": [
+        "gamelab/perception/lie_target.py",
+        "gamelab/control/lie_tracking.py",
+        "maplehelper/mouse_trail.py"
+      ]
+    },
+    {
+      "date": "2026-11-03",
+      "title": "Violetta followed live and answered",
+      "what": "YOLO finds the Violettas on every frame, each round is fitted to the client's shuffle rules, the answer's button is clicked, and the pass dialog's OK clicked after.",
+      "see": [
+        "gamelab/perception/violetta.py",
+        "gamelab/control/violetta_live.py"
+      ]
+    },
+    {
+      "date": "2026-11-03",
+      "title": "The cornered study: aim by a wall, the spawn guard",
+      "what": "Three fixes for being cornered. Her aim up close by a wall uses the client's hit point. A touch with no monster seen is answered with a throw from the air. Trips to piles are held for the map's next spawn pass.",
+      "see": [
+        "gamelab/attack/reach.py",
+        "gamelab/attack/stance.py",
+        "gamelab/localization/spawnclock.py",
+        "gamelab/behavior/hunt.py"
+      ]
+    },
+    {
+      "date": "2026-11-03",
+      "title": "Knock landings and aggro; grinding follows the spawns",
+      "what": "Two building blocks for what happens after a touch: knock landings flown and priced, and a passive aggro memory. Neither is read by a decision yet. Grinding gained a census of every spawn point's monsters.",
+      "see": [
+        "gamelab/attack/knock.py",
+        "gamelab/localization/aggro.py",
+        "gamelab/behavior/patrol.py"
+      ]
+    },
+    {
+      "date": "2026-11-04",
+      "title": "The target-first planner",
+      "what": "Grinding decides which monster to hit next by EXP over time, keeps it, and plans against it. It's on by default (`GAMELAB_TARGET=0` turns it off).",
+      "see": [
+        "gamelab/attack/target.py",
+        "gamelab/behavior/targeting.py"
+      ]
+    },
+    {
+      "date": "2026-11-04",
+      "title": "Monsters near her by their exact pixels",
+      "what": "An exact-pixel finder sees monsters near her however little of them shows. Throws at monsters no look has go by the evidence for them (presence).",
+      "see": [
+        "gamelab/perception/exact.py",
+        "gamelab/behavior/presence.py"
+      ]
+    },
+    {
+      "date": "2026-11-04",
+      "title": "When her attacks hit nothing",
+      "what": "A frame misread her facing and 85 attacks went into a wall. Since then, two throws showing nothing tap the arrow first, and 4 attacks without a hit save a recording of the episode.",
+      "see": [
+        "gamelab/behavior/attacks.py",
+        "gamelab/control/actions.py"
+      ]
+    },
+    {
+      "date": "2026-11-05",
+      "title": "The whole screen, the next move, the loot chain",
+      "what": "The planner weighs every monster on screen and the move after the kill. Drops are run through as one navigator plan with pick-up pressed all the way.",
+      "see": [
+        "gamelab/behavior/lootchain.py",
+        "gamelab/behavior/targeting.py"
+      ]
+    },
+    {
+      "date": "2026-11-05",
+      "title": "A stop that parks, and a guard between hunts",
+      "what": "After a killed hunt left her to die unseen, `gamelab stop` became the way to end a hunt, and she parks. A guard in the pet feeder parks her when she's touched between hunts. Merged 2026-11-06.",
+      "see": [
+        "gamelab/behavior/guard.py",
+        "gamelab/behavior/retreat.py"
+      ]
+    },
+    {
+      "date": "2026-11-07",
+      "title": "Review page builders in git",
+      "what": "The builders of the Lie Detector's and Violetta's review sets were committed; the pages they build stay outside git.",
+      "see": [
+        "tools/review_pages/build.py",
+        "gamelab/ui/review.py"
+      ]
+    },
+    {
+      "date": "2026-11-13",
+      "title": "/tls/ on the web page",
+      "what": "The recorder's network captures, with their TLS decrypted, were served at /tls/ behind Cloudflare Access. On 2026-11-14 the x-csauth calls were added as a timeline per computer.",
+      "see": [
+        "gamelab/ui/tls/view.py",
+        "gamelab/ui/tls/csauth.py"
+      ]
+    }
+  ]
+}

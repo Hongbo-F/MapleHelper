@@ -1,0 +1,2478 @@
+{
+ "id": "runtime",
+ "layer": "runtime",
+ "title": "Runtime: the command line, the processes and the lab folder",
+ "tagline": "One command line, a handful of cooperating processes, talking through files and a pipe",
+ "summary": "Everything starts as `python -m gamelab <command>` (gamelab/__main__.py). A few commands are long-lived processes: the elevated key player, the always-on perception service, a hunting command, the pet feeder with its guard, the mini-map's web server; an external babysitter script keeps the always-on ones running. They never call each other: they talk through files under `gamelab/lab/` (plans in an inbox, results in an outbox, flag files such as `STOP` and `ALARM.json`), a named pipe with shared memory for perception, and JSON-lines telemetry.",
+ "details_md": "**Why it is several processes, not one program.** Three facts of the PC shape the runtime:\n\n- **Administrator rights.** MapleStory runs as administrator, and Windows blocks key presses from normal programs into admin windows. So exactly one small process, the **key player**, runs elevated (one click on Windows' UAC prompt, the \"allow this app to make changes\" dialog, per session), and everything else runs as a normal user and hands it *plans* (JSON data, never code) through files. The player loads as little of gamelab as it can: `tests/test_architecture.py` starts it the way the command line does and fails if any of the stack (behavior, motion, localization, attack, ui, sim, the game data, tkinter or gamelab's C pieces) comes along.\n- **Python's global lock.** Planning holds the GIL; a perception thread in the same process got 16 of its 60 looks in 2 s while the planner worked. So perception runs in a process of its own. Until 2026-10-25 each command spawned a *feed child* of its own; since then one shared **perception service** (`python -m gamelab perceive`) looks at the game 15 times a second for everyone (the user: \"run one shared perception process at all times\").\n- **Screen captures are scarce.** With `watch`, the pet feeder and a hunt each holding a DXGI desktop duplication (Windows' fast screen-capture interface), a third one failed (0x887A0022). Now no command captures the game for its looks: only the service builds `ScreenFrames` (`tests/test_architecture.py` checks it) and the commands read its frames. The exceptions are deliberate: the key player records the client area when a plan asks for frames (`snap`, `act`, `calibrate`, the recorded tests), `spot` and the old `gamelab recorder` grab with mss, and `bench-capture` and `bench-look --live` make their own grabber to time captures.\n\n**Who runs.**\n\n| Process | Started by | Elevated | Lives |\n|---|---|---|---|\n| key player (`player --elevate`) | a person (UAC) | yes | until `lab/STOP`, 24 idle hours, or a Lie Detector dealt with |\n| perception service (`perceive`) | the babysitter, or any command's client (`service.ensure`, through WMI) | no | always; one per PC (a named mutex) |\n| a hunting command (`tour --loop`, `hunt clear`, `nav`, `probe run`) | a person (or an external grind loop) | no | its run |\n| pet feeder and guard (`pet --every 1`) | the babysitter, while no hunt runs | no | between hunts |\n| parker (`nav --park`) | the guard, `gamelab stop`, or a person | no | one trip |\n| mini-map / web page (`minimap`, `web`) | a person | no | until closed |\n| children of the service | the service | no | the mini-game tracker while the alarm is up; a part writer per save |\n\nThe **babysitter** is a PowerShell script outside the repo (`babysit3.ps1` in `D:/MapleHelper-scratch`), polling every 5 s: it starts the service when none runs, stops the pet feeder while a hunting command's process is seen and starts it again after, and hands the rolling recording from an old `gamelab recorder` to the service.\n\n**How they talk.** Nothing calls across processes directly. They talk through:\n\n- **Files in `gamelab/lab/`**, written whole (a `.tmp` then a rename) and polled: the player's `inbox/` and `outbox/` (polled every 10 ms on both sides), flag files (`STOP`, `ALARM.json`, `stop_hunt.json`, `guard_mode.txt`), small state files that survive restarts (`hunt.json`, `parked.json`, `park_note.json`, `guard.json`, `pet.json`, `vitals.json`, `window_tries.json`, `alarm_keys.json`), and the recorder's own `recorder/inbox`, `outbox` and `status.json`.\n- **A named pipe and shared memory** for perception: `\\\\.\\pipe\\gamelab-perceive` (its authkey and pid in `lab/perceive.json`), states pickled down it by a writer thread per client, the frames in rings of shared memory (16 look frames, 2 full-size).\n- **Detached starts through WMI** (Windows Management Instrumentation): a process created through it is not its starter's child, so it outlives it (and gets none of its environment). `service.ensure` starts the service this way, the guard its park (`nav --park --tell`), and the babysitter everything it starts.\n- **Named mutexes** (Windows' system-wide locks) for \"one at a time\": `Local\\gamelab-perceive` and `Local\\gamelab-rolling-recorder`.\n- **stdin/stdout pipes** to the service's two kinds of child process (pickled messages down, replies up).\n- **Telemetry**: JSON lines in `lab/telemetry/<time>-<command>.jsonl`, which the mini-map and the offline analyses read.\n\n**The gates at the command line.** `main` decides who plays (`--character`, set before her physics loads), refuses a magician's `lock`, `combo` and `probe run`, and refuses the commands that bring the game forward or send input (`GAME_COMMANDS`, and `probe run`) while `lab/ALARM.json` is up; `keys --read` and `stats --read` check the alarm themselves and send nothing, `pet` goes on with its food only (the player takes it), and `perceive` and `watch` keep looking. The exit code tells a caller what happened: 0 done, 1 an error, 2 refused, 3 the Lie Detector, 4 the safety stop (also HP not read, a map too strong), 5 out of darts, 6 the key check, 7 the stat window, 8 out of MP, 9 a stop asked by `gamelab stop`. Whatever happens, `_close_perception` detaches the command from the service and prints what it had of it, and a clean end removes `lab/hunt.json`, so a hunt that was killed or crashed is visible to the guard.",
+ "groups": [
+  {
+   "id": "cli",
+   "title": "The command line",
+   "summary": "The single entry point: argument parsing, the gates before a command (who plays, the Lie Detector alarm), the wiring of a command's Hunter to the perception service and the player, and the start of every long-lived process. The processes, the lab folder and all 47 commands are listed in this slice's runtime view.",
+   "modules": [
+    "gamelab/__main__.py"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "path": "gamelab/__main__.py",
+   "title": "The command line",
+   "tagline": "`python -m gamelab`: 47 subcommands, the safety gates before them, and process glue",
+   "summary": "The single entry point of gamelab: every process of the autonomous player, from the elevated key player to the perception service, the hunts, the pet feeder and the mini-map, is started as `python -m gamelab <command>`. It checks who plays and whether the Lie Detector alarm is up before anything touches the game, wires a command's Hunter to the perception service and the key player, and turns how a command ended into an exit code.",
+   "details_md": "`gamelab/__main__.py` is the top of the stack: the only module allowed to import every layer. It imports what many commands share (analysis, control, the shared modules) at the top; each command imports the other layers inside its own function, which keeps the elevated `python -m gamelab player` light.\n\n**`main(argv)`** is the same for all 47 subcommands:\n\n1. `build_parser()` parses the line. Every subcommand but `character` also takes `--character` after its own name (`gamelab tour --character magician ...`), so the babysitter's process match sees the command it is.\n2. **Who plays.** `_play_as` sets `GAMELAB_CHARACTER` for this process and its children, and refuses if her physics (`motion.physics`) is already loaded as someone else. `_unnamed` makes an unnamed in-game command play the thief when only `lab/character.json` or config.toml chose another (her bottom bar isn't read yet), except `perceive`, `pet` (`FOLLOW_CHOICE`) and the attacking commands (left to `_refused_as`). `_refused_as` refuses a non-thief's `lock`, `combo` and `probe run` (`HERS_NOT_YET`). For `hunt`, `nav` and `tour`, `attack.magic.apply` switches the attack layer to the magician's Magic Claw when she plays.\n3. DPI awareness on (real pixels whatever the display scaling), then `client.check_alarm()` for `GAME_COMMANDS` and anything whose parser sets `game` (`probe run`).\n4. The command's function runs. Its exceptions become exit codes: `LieDetectorAlarm` 3, `PlayerError` or `RuntimeError` 1 with `error: ...`, a `HuntStop` (the safety stop, out of darts, a stop asked...) its own `exit_code`. `_hunt_over` (clean ends, the Lie Detector and hunt stops) removes `lab/hunt.json`; `_close_perception` always runs.\n\n**Wiring a command that acts.** `_hunter(args, ...)` builds the agent (a `behavior.hunter.Hunter`) the same way for `hunt` (`hunt look` as a viewer that sends nothing), `nav`, `tour`, `probe run`, `pet`, `keys --read`, `stats --read` and `nav --park` (the last four send keys but don't hunt: no size fix, no OCR warm-up):\n\n- her keys (`keymap.at_start`: the bindings last read off the game, else config.toml `[keys]`) and the map (`mapdata`);\n- `_perception` attaches a `ServiceClient` named for the command (`tour`, `hunt-clear`, `pet`...), saying whether it sends keys (`acts`) and tells her throws; it waits up to `PERCEPTION_WAIT_S` (20 s) for the welcome, the client starting the service through WMI if none answers, and a hunting command stops if the service perceives another character (`_perceives_her`);\n- for a command that hunts (`hunt kill|clear`, `nav`, `tour`, `probe run`), `_size_fix` and `_fit_start`: a client of a size the eyes aren't calibrated for is set right with Alt+Enter twice and waited for, `START_WAIT_S` (180 s) at most;\n- `_eyes` builds `Eyes` on the service's frames (never capturing) with the map's monster detector and minimap picture (`_minimap_picture`: 3 tries, 0.5 s apart; one that won't load stops the command);\n- the OCR models warmed on a thread, the `Hunter` built, the phone pushes wired (`notify`), her keys published for the player's Lie Detector allowance (`lab/alarm_keys.json`);\n- a command that takes `--low-hp` (`hunt`, `tour`, `probe run`) then waits for her max HP off the HUD (5 s at most), collapses her chat box, reads her stat window and refuses a map whose monsters are too strong for her.\n\n`_record(command, map)` starts the run's telemetry (`lab/telemetry/<time>-<command>.jsonl`), claims `lab/hunt.json` for `hunt`, `probe`, `nav` and `tour` (`guard.claim`; a park claims it as `nav-park`, but never takes it from a running hunt), and writes the `session` record with her physics. `_to_game` brings the game forward and waits `FRONT_WAIT_S` (3 s): the player refuses every plan while another window is in front. The hunting commands run inside `retreat.on_alarm`: on the Lie Detector or a hunt stop she goes to a safe place before the exception reaches `main`.\n\n**The long-lived processes are started here too.** `cmd_player --elevate` relaunches `python -X utf8 -m gamelab player` through `ShellExecuteW(\"runas\")`, minimized and not activated; the elevated copy runs `control.player.serve`. `cmd_perceive` takes the service's mutex, sets its priority and timers (`service.settle`), and hands `service.Service` its `Publisher` (telemetry), the rolling `Recording` and the Lie Detector trackers. `cmd_pet --every` is the babysitter's pet feeder: between follows it runs the guard's passes once a second (`_guarded`), and the guard's park is started detached through WMI (`_guard_pass`: `nav --park --tell >> lab/park.log`). `cmd_minimap` runs the web server and the tkinter window in one process.\n\n**The rest** are tools: explore steps (`parse_steps`), combo and lock measurements, the in-game window readers, offline analyses.",
+   "lines": 3576,
+   "key_items": [
+    {
+     "name": "main",
+     "kind": "function",
+     "line": 3528,
+     "signature": "def main(argv=None) -> int",
+     "summary": "Parses the line, applies who plays and the Lie Detector gate, runs the command and maps its exceptions to exit codes; always detaches from the perception service.",
+     "details_md": "Order: `_play_as` (exit 2 if `--character` comes too late), `_unnamed`, `_refused_as` (exit 2: a non-thief's `lock`, `combo` or `probe run`, `HERS_NOT_YET` saying why), `magic.apply` for `hunt`/`nav`/`tour`, `enable_dpi_awareness`, `client.check_alarm()` for `GAME_COMMANDS` or `args.game`. Exceptions: `client.LieDetectorAlarm` -> 3 with instructions to answer it and run `clear-alarm`; `client.PlayerError`/`RuntimeError` -> 1; a `behavior.safety.HuntStop` -> its `exit_code`; anything else is re-raised. `finally: _close_perception()`."
+    },
+    {
+     "name": "build_parser",
+     "kind": "function",
+     "line": 3050,
+     "signature": "def build_parser() -> argparse.ArgumentParser",
+     "summary": "Declares all 47 subcommands, their options and defaults, and adds `--character` after every command's name.",
+     "details_md": "`hunt` takes a mode (`look`, `kill`, `clear`, `shots`); `probe` has its own subparsers (`list`, `run`, `score`), `run` setting `game=True` so the alarm gate applies. `minimap` and `web` share `map_args` (port 8765, host 0.0.0.0). `tour`'s `--grind` (the default since 2026-10-27) and `--camp` are a mutually exclusive group."
+    },
+    {
+     "name": "_hunter",
+     "kind": "function",
+     "line": 1040,
+     "signature": "def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, restore: bool = True, **kw)",
+     "summary": "Builds the Hunter for any command that looks or acts in the game: keys, map, perception client, size fix, eyes, OCR warm-up, phone pushes, published keys, and the start checks of a hunt.",
+     "details_md": "Steps: her keys (`keymap.at_start`), the map (`mapdata.load`), `_perception`, then for a command that hunts `_size_fix` + `_fit_start`, the caller's `fit(perception)`, `_eyes`, the OCR warm-up, the `Hunter`, the phone pushes (`notify.BackpackPush`, `Vitals`), `keymap.publish`. `viewer` (`hunt look`): neither sends keys nor tells throws, no size fix, a minimized game waited for. `throws=False` (`pet`, `keys --read`, `stats --read`, `nav --park`): sends keys but doesn't hunt, no size fix, no OCR warm-up. `fit(perception)` runs before the eyes are made (the pet's `PetWait`, `nav --park`'s `_not_minimized`). Commands that take `--low-hp` (`hunt`, `tour`, `probe run`) then wait up to `safety.HP_WAIT_S` (5 s) for her max HP (unless `--low-hp` is a share, 1 or under), collapse her chat box, read her stat window (which shows her max HP too), raise `HpNotRead` if her max HP is still unknown, and raise `TooStrong` on a map whose monsters are too strong for her (both exit 4)."
+    },
+    {
+     "name": "_perception",
+     "kind": "function",
+     "line": 1001,
+     "signature": "def _perception(model, title: str, name: str, acts: bool, throws: bool = False)",
+     "summary": "Attaches this command to the perception service as a named client and waits up to PERCEPTION_WAIT_S for its welcome.",
+     "details_md": "The client is appended to `_PERCEPTION` so `main` closes it. `ready()` raises `RuntimeError` when another command holds the service on another map. Without a welcome in time the command goes on and its looks stand still until states come."
+    },
+    {
+     "name": "_record",
+     "kind": "function",
+     "line": 1601,
+     "signature": "def _record(command: str, map_id: int) -> None",
+     "summary": "Starts the run's telemetry file, claims lab/hunt.json for hunting commands, and writes the run's session record.",
+     "details_md": "`telemetry.record_to(command)`; `guard.claim(command)` when `command.split('-')[0]` is in `guard.HUNTS` (`hunt`, `probe`, `nav`, `tour`); `telemetry.emit('session', map, command, mode='live', physics=..., jump_aside, hop_up)`; `gcstats.report_every` (Python's garbage collections once a minute). Called before `_hunter`, whose start may resize the client."
+    },
+    {
+     "name": "cmd_player",
+     "kind": "function",
+     "line": 108,
+     "signature": "def cmd_player(args) -> int",
+     "summary": "`player`: runs the key player here, or with `--elevate` relaunches it as administrator through a UAC prompt.",
+     "details_md": "`ShellExecuteW(None, 'runas', sys.executable, '-X utf8 -m gamelab player', REPO, SW_SHOWMINNOACTIVE)`. A return of 32 or less is an error: 5 the UAC prompt declined, 2 python not found, 3 folder not found. Refused while the alarm is up (`client.check_alarm`)."
+    },
+    {
+     "name": "cmd_perceive",
+     "kind": "function",
+     "line": 2653,
+     "signature": "def cmd_perceive(args) -> int",
+     "summary": "`perceive`: the perception service's process: one per PC, its telemetry, the rolling recording and the Lie Detector trackers wired in, then `Service.serve`.",
+     "details_md": "Takes `service.MUTEX` (or `SAVED_MUTEX` with `--frames`); a second one prints that one is running and returns 0. Live: `telemetry.console_in_background()`, `record_to('perceive')`, a `Publisher`, `Recording(title)` unless `--no-record`, and `Together(LieTracking, VioletaLive)`. With `--frames DIR`: saved PNGs looked at round and round (`--hold` 30 times each), nothing published or recorded, at its own pipe and info file (`GAMELAB_PERCEIVE=saved` reaches it)."
+    },
+    {
+     "name": "cmd_pet",
+     "kind": "function",
+     "line": 1366,
+     "signature": "def cmd_pet(args) -> int",
+     "summary": "`pet`: her pet fed by its fullness followed in time; with `--every N` a loop that waits for the game, waits out a wrong-sized client, and runs the guard between follows.",
+     "details_md": "Each follow: `_pet_resized` (a client now at another calibrated size ends the process for the babysitter to restart it with eyes for it), `PetWait` (a wrong size, full screen or the game drawn off its client: nothing sent), `_pet_keys` (follows key bindings another command read since), then `hunter.pet.tend(present=...)`. A `PlayerError` (the alarm's limits, no player) is logged and tried again next time. With the alarm up it goes on feeding but never reads (the read double-clicks her)."
+    },
+    {
+     "name": "_guard_pass",
+     "kind": "function",
+     "line": 1446,
+     "signature": "def _guard_pass(hunter, title: str)",
+     "summary": "Builds the guard's pass for `pet --every`: the service's newest state, her HP against the stop rule, the phone, and a detached `nav --park --tell`.",
+     "details_md": "`latest()` asks the feed for a state no older than `guard.STATE_AGE_S` (3 s) without waiting; `low(st)` compares her HP with `hunter.hp_watch.threshold`; `start_park()` runs `cmd.exe /c set PYTHONUNBUFFERED=1&& python -u -X utf8 -m gamelab nav --park --tell >> lab/park.log 2>&1` through `service._start_detached` (WMI), so the park outlives the pet feeder the babysitter stops when it sees it."
+    },
+    {
+     "name": "_nav_park",
+     "kind": "function",
+     "line": 1861,
+     "signature": "def _nav_park(args) -> int",
+     "summary": "`nav --park`: she goes to the safe place on the map the service looks at, her moves alone; never brings the game forward.",
+     "details_md": "Sends nothing if a hunt runs (`guard.running_hunt`), if the game isn't in front (a note for the guard: `retreat.told`), or if no service runs. The map comes from `lab/perceive.json` (`_park_map`), not a `--map` default: at 08:18 on 2026-11-05 a `nav` with none took the service off her map. `--tell` pushes the outcome to the phone."
+    },
+    {
+     "name": "cmd_tour",
+     "kind": "function",
+     "line": 1962,
+     "signature": "def cmd_tour(args) -> int",
+     "summary": "`tour`: the sweep of the map's hunting platforms, or with `--loop` the hunt loop for `--minutes` (grinding by default, `--camp` one ground at a time), then she parks.",
+     "details_md": "`--loop --grind` runs `behavior.grind.Grind(tour).run(minutes)`, `--loop --camp` runs `behavior.hunt.Hunt(tour).run(minutes)`, both inside `retreat.on_alarm`, then `park(hunter)`. Without `--loop`, `Tour.run(stops, kinds, kills_per_stop, seconds_per_stop)`."
+    },
+    {
+     "name": "cmd_clear_alarm",
+     "kind": "function",
+     "line": 207,
+     "signature": "def cmd_clear_alarm(args) -> int",
+     "summary": "`clear-alarm`: removes lab/ALARM.json once the Lie Detector's recording has ended; refuses (exit 3) while it is still going.",
+     "details_md": "While `lie_recorder.going()` has a folder and the alarm is up, clearing it would let a running player stop `END_S` after the last sight while a person may still be answering it, and the commands run. After clearing, a player that stopped needs `player --elevate` again."
+    },
+    {
+     "name": "GAME_COMMANDS",
+     "kind": "constant",
+     "line": 46,
+     "signature": "GAME_COMMANDS = {\"player\", \"calibrate\", \"window\", \"snap\", \"act\", \"do\", \"lock\", \"combo\", \"hunt\", \"nav\", \"tour\"}",
+     "summary": "Commands that bring the game to the front or send it input: `main` refuses them (exit 3) while the Lie Detector alarm is up.",
+     "details_md": "`probe run` joins them through its parser's `game=True`. Not in it: `pet` (it keeps feeding through the alarm), `perceive`, `watch`, `stop`, and `keys`/`stats`, which check the alarm themselves before `--read` sends anything."
+    },
+    {
+     "name": "_fit_start",
+     "kind": "function",
+     "line": 1144,
+     "signature": "def _fit_start(title: str, fix) -> None",
+     "summary": "At a hunting command's start, sets a client of an uncalibrated size right with Alt+Enter twice and waits for it, START_WAIT_S at most.",
+     "details_md": "Polls the window every `START_POLL_S` (1 s) without capturing; checks the alarm each round; raises `RuntimeError` after 180 s. It used to wait for ever, while the babysitter kept the pet stopped meanwhile, unfed."
+    },
+    {
+     "name": "_to_game",
+     "kind": "function",
+     "line": 1582,
+     "signature": "def _to_game() -> bool",
+     "summary": "Brings the game to the front before a hunting command's first look and plan, and checks it came (`FRONT_WAIT_S`, 3 s); if not, the command says which window is in front and doesn't start (exit 1).",
+     "details_md": "The player refuses every plan while another window is in front, and a look then sees that window: on 2026-10-21 at 01:01:30 a tour's first looks saw another window for 2.5 s and its first plan was refused (\"game not in front\"). `window.bring_to_front` sends no keys: it attaches to the foreground window's input thread to be allowed `SetForegroundWindow`. Half way through the wait it also switches to the game as Alt+Tab does (`window.SWITCH_FALLBACK`, on; the README says it wasn't tried in game yet)."
+    }
+   ],
+   "inputs": [
+    "the command line (argparse) and the environment: `GAMELAB_CHARACTER`, `GAMELAB_PERCEIVE=saved`",
+    "config.toml through `control.timeline.her_setup` and `control.keymap.at_start` (her keys, the game window's title)",
+    "the perception service's states and frames (through `localization.service.ServiceClient`)",
+    "the key player's results (through `control.client`)",
+    "lab files: ALARM.json, perceive.json, hunt.json, telemetry, recordings, logs"
+   ],
+   "outputs": [
+    "an exit code (0 done, 1 error, 2 refused, 3 Lie Detector, 4-9 the hunt stops)",
+    "console lines, each also a `log` telemetry record (`_log`)",
+    "started processes: the elevated player (UAC), the perception service and `nav --park --tell` (detached through WMI)",
+    "telemetry runs, screenshots, reports and calibrations under gamelab/lab"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/window.py",
+    "gamelab/screen.py",
+    "gamelab/character.py",
+    "gamelab/gcstats.py",
+    "gamelab/capture.py",
+    "gamelab/native.py",
+    "gamelab/control/client.py",
+    "gamelab/control/player.py",
+    "gamelab/control/alarm.py",
+    "gamelab/control/lie_recorder.py",
+    "gamelab/control/notify.py",
+    "gamelab/control/keymap.py",
+    "gamelab/control/window_size.py",
+    "gamelab/control/rolling.py",
+    "gamelab/control/recording.py",
+    "gamelab/control/lie_tracking.py",
+    "gamelab/control/violetta_live.py",
+    "gamelab/control/timeline.py",
+    "gamelab/control/mover.py",
+    "gamelab/localization/service.py",
+    "gamelab/localization/feed.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/worldstate.py",
+    "gamelab/localization/senses.py",
+    "gamelab/localization/memory.py",
+    "gamelab/localization/pose.py",
+    "gamelab/perception/eyes.py",
+    "gamelab/perception/lie_detector.py",
+    "gamelab/perception/lie_target.py",
+    "gamelab/perception/stat_window.py",
+    "gamelab/perception/keybindings.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/perception/sprites.py",
+    "gamelab/behavior/hunter.py",
+    "gamelab/behavior/tour.py",
+    "gamelab/behavior/grind.py",
+    "gamelab/behavior/hunt.py",
+    "gamelab/behavior/retreat.py",
+    "gamelab/behavior/guard.py",
+    "gamelab/behavior/pet.py",
+    "gamelab/behavior/probe.py",
+    "gamelab/behavior/walk.py",
+    "gamelab/behavior/statcheck.py",
+    "gamelab/behavior/keycheck.py",
+    "gamelab/behavior/patrol.py",
+    "gamelab/behavior/safety.py",
+    "gamelab/behavior/bootstrap.py",
+    "gamelab/behavior/vitals.py",
+    "gamelab/attack/magic.py",
+    "gamelab/attack/reach.py",
+    "gamelab/attack/danger.py",
+    "gamelab/motion/physics.py",
+    "gamelab/motion/route.py",
+    "gamelab/ui/web.py",
+    "gamelab/ui/app.py",
+    "gamelab/ui/sources.py",
+    "gamelab/ui/render.py",
+    "gamelab/sim/scenarios.py",
+    "gamelab/sim/harness.py",
+    "gamelab/analysis/calibration.py",
+    "gamelab/analysis/recordings.py",
+    "gamelab/analysis/analyze.py",
+    "gamelab/analysis/track.py",
+    "gamelab/analysis/bench.py",
+    "gamelab/analysis/coverage.py",
+    "gamelab/analysis/jumps.py",
+    "gamelab/analysis/respawn.py",
+    "gamelab/analysis/disk.py",
+    "maplehelper/actions.py",
+    "maplehelper/combos.py",
+    "maplehelper/config.py",
+    "maplehelper/win32.py",
+    "gamelab/analysis/bodies.py",
+    "gamelab/analysis/pasted.py",
+    "gamelab/analysis/scroll.py",
+    "gamelab/attack/stance.py",
+    "gamelab/localization/players.py",
+    "gamelab/localization/scene.py",
+    "gamelab/perception/drops.py",
+    "gamelab/perception/exp_number.py",
+    "gamelab/perception/frames.py",
+    "gamelab/perception/gates.py",
+    "gamelab/perception/heading.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/perception/loot.py",
+    "gamelab/perception/messages.py",
+    "gamelab/perception/minimap.py",
+    "gamelab/perception/mobs.py",
+    "gamelab/perception/nametag.py",
+    "maplehelper/engine.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/STOP",
+     "mode": "write",
+     "what": "`stop-player` touches it; the player exits at its next loop"
+    },
+    {
+     "path": "lab/player.log",
+     "mode": "read",
+     "what": "`stop-player` waits up to 10 s for its last line to be \"player stopped\""
+    },
+    {
+     "path": "lab/ALARM.json",
+     "mode": "read-write",
+     "what": "checked before game commands (`client.check_alarm`); removed by `clear-alarm`; raised by `watch --lie-detector`"
+    },
+    {
+     "path": "lab/guard_mode.txt",
+     "mode": "write",
+     "what": "`guard off|alert` writes it, `guard on` deletes it"
+    },
+    {
+     "path": "lab/hunt.json",
+     "mode": "read-write",
+     "what": "claimed by `_record` for hunting commands (`guard.claim`), removed on a clean end (`_hunt_over`)"
+    },
+    {
+     "path": "lab/telemetry/<time>-<command>.jsonl",
+     "mode": "read-write",
+     "what": "each run's records (`_record`, `perceive`, `sim`); read back by `coverage`, `jitter`, `respawn`, `memory`, `patrol`, `bodies --tracks`; `lab-usage --prune-telemetry` deletes the oldest past 2 GB"
+    },
+    {
+     "path": "lab/perceive.json",
+     "mode": "read",
+     "what": "`nav --park` takes the service's map from it (`_park_map`)"
+    },
+    {
+     "path": "lab/park.log",
+     "mode": "write",
+     "what": "the console of the guard's detached `nav --park --tell`"
+    },
+    {
+     "path": "lab/inbox/, lab/outbox/",
+     "mode": "read-write",
+     "what": "plans and results through `control.client` (`act`, `do`, `window`, `lock`, `combo`, the readers' recorded captures, every hunt)"
+    },
+    {
+     "path": "lab/shots/",
+     "mode": "write",
+     "what": "pictures commands save (`snap`, `act`, `do`, `window`, `hunt look`, `hunt kill|clear`'s `hunt_end.png`, `map`, `coverage`); `statwindow-<time>/` and `keybindings-<time>/` with frames and report.json"
+    },
+    {
+     "path": "lab/recordings/<name>.npz",
+     "mode": "read-write",
+     "what": "saved through `analysis.recordings.record` by `act --record`, `do`, `lock` and `combo` (frames, times and a `.events.json`); `list`, `sheet`, `track`, `check`, `bodies` read them"
+    },
+    {
+     "path": "lab/shots2.jsonl, lab/probe_geometry.jsonl",
+     "mode": "read",
+     "what": "`hunt shots` and `probe score` sum up the throw logs"
+    },
+    {
+     "path": "lab/her_stats.json, lab/touches.jsonl",
+     "mode": "read-write",
+     "what": "`stats` reads both (`stats --frame` keeps the W.DEF it reads as hers); the offline commands' positioning model reads her stats (`_her_offline`)"
+    },
+    {
+     "path": "lab/alarm_clips/<clip>/",
+     "mode": "read",
+     "what": "`lie-target` replays recorded mini-game clips"
+    },
+    {
+     "path": "lab/character.json",
+     "mode": "write",
+     "what": "`character use <id>` (through `gamelab.character.choose`)"
+    },
+    {
+     "path": "lab/stat_window.json",
+     "mode": "write",
+     "what": "the stat window reader's calibration (`stats --read --record`, `stats --calibrate`)"
+    },
+    {
+     "path": "lab/alarm_keys.json",
+     "mode": "write",
+     "what": "her moves' and pet food's keys for the player's Lie Detector allowance (`keymap.publish`: `_hunter` at a command's start, `keys --read`, `pet --every` when the remembered bindings change)"
+    },
+    {
+     "path": "lab/keybindings-<her>.json",
+     "mode": "read-write",
+     "what": "her key bindings as the game's window last showed them: read at every command's start (`keymap.at_start`), written by `keys --read`, deleted by `keys --forget`"
+    },
+    {
+     "path": "lab/bark.json, lab/smtp.json",
+     "mode": "read-write",
+     "what": "`notify --setup-bark` / `--setup-sms` write them, `--test-*` and a bare `notify` read them"
+    },
+    {
+     "path": "lab/recent/<time>[-name]/",
+     "mode": "read",
+     "what": "`sheet FOLDER` (and `--video`) reads a saved stretch of the rolling recording; `save-recent` only asks the recorder to write one"
+    },
+    {
+     "path": "lab/heading*.npz",
+     "mode": "read-write",
+     "what": "her facing pictures: `heading --learn` adds to them (`--seed`: the seed in gamelab/assets), `watch --heading` reads them"
+    },
+    {
+     "path": "gamelab/assets/backgrounds/<map id>.npz",
+     "mode": "write",
+     "what": "`learn-colours` keeps a map's background colours for its monsters' colour gates"
+    },
+    {
+     "path": "tests/fixtures/lie_detector/references/*.json",
+     "mode": "read",
+     "what": "the reference tracks `lie-target` scores the tracker against"
+    }
+   ],
+   "concurrency": "Runs on the main thread of whatever process the command is. It starts other processes: the elevated player through `ShellExecuteW` 'runas' (`cmd_player --elevate`), and, detached through WMI so they outlive it, the perception service (`ServiceClient` -> `service.ensure`, at most every 10 s) and the guard's `nav --park --tell` (`_guard_pass`); `stop` with no hunt runs `nav --park` as a child and waits. Threads come from what it builds: the perception client's `perceive-client` thread, the telemetry writer (`telemetry-writer`; `perceive` adds a `console-writer`), `gcstats`' once-a-minute report (`gc-report`), the OCR warm-up thread of a hunt's start (`ocr-warm`, `perception.messages.warm`), the web server's threads (`minimap`), and the whole service (`perceive`).",
+   "tunables": [
+    {
+     "name": "DEFAULT_MAP",
+     "value": "10000012",
+     "meaning": "`--map` default: Victoria Road, Thicket Around the Beach II"
+    },
+    {
+     "name": "FRONT_WAIT_S",
+     "value": "3.0",
+     "meaning": "s a hunting command waits for the game to come to the front (`_to_game`)"
+    },
+    {
+     "name": "PERCEPTION_WAIT_S",
+     "value": "20.0",
+     "meaning": "s a command waits at its start for the perception service's welcome (its first state comes about 2 s after it starts)"
+    },
+    {
+     "name": "START_WAIT_S",
+     "value": "180.0",
+     "meaning": "s a hunting command waits for a client of an uncalibrated size to be set right (`_fit_start`)"
+    },
+    {
+     "name": "START_POLL_S",
+     "value": "1.0",
+     "meaning": "s between looks at the window while it waits"
+    },
+    {
+     "name": "GAME_POLL_S",
+     "value": "5.0",
+     "meaning": "s between looks for the game's window while `pet --every` waits for it"
+    },
+    {
+     "name": "MINIMIZED_POLL_S",
+     "value": "0.5",
+     "meaning": "s between looks at whether a minimized game was restored"
+    },
+    {
+     "name": "MINIMAP_TRIES / MINIMAP_RETRY_S",
+     "value": "3 / 0.5",
+     "meaning": "tries at loading the map's minimap picture, this far apart, before a command that acts stops"
+    },
+    {
+     "name": "WATCH_STATUS_S",
+     "value": "10.0",
+     "meaning": "s between `watch`'s console lines"
+    },
+    {
+     "name": "WATCH_LIE_DETECTOR_S",
+     "value": "0.5",
+     "meaning": "s between `watch --lie-detector`'s checks of the service's full frame"
+    },
+    {
+     "name": "LIE_DETECTOR_EXIT",
+     "value": "3",
+     "meaning": "exit code after the Lie Detector stopped a command"
+    },
+    {
+     "name": "SW_SHOWMINNOACTIVE",
+     "value": "7",
+     "meaning": "ShellExecute show flag: the elevated player starts minimized, not activated"
+    },
+    {
+     "name": "TAP_MS",
+     "value": "40",
+     "meaning": "a key tap's hold in explore steps and recorded tests"
+    },
+    {
+     "name": "SETTLE_S",
+     "value": "0.6",
+     "meaning": "rest between recorded runs of `lock` and `combo`"
+    },
+    {
+     "name": "FACE_MS",
+     "value": "600",
+     "meaning": "`combo`: each run first taps the arrow she should face, the combo starting this much later"
+    },
+    {
+     "name": "SHOT_BAND",
+     "value": "30",
+     "meaning": "`hunt shots` groups throws by the target's height in bands this tall (map units)"
+    },
+    {
+     "name": "RECORD_FPS / OPEN_MS / CLOSE_MS / LATE_S",
+     "value": "15 / 1500 / 1200 / 1.0",
+     "meaning": "`keys --read --record`: frames a second recorded after the backslash and after Esc, for how long, and one late frame"
+    },
+    {
+     "name": "STAT_RECORD_FPS / STAT_OPEN_MS / STAT_CLICK_MS / STAT_CLOSE_MS / STAT_LATE_S",
+     "value": "15 / 1500 / 1200 / 1200 / 1.0",
+     "meaning": "`stats --read --record`: the same for her stats key, the click on DETAIL and each closing key, and one late frame"
+    },
+    {
+     "name": "minimap --port / --width / --web-width",
+     "value": "8765 / 760 / 900",
+     "meaning": "the web page's port, the window's width and the page's map width (px)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-21",
+     "what": "`_to_game`: a hunting command brings the game forward and checks it came before its first look and plan.",
+     "why": "At 01:01:30 a tour's first looks saw another window for 2.5 s and its first plan was refused (\"game not in front\")."
+    },
+    {
+     "date": "2026-10-24",
+     "what": "`_game_geometry` restores a minimized game (commands that act) or waits for it (`watch`, `pet --every`) before reading its size.",
+     "why": "Minimized, GetClientRect gave 432x54, not the game's client."
+    },
+    {
+     "date": "2026-10-24",
+     "what": "`_minimap_picture` tries 3 times and stops a command whose map has a minimap picture that won't load.",
+     "why": "A process where it was None (16:46:50) read her dot with the first map's origin, putting her 640 units off Tree Dungeon for a whole hunt."
+    },
+    {
+     "date": "2026-10-25",
+     "what": "Every command's looks come from one perception service; `--feed`/`--no-feed` and `--sweep` removed; `_perception` attaches commands as clients.",
+     "why": "The user: \"perception should just always run and the other modules just work based on latest perception result\"; \"run one shared perception process at all times\"."
+    },
+    {
+     "date": "",
+     "what": "`pet --every` with no game window waits for one (`_wait_for_game`, every `GAME_POLL_S`, 5 s) instead of ending.",
+     "why": "It ended, and the babysitter started it again every 5 s."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "`pet --every` waits out a client that is full screen, another size or drawn off (`behavior.pet.PetWait`) instead of ending.",
+     "why": "At 23:21 on 2026-10-25 it ended at once (\"not calibrated at 3840x2160 yet\") and the babysitter restarted it every 5 s (gamelab/README.md dates `PetWait` from 2026-10-26)."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "`perceive` keeps the rolling recording from its own frames; `gamelab recorder` is only what runs where it can't.",
+     "why": "The user: \"The recording should probably just take frames from within the same perception process\"."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "`tour --loop` grinds by default (`--grind`); `--camp` keeps one ground at a time.",
+     "why": "The user: \"Yes make that the default\"; live it made 318-408 EXP a minute on Tree Dungeon on 2026-10-26, camping 283 and 340 on 10-24 and 10-25."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "`--low-hp` (`safety_arg`): 1 or under a share of her max HP, over 1 HP; by default her profile's reserve.",
+     "why": "Until 2026-10-26 `tour`'s rested her on the chair (30%); until 2026-10-28 it was always a share, 65% by default."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "`stats --read --record` catches any exception to say \"HER STAT WINDOW MAY BE OPEN IN THE GAME\" and write its report before re-raising.",
+     "why": "The review of 2026-10-28: a crash after S left the window open, nothing said."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "The magician plays `hunt`, `nav` and `tour` (her Magic Claw); `lock`, `combo` and `probe run` stay the thief's.",
+     "why": "Her attacks are built for the hunt only (`HERS_NOT_YET` says why for each other command)."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "`pet --every` tells the pet care the time it waited for the game wasn't the pet's (`hunter.pet.away()`).",
+     "why": "At 16:29 that time had been counted, and the pet was fed blind twice."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "The run's `session` record carries her physics (`motion.physics.record`).",
+     "why": "So a recorded run says how it planned her moves."
+    },
+    {
+     "date": "2026-11-05",
+     "what": "`stop` stops a hunt and parks her (`stop-player` stops the player); `nav --park` takes its map from the service's info file; the guard runs inside `pet --every`.",
+     "why": "A grind killed with Stop-Process left her among monsters until she died; and at 08:18 a `nav` with no `--map` took the service off her map."
+    }
+   ],
+   "gotchas": [
+    "`stop` stops the running hunt and parks her; `stop-player` stops the key player. They used to be easy to confuse.",
+    "A hunt killed or crashed (exit 1 included) leaves `lab/hunt.json` behind: the guard takes that as \"ended without parking her\" and parks her.",
+    "While `lab/ALARM.json` is up even `hunt look`, `snap` and `calibrate` are refused (they are in `GAME_COMMANDS`), but `pet --every` keeps feeding and `perceive` keeps running.",
+    "`--character` must come before her physics is loaded (`_play_as`); under `character use` alone, an in-game command other than `perceive`, `pet` and the hunting commands plays the thief and says so.",
+    "A hunting command is refused at its start if another hunting command holds the service on another map; viewers on another map see the held map's places (they say so).",
+    "`window 1366x768` resizes through the player (a normal program can't resize the admin window); `window --recover` instead switches full screen and back with Alt+Enter twice.",
+    "`minimap` falls back to the window alone if port 8765 is taken; `web` then exits 1.",
+    "`watch --hz` does nothing now: the service's rate is its own (15 a second).",
+    "`probe score --line` sets `reach.LINE` for that process only; `coverage --ways` and `nav/tour --ways` set `route.ROUTES` the same way (`_ways`).",
+    "`pet --every` ends with exit 0 when the client changes to another calibrated size: by design, for the babysitter to restart it with eyes for that size.",
+    "`spot` takes its own screenshot with mss (not the service's frame); `watch --lie-detector` uses the service's full frame.",
+    "`save-recent --png`'s help still says the saves keep 5 GB; the code keeps 20 GB (`rolling.RECENT_KEEP_BYTES`, raised on 2026-10-29).",
+    "An error (`RuntimeError`, `PlayerError`) exits 1 without `_hunt_over`, on purpose: `lab/hunt.json` stays so the guard parks her.",
+    "`hunt look` and `map` never bring the game forward: `hunt look`'s eyes wait for a minimized game (a viewer: `restore` off) and `map` only reads the service's newest state. gamelab/README.md's \"bring the game to the front\" paragraph still says they restore it; the code wins."
+   ],
+   "tests": [
+    "tests/test_alarm.py",
+    "tests/test_architecture.py",
+    "tests/test_bench.py",
+    "tests/test_bodies.py",
+    "tests/test_bootstrap.py",
+    "tests/test_character.py",
+    "tests/test_chatbox.py",
+    "tests/test_darts.py",
+    "tests/test_disk.py",
+    "tests/test_evade.py",
+    "tests/test_framecheck.py",
+    "tests/test_gamelab.py",
+    "tests/test_gates.py",
+    "tests/test_geometry.py",
+    "tests/test_guard.py",
+    "tests/test_heading.py",
+    "tests/test_hunt.py",
+    "tests/test_jump_reach.py",
+    "tests/test_keycheck.py",
+    "tests/test_keymap.py",
+    "tests/test_lie_recording.py",
+    "tests/test_magician_hunt.py",
+    "tests/test_navigation.py",
+    "tests/test_pet.py",
+    "tests/test_probe.py",
+    "tests/test_resolution.py",
+    "tests/test_rolling.py",
+    "tests/test_rope_top.py",
+    "tests/test_safety.py",
+    "tests/test_service.py",
+    "tests/test_statcheck.py",
+    "tests/test_ui.py",
+    "tests/test_window_size.py"
+   ]
+  }
+ ],
+ "data_types": [
+  {
+   "name": "plan",
+   "module": "gamelab/control/client.py",
+   "line": 71,
+   "summary": "A key plan, written by `client.send` as `lab/inbox/<plan id>.json` and played by the elevated player. Plain data: the player runs no code it receives.",
+   "fields": [
+    {
+     "name": "events",
+     "type": "list",
+     "meaning": "[ms, key, \"down\"|\"up\"] or [ms, \"mouse\", x, y] (client px; `lbutton`/`rbutton` for clicks)"
+    },
+    {
+     "name": "capture",
+     "type": "dict",
+     "meaning": "fps, duration_ms, scale, lead_ms and an optional crop: the client area recorded while it plays"
+    },
+    {
+     "name": "focus",
+     "type": "bool",
+     "meaning": "bring the game to the front first (never for a `retreat`)"
+    },
+    {
+     "name": "end_ms",
+     "type": "int | None",
+     "meaning": "how long the plan lasts after its last key, so the next starts the moment it ends"
+    },
+    {
+     "name": "window_client",
+     "type": "[w, h] | None",
+     "meaning": "resize the game's client area first (`window`)"
+    },
+    {
+     "name": "kind",
+     "type": "str | None",
+     "meaning": "pet_food, retreat, lie_cursor or lie_ok: the four kinds the player still takes with the alarm up"
+    }
+   ]
+  },
+  {
+   "name": "result",
+   "module": "gamelab/control/player.py",
+   "line": 967,
+   "summary": "The player's answer, `lab/outbox/<plan id>.json`, with the recorded frames beside it in `<plan id>.npz`; read and deleted by `client.wait`.",
+   "fields": [
+    {
+     "name": "sent",
+     "type": "list",
+     "meaning": "the keys sent and when"
+    },
+    {
+     "name": "problems",
+     "type": "list[str]",
+     "meaning": "e.g. \"cancelled\", \"spliced\""
+    },
+    {
+     "name": "region, scale, client",
+     "type": "dict",
+     "meaning": "what was recorded and the client area's size"
+    },
+    {
+     "name": "trail",
+     "type": "list | None",
+     "meaning": "where the pointer went, for mouse plans"
+    },
+    {
+     "name": "error",
+     "type": "str | None",
+     "meaning": "a refusal, e.g. \"Lie Detector on screen: all input stopped\" or \"game not in front\""
+    },
+    {
+     "name": "frames",
+     "type": "int",
+     "meaning": "frames recorded; the arrays `frames` and `times` are in the .npz"
+    }
+   ]
+  },
+  {
+   "name": "Hello",
+   "module": "gamelab/localization/service.py",
+   "line": 323,
+   "summary": "What a command says of itself when it attaches to the perception service; decides whether it holds the map and how it is served.",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str",
+     "meaning": "the command (`tour`, `hunt-clear`, `pet`, `watch`...)"
+    },
+    {
+     "name": "pid",
+     "type": "int",
+     "meaning": "its process"
+    },
+    {
+     "name": "acts",
+     "type": "bool",
+     "meaning": "it sends keys: the game is brought forward for it, its map followed"
+    },
+    {
+     "name": "throws",
+     "type": "bool",
+     "meaning": "it tells her throws (the tracker's kills are hers only after one her way)"
+    },
+    {
+     "name": "fast",
+     "type": "bool",
+     "meaning": "it hunts: it holds the map looked at; a second hunter on another map is refused"
+    },
+    {
+     "name": "map",
+     "type": "int | None",
+     "meaning": "the map it decides on"
+    }
+   ]
+  },
+  {
+   "name": "welcome",
+   "module": "gamelab/localization/service.py",
+   "line": 518,
+   "summary": "The service's answer to a hello (`c.send(\"welcome\", self._welcome())`; `Service._welcome` builds it, and the same dict goes to every client as an `epoch` message at a new run): how to read this run's frames from shared memory.",
+   "fields": [
+    {
+     "name": "epoch",
+     "type": "int",
+     "meaning": "the run; a new map or the game first seen starts a new one with new rings"
+    },
+    {
+     "name": "pid, map, next",
+     "type": "int",
+     "meaning": "the service's process, the map it looks at, and the map of a run due next"
+    },
+    {
+     "name": "character",
+     "type": "str",
+     "meaning": "who it perceives; a hunting command playing someone else stops"
+    },
+    {
+     "name": "ring, slots, shape",
+     "type": "str, int, list",
+     "meaning": "the shared-memory ring of look frames (16 slots)"
+    },
+    {
+     "name": "full, full_slots, full_shape",
+     "type": "str, int, list",
+     "meaning": "the ring of full-size frames (2 slots) for `full` asks"
+    }
+   ]
+  },
+  {
+   "name": "perceive.json",
+   "module": "gamelab/localization/service.py",
+   "line": 869,
+   "summary": "`lab/perceive.json`, written whole (`write_info`: a `.tmp` then a rename) by the running service as it starts listening (`Service.listen`): how a client reaches it, and which map it looks at (`nav --park` reads it).",
+   "fields": [
+    {
+     "name": "pid",
+     "type": "int",
+     "meaning": "the service's process (stop it to restart the service)"
+    },
+    {
+     "name": "address",
+     "type": "str",
+     "meaning": "the named pipe, `\\\\.\\pipe\\gamelab-perceive`"
+    },
+    {
+     "name": "authkey",
+     "type": "hex str",
+     "meaning": "the pipe's authentication key (32 random bytes)"
+    },
+    {
+     "name": "started, map, character",
+     "type": "float, int, str",
+     "meaning": "when it started, its map, who it perceives"
+    }
+   ]
+  },
+  {
+   "name": "ALARM.json",
+   "module": "gamelab/paths.py",
+   "line": 19,
+   "summary": "`lab/ALARM.json`: the Lie Detector was seen. Written first by `control.alarm.raise_alarm` (the player's watchdog, or `watch --lie-detector`); while it exists gamelab's game commands refuse to run.",
+   "fields": [
+    {
+     "name": "reason",
+     "type": "str",
+     "meaning": "\"lie_detector\" (or who raised it)"
+    },
+    {
+     "name": "time, at",
+     "type": "str, float",
+     "meaning": "when; `at` (time.time) is what her retreat's 10 s count from"
+    },
+    {
+     "name": "form",
+     "type": "str | None",
+     "meaning": "the form seen, by the spotter's name (e.g. `mini-game`, `mini-game notice`, `quiz`, `quiz warning`): paged by name"
+    },
+    {
+     "name": "cause",
+     "type": "str | None",
+     "meaning": "a Truth Booth with no test seen before it"
+    },
+    {
+     "name": "screenshot",
+     "type": "str",
+     "meaning": "lab/lie_detector_<HHMMSS>.png"
+    }
+   ]
+  },
+  {
+   "name": "hunt.json",
+   "module": "gamelab/paths.py",
+   "line": 54,
+   "summary": "`lab/hunt.json`: the command hunting now, as it said at its start (`guard.claim`). `gamelab stop` finds the hunt to stop from it; left behind by a hunt that died, it is the guard's note to park her.",
+   "fields": [
+    {
+     "name": "pid",
+     "type": "int",
+     "meaning": "the hunting process"
+    },
+    {
+     "name": "started",
+     "type": "int | None",
+     "meaning": "the process's start time, so a reused pid isn't mistaken for it"
+    },
+    {
+     "name": "command",
+     "type": "str",
+     "meaning": "e.g. `tour`, `hunt-clear`, `nav-park`"
+    }
+   ]
+  },
+  {
+   "name": "park_note.json",
+   "module": "gamelab/paths.py",
+   "line": 56,
+   "summary": "`lab/park_note.json`: a park or stop not done (the game not in front, a hunt that died); the guard parks her at the game's return.",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "when (time.time)"
+    },
+    {
+     "name": "why",
+     "type": "str",
+     "meaning": "in words, e.g. \"`tour` ended without parking her\""
+    },
+    {
+     "name": "urgent",
+     "type": "bool",
+     "meaning": "a critical push (a hunt that died)"
+    }
+   ]
+  },
+  {
+   "name": "parked.json",
+   "module": "gamelab/paths.py",
+   "line": 57,
+   "summary": "`lab/parked.json`: how the last park or stop's retreat came out (`retreat.told`), read by `gamelab stop` and the guard.",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "when"
+    },
+    {
+     "name": "by",
+     "type": "str",
+     "meaning": "who parked her"
+    },
+    {
+     "name": "there",
+     "type": "bool",
+     "meaning": "she is on the safe place"
+    },
+    {
+     "name": "said",
+     "type": "str",
+     "meaning": "the outcome in words"
+    }
+   ]
+  },
+  {
+   "name": "session",
+   "module": "gamelab/__main__.py",
+   "line": 1608,
+   "summary": "A run's first telemetry record (`_record`), which the mini-map and the offline analyses use to know the map, the command and her physics.",
+   "fields": [
+    {
+     "name": "t, topic",
+     "type": "float, str",
+     "meaning": "wall-clock time and \"session\" (every record has them)"
+    },
+    {
+     "name": "map, command, mode",
+     "type": "int, str, str",
+     "meaning": "the map id, e.g. \"tour\", and \"live\""
+    },
+    {
+     "name": "physics",
+     "type": "dict",
+     "meaning": "her walk, climb, jump and speed as the run plans her moves"
+    },
+    {
+     "name": "jump_aside, hop_up",
+     "type": "bool",
+     "meaning": "whether those two moves are on"
+    }
+   ]
+  }
+ ],
+ "flows": [
+  {
+   "id": "hunt-start",
+   "title": "A hunt's start, from the command line to its first key",
+   "summary": "What `python -m gamelab tour --loop` does before she moves: the gates, the telemetry, attaching to perception, fixing the window and checking her HP, then the hunt loop inside the Lie Detector's retreat.",
+   "trigger": "A person types `python -m gamelab tour --loop --minutes 20 --map 10002073` (the player and the service already running)",
+   "steps": [
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "main",
+     "process": "hunt",
+     "text": "Parses the line; `_play_as` sets `GAMELAB_CHARACTER` before her physics loads; `_refused_as` lets any character hunt; `magic.apply` switches to Magic Claw for the magician; `client.check_alarm()` exits 3 if `lab/ALARM.json` is up. Then it calls `cmd_tour`."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "_record",
+     "process": "hunt",
+     "text": "`cmd_tour` first records the run: opens `lab/telemetry/<time>-tour.jsonl`, writes `lab/hunt.json` (`guard.claim`) and the `session` record with her physics."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "_hunter",
+     "process": "hunt",
+     "text": "Builds the agent: her keys from the bindings last read (else config.toml), the map's data, then the steps below in this order."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "_perception",
+     "process": "hunt",
+     "text": "A `ServiceClient` says hello over the pipe (acts, throws, the map); if no service answers, the client starts one through WMI; it waits up to 20 s for the welcome and stops if the service perceives another character."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "_fit_start",
+     "process": "hunt",
+     "text": "A client at a size the eyes have no calibration for is set right with Alt+Enter twice (`control.window_size.SizeFix`), waited for 180 s at most."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "_eyes",
+     "process": "hunt",
+     "text": "Eyes on the service's frames (never a capture of their own) with the map's monster detector and its minimap picture (3 tries; a map whose picture won't load stops the command). Then the OCR warms on a thread, the Hunter is built, the phone pushes are wired, and her keys go to `lab/alarm_keys.json` for the player's Lie Detector allowance."
+    },
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter.wait_max_hp",
+     "process": "hunt",
+     "text": "Waits up to 5 s for her max HP off the HUD; then her chat box is collapsed (`collapse_chat`), her stat window read (`read_stats`), and a map whose monsters are too strong for her refused (`too_strong`)."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "_to_game",
+     "process": "hunt",
+     "text": "Back in `cmd_tour`: a fighting navigator is made, then the game is brought to the front and waited for 3 s; the player refuses plans while another window is in front."
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "on_alarm",
+     "process": "hunt",
+     "text": "Wraps the hunt: on the Lie Detector or a hunt stop she goes to a safe place before the exception reaches `main`."
+    },
+    {
+     "module": "gamelab/behavior/grind.py",
+     "symbol": "Grind.run",
+     "process": "hunt",
+     "text": "The hunt loop for `--minutes`: a decision after every look of the service's latest state; its keys go out as plans through `control.client`."
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "park",
+     "process": "hunt",
+     "text": "Time's up: she parks on the map's safe place instead of being left among the monsters."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "main",
+     "process": "hunt",
+     "text": "At the end: `_hunt_over` removes `lab/hunt.json` on a clean end, and `_close_perception` detaches from the service and prints how many states it was handed."
+    }
+   ]
+  },
+  {
+   "id": "plan-round-trip",
+   "title": "A key plan's round trip through the lab folder",
+   "summary": "How a normal process gets keys into the admin game window: a JSON file in the inbox, claimed by renaming, played, answered in the outbox.",
+   "trigger": "Any command that acts calls `client.submit` or `client.send` + `client.wait`",
+   "steps": [
+    {
+     "module": "gamelab/control/client.py",
+     "symbol": "send",
+     "process": "hunt",
+     "text": "Refuses with the alarm up unless the plan has one of the four kinds; writes `inbox/<id>.tmp` and renames it to `<id>.json` so the player never reads half a plan."
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "_serve",
+     "process": "player",
+     "text": "Every 10 ms takes the first `*.json` in name order (none before the watchdog's first look) and renames it to `.running`: from then on the client can cancel it but no longer withdraw it."
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "Player.run",
+     "process": "player",
+     "text": "Refuses it during an alarm unless its kind allows it, validates it (any key config.toml can name, at most 400 events, 20 s and 900 frames), brings the game forward if asked, presses the events on a `key-player` thread, records frames (saved to `outbox/<id>.npz`), and stops at once on `<id>.cancel` or the Lie Detector."
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "_answer",
+     "process": "player",
+     "text": "Removes the `.running` file and writes the result to `outbox/<id>.tmp`, renamed to `<id>.json` so the client never reads half a result."
+    },
+    {
+     "module": "gamelab/control/client.py",
+     "symbol": "wait",
+     "process": "hunt",
+     "text": "Polls every 10 ms; withdraws a plan not yet taken if the alarm goes up; after 120 s says the player may not be running. Reads the result (retrying about 1 s while Windows holds it locked), deletes it and any leftover cancel file, and raises `LieDetectorAlarm` or `PlayerError` on an error."
+    }
+   ]
+  },
+  {
+   "id": "between-hunts",
+   "title": "Between hunts: the pet feeder's guard parks her",
+   "summary": "With no hunt running, the babysitter's `pet --every 1` feeds her pet and runs the guard each second; when she is in trouble the guard starts a detached `nav --park`.",
+   "trigger": "The babysitter starts `pet --every 1 --map M` because no hunting command's process is running",
+   "steps": [
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "cmd_pet",
+     "process": "pet",
+     "text": "Waits for the game window if there is none, says a park wanted while the game is minimized, builds the Hunter (keys but no throws, `PetWait` for a wrong-sized client) and the guard's pass."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "_guarded",
+     "process": "pet",
+     "text": "Between follows of the pet's fullness, runs a guard pass every `GUARD_S` (1 s); a pass that fails is logged once a kind and never stops the pet's care."
+    },
+    {
+     "module": "gamelab/behavior/guard.py",
+     "symbol": "Pass.tick",
+     "process": "pet",
+     "text": "Reads `lab/guard_mode.txt`, turns a dead hunt's `lab/hunt.json` into `lab/park_note.json`, and looks at the service's newest state: two touches within 30 s, HP under the stop rule on two passes, or a note set it off."
+    },
+    {
+     "module": "gamelab/behavior/guard.py",
+     "symbol": "Guard.act",
+     "process": "pet",
+     "text": "Dead: one push. Alarm up: no moves. Played by hand: left alone. Game in front and player up: start a park (again at most every 2 minutes, 3 times an episode). Else a push, and she parks at the game's return."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "_guard_pass",
+     "process": "pet",
+     "text": "`start_park` launches `nav --park --tell` detached through WMI, its console appended to `lab/park.log`; the babysitter, seeing a `nav` process, stops the pet feeder meanwhile."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "_nav_park",
+     "process": "park",
+     "text": "Sends nothing if a hunt runs, the game isn't in front or no service runs; takes the map from `lab/perceive.json`; drives her moves alone to the safe place (`retreat.park`), and pushes the outcome to the phone."
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "process": "park",
+     "text": "Writes how it came out to `lab/parked.json` (or a note in `lab/park_note.json` if she isn't there), which `gamelab stop` and the guard read."
+    }
+   ]
+  },
+  {
+   "id": "lie-detector-processes",
+   "title": "The Lie Detector, across the processes",
+   "summary": "One sighting by the elevated player's watchdog changes what every other process may do, through one file.",
+   "trigger": "The game shows a Lie Detector form while a hunt and the pet feeder run",
+   "steps": [
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "Watchdog.tick",
+     "process": "player",
+     "text": "Looks 4 times a second; on a sighting the alarm Event is set first (input stops within about 10 ms, held keys let go), then `control.alarm.raise_alarm` writes `lab/ALARM.json`, saves a screenshot and pages the PC; the cycle is recorded."
+    },
+    {
+     "module": "gamelab/control/client.py",
+     "symbol": "wait",
+     "process": "hunt",
+     "text": "The hunt's running plan is answered with the Lie Detector error and raises `LieDetectorAlarm`; any new plan without a kind is refused before it is written."
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "on_alarm",
+     "process": "hunt",
+     "text": "Moves her to a safe place within 10 s with plans of kind `retreat` (her arrows, jump, up, down), which the player takes for 12 s after the sighting."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "main",
+     "process": "hunt",
+     "text": "Catches `LieDetectorAlarm`, removes `lab/hunt.json`, prints what to do, exits 3."
+    },
+    {
+     "module": "gamelab/control/lie_tracking.py",
+     "process": "perceive",
+     "text": "The service sees `ALARM.json`: its mini-game tracker (a child process) follows the target and moves the cursor through the player (`lie_cursor`); the Violetta watcher clicks the answer and the pass's OK (`lie_ok`)."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "cmd_pet",
+     "process": "pet",
+     "text": "Keeps feeding by the fullness it follows (`pet_food`, 3 a minute at most) and reads nothing until the alarm is cleared."
+    },
+    {
+     "module": "gamelab/control/rolling.py",
+     "process": "perceive",
+     "text": "The rolling recording saves the 5 minutes before into the cycle's folder (`before/`) and the alarm's clip to `lab/alarm_clips/`."
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "cmd_clear_alarm",
+     "process": "tools",
+     "text": "A person answers it, then `clear-alarm` removes `ALARM.json` (refused, exit 3, while the recording is still going). A cycle with no Truth Booth clears itself (`player.AUTO_RESUME`); after one with it, the player stops and needs `player --elevate` again."
+    }
+   ]
+  }
+ ],
+ "not_done": [
+  "The babysitter is outside the repo (`D:/MapleHelper-scratch/pconst/finish/babysit3.ps1`, its owner's to change): its rules exist only in its own header and the README's notes, and it finds processes by regexes over their command lines.",
+  "Who plays isn't read off the game (her bottom bar, the design's S0g): `character check` reads nothing yet, and a non-thief must be named for in-game commands other than `perceive`, `pet` and the hunting commands.",
+  "The perception service doesn't restart itself: after a crash or its watchdog's exit, perception stops until a client's `ensure` (at most every 10 s) or the babysitter starts another. A hang that holds Python's lock stops its watchdog thread too (README: not seen).",
+  "The rolling recording lives in the service's memory: a service restart loses its last 5 minutes.",
+  "The guard is blind with the game behind another window or minimized, and on any map but the babysitter's fixed `pet --map`; there `stop` with no hunt can't park her.",
+  "\"Played by hand\" can't be told for certain; Chrome Remote Desktop's injected keys should count, read off the process list but not tried.",
+  "`gamelab stop`'s cancel files should cut plans already sent (a pick-up or Lucky Seven tap in the simulator came from plans sent before it): not tried live.",
+  "`lock`, `combo` and `probe run` are the thief's only (`HERS_NOT_YET`).",
+  "The external grind loops' STOP file is a hard-coded path outside the repo (`behavior.guard.LOOP_STOP`)."
+ ],
+ "processes": [
+  {
+   "id": "player",
+   "name": "The key player",
+   "command": "python -m gamelab player --elevate",
+   "elevated": true,
+   "lifetime": "Started by a person (`player --elevate`: the UAC prompt needs their click). Runs until `lab/STOP` appears (`stop-player`), after 24 idle hours (`IDLE_LIMIT_S`; not while it records a Lie Detector), if its Lie Detector watch thread dies, or after a Lie Detector whose cycle saw the Truth Booth, once a person has cleared the alarm and the game has shown none for `END_S` (10 s). An answered Lie Detector with no Truth Booth clears its own alarm and the player carries on (`AUTO_RESUME`, since 2026-10-29). It refuses to start while the alarm is up.",
+   "summary": "The only process with administrator rights: MapleStory runs elevated, and Windows blocks input from normal programs into admin windows. It plays JSON plans from `lab/inbox` (keys, mouse moves and clicks inside the game window, resizes), only while the game is in front, records the client area when asked, and answers in `lab/outbox`. A watchdog looks for the Lie Detector 4 times a second and stops all input within about 10 ms.",
+   "details_md": "**How it starts.** `cmd_player --elevate` calls `ShellExecuteW('runas', python, '-X utf8 -m gamelab player')`, minimized and not activated (`SW_SHOWMINNOACTIVE`); the elevated copy runs `control.player.serve()`. It deletes leftover inbox files, writes `lab/player.json` (`{splice, pid, started}`: clients check it before splicing plans), starts the watchdog and takes no plan before the watchdog's first look.\n\n**What keeps it safe** (gamelab/README.md, How the keys get to the game): it runs no code from plans; it presses any key config.toml can name and both mouse buttons, moves the pointer only inside the game window, and only with the game in front; its code and key list are loaded once at start, and it loads as little of gamelab as it can (a test enforces this). A plan is limited to 400 events, 20 s and 900 frames.\n\n**With the alarm up** it refuses every plan but four kinds: `pet_food` (one tap, 3 a minute), `retreat` (her moves only, for 12 s after the sighting), `lie_cursor` (one move inside the mini-game's board, or one click on a Violetta answer button) and `lie_ok` (one click on the pass's OK). It writes `lab/ALARM.json` first, then a screenshot, pages the PC (sounds and a Windows notification that doesn't take focus) and pushes to the phone if `lab/bark.json` or `lab/smtp.json` are set up. Its log, `lab/player.log`, rotates past 5 MB when it starts.",
+   "modules": [
+    "gamelab/__main__.py",
+    "gamelab/control/player.py",
+    "gamelab/control/alarm.py",
+    "gamelab/control/lie_recorder.py",
+    "gamelab/perception/lie_detector.py",
+    "gamelab/control/notify.py"
+   ],
+   "threads": [
+    "the serve loop (main thread): the inbox looked at every 10 ms, one plan at a time",
+    "`lie-detector-watch` (Watchdog): a look at the game every 0.25 s whether or not a plan runs; while a cycle is recorded, `lie-detector-recording` writes its index and `lie-detector-prune` keeps the folder to 10 GB",
+    "`key-player`: a thread per plan that presses its events on time",
+    "phone pushes (`bark-push`, `text-mail`), and a hidden PowerShell process for each Windows notification"
+   ],
+   "talks_to": [
+    {
+     "process": "hunt",
+     "via": "lab/inbox and lab/outbox (plus `.cancel` and `.splice` files)",
+     "what": "key plans in; results and recorded frames out"
+    },
+    {
+     "process": "pet",
+     "via": "lab/inbox and lab/outbox",
+     "what": "`pet_food` taps (also with the alarm up); a fullness read's Esc and double-click"
+    },
+    {
+     "process": "park",
+     "via": "lab/inbox and lab/outbox",
+     "what": "her moves to the safe place"
+    },
+    {
+     "process": "perceive",
+     "via": "lab/inbox (`lie_cursor`, `lie_ok` plans) and lab/ALARM.json",
+     "what": "the mini-game cursor and Violetta clicks during an alarm; the alarm the service watches for"
+    },
+    {
+     "process": "tools",
+     "via": "lab/STOP, lab/ALARM.json, lab/player.log",
+     "what": "`stop-player`, `clear-alarm`; `window`, `snap`, `act` plans"
+    }
+   ]
+  },
+  {
+   "id": "perceive",
+   "name": "The perception service",
+   "command": "python -m gamelab perceive --map 10002073",
+   "elevated": false,
+   "lifetime": "Meant to run at all times, one per PC (the named mutex `Local\\gamelab-perceive`; a second prints that one runs and exits 0). Started by the babysitter, or by any command's client that can't reach one (`service.ensure`: detached through WMI, at most every 10 s, its console in `lab/perceive.log`). Ends on Ctrl+C or `--minutes`, or ends itself (exit 3) when its frame loop hasn't gone round for 10 s (`STUCK_S`; 60 s while a run is built) so that another can be started.",
+   "summary": "Looks at the game 15 times a second and hands the newest state (her place, the HUD, every monster with its track, the drops) to every command that attaches; no command captures the screen itself. It publishes what it sees as telemetry for the mini-map, keeps the rolling 5-minute recording, and while the Lie Detector alarm is up follows the mini-game's target and the Violetta game.",
+   "details_md": "**Why it exists.** Until 2026-10-25 every command that looked had a feed child process of its own (spawn, below-normal priority, a ring of 4 frames in shared memory) and a desktop duplication of its own; with `watch`, the pet and a hunt that was three feeds at 1.33-1.50 cores each and the duplications ran out. Now one process: measured offline on saved frames at its paces then (10 frames a second idle, 26.5 hunting), 0.55 cores with only a viewer and 1.66 with a hunting client (gamelab/README.md, The perception service); it runs at 15 a second for everyone now. It runs at normal priority with OpenCV on one thread and 1 ms timers (`service.settle`).\n\n**Its clients.** Each command's `ServiceClient` connects to `\\\\.\\pipe\\gamelab-perceive` with the authkey from `lab/perceive.json`, says `hello`, and then sends `ask` (what to search on the next frame), `throw`, `full` (the next frame at full size), `status`, `bye`. States go down the pipe pickled once, by a writer thread per client that keeps the newest 64 (`QUEUE_KEEP`; older ones dropped and counted as a gap); frames are read from shared-memory rings (16 look frames, 2 full-size). A client that hears nothing for 10 s reconnects; one that can't reach a service starts one. A command that hunts holds the map; a second hunting command on another map is refused.\n\n**What else runs in it.** Telemetry in `lab/telemetry/<time>-perceive.jsonl` (a scene 10 times a second, tracks twice, events, a `perf` record every 10 s); the rolling recording (`control.recording`, 15 frames a second, the last 5 minutes in memory, saves written by a part-writer child); and, while the alarm is up, `LieTracking` (its tracker in a child process) and `VioletaLive` (a YOLO model on the GPU). Those two move the cursor and click through the player; the service itself never presses a key or brings the game forward.\n\n**Saved frames.** `perceive --frames DIR` runs the same loop on PNGs, offline, at its own pipe, mutex and `lab/perceive-saved.json`; commands reach it with `GAMELAB_PERCEIVE=saved`.",
+   "modules": [
+    "gamelab/__main__.py",
+    "gamelab/localization/service.py",
+    "gamelab/localization/feed.py",
+    "gamelab/localization/worldstate.py",
+    "gamelab/control/recording.py",
+    "gamelab/control/rolling.py",
+    "gamelab/control/lie_tracking.py",
+    "gamelab/control/violetta_live.py",
+    "gamelab/telemetry.py"
+   ],
+   "threads": [
+    "the frame loop (main thread, `feed.run`): one pass of the world step per frame, 15 a second",
+    "`perceive-accept`, and per client `perceive-reader-<id>` (its asks) and `perceive-writer-<id>` (its states)",
+    "`perceive-watchdog`: ends the process if the loop hangs",
+    "`perceive-recording` (its ticks, the recorder's inbox and status) and `perceive-recording-encoder`",
+    "while the alarm is up: `lie-target`, `lie-target-replies`, `lie-target-cursor`, and `violetta`, `violetta-load`, `violetta-answer`",
+    "`telemetry-writer` and `console-writer` (a disk that stalls holds up neither the loop nor the console), `gc-report`"
+   ],
+   "talks_to": [
+    {
+     "process": "hunt",
+     "via": "named pipe `\\\\.\\pipe\\gamelab-perceive` + shared memory",
+     "what": "hello, asks and throws up; states, events and frames down"
+    },
+    {
+     "process": "pet",
+     "via": "named pipe + shared memory",
+     "what": "states for the guard; full frames for the pet's panels"
+    },
+    {
+     "process": "park",
+     "via": "named pipe + shared memory; lab/perceive.json",
+     "what": "her place; the map it looks at"
+    },
+    {
+     "process": "minimap",
+     "via": "lab/telemetry/<time>-perceive.jsonl",
+     "what": "scenes, tracks, events, EXP"
+    },
+    {
+     "process": "player",
+     "via": "lab/inbox; lab/ALARM.json",
+     "what": "cursor moves and clicks during an alarm"
+    },
+    {
+     "process": "lie-tracker",
+     "via": "stdin/stdout (pickled)",
+     "what": "the board's pictures down, target positions up"
+    },
+    {
+     "process": "partwriter",
+     "via": "stdin (pickled frames) / stdout (JSON summary)",
+     "what": "a save of the rolling recording"
+    },
+    {
+     "process": "recorder",
+     "via": "the mutex `Local\\gamelab-rolling-recorder`; lab/recorder/waiting.json",
+     "what": "one recorder at a time"
+    },
+    {
+     "process": "babysitter",
+     "via": "the process list",
+     "what": "it starts the service when none runs"
+    }
+   ]
+  },
+  {
+   "id": "hunt",
+   "name": "A hunting command",
+   "command": "python -m gamelab tour --loop --minutes 20 --map 10002073",
+   "elevated": false,
+   "lifetime": "Started by a person, or by an external grind loop (`behavior.guard.LOOP_STOP` names its STOP file). Ends when its objective or time is done (`tour --loop` then parks her), on `gamelab stop` (exit 9 after she parks), on the Lie Detector (exit 3 after her retreat), on a hunt stop (4 the safety stop, 5 out of darts, 6-8 the key check, stat window and MP), or on an error (1). A clean end removes `lab/hunt.json`; a killed or crashed one leaves it for the guard.",
+   "summary": "The agent itself (`hunt kill|clear`, `nav`, `tour`, `tour --loop`, `probe run`): a normal process that reads the perception service's latest state, decides, and hands key plans to the elevated player. It writes its own telemetry run, claims `lab/hunt.json`, and runs inside the Lie Detector's retreat.",
+   "details_md": "Its start is `_record` then `_hunter` (see the flow *A hunt's start*). It attaches to the service as a client that acts and tells her throws, and holds the service's map while it runs. Before its first look it brings the game forward (`_to_game`). Its plans go through `control.client` (sent, spliced, cancelled through files). It reads `lab/stop_hunt.json` at every look (`gamelab stop`), and the guard and the babysitter know it runs from `lab/hunt.json` and the process list: the babysitter stops the pet feeder while one runs, since the hunt feeds the pet itself.",
+   "modules": [
+    "gamelab/__main__.py",
+    "gamelab/behavior/hunter.py",
+    "gamelab/behavior/tour.py",
+    "gamelab/behavior/grind.py",
+    "gamelab/behavior/hunt.py",
+    "gamelab/behavior/retreat.py",
+    "gamelab/control/client.py",
+    "gamelab/control/navigator.py"
+   ],
+   "threads": [
+    "the main thread: the hunt loop (look, decide, send a plan)",
+    "`perceive-client`: reads the service's pipe as states come",
+    "`telemetry-writer` and `gc-report`",
+    "`ocr-warm`: the OCR models' warm-up at the start (`perception.messages.warm`)"
+   ],
+   "talks_to": [
+    {
+     "process": "player",
+     "via": "lab/inbox, lab/outbox",
+     "what": "key plans and their results"
+    },
+    {
+     "process": "perceive",
+     "via": "named pipe + shared memory",
+     "what": "states and frames; her throws"
+    },
+    {
+     "process": "minimap",
+     "via": "lab/telemetry/<time>-<command>.jsonl",
+     "what": "routes, chains, the hunt's rules, the log"
+    },
+    {
+     "process": "pet",
+     "via": "lab/hunt.json, lab/park_note.json",
+     "what": "a hunt that died leaves its entry: the guard parks her"
+    },
+    {
+     "process": "tools",
+     "via": "lab/stop_hunt.json and `.cancel` files",
+     "what": "`gamelab stop` asks it to stop and park"
+    },
+    {
+     "process": "babysitter",
+     "via": "the process list",
+     "what": "while it runs, the pet feeder is stopped"
+    }
+   ]
+  },
+  {
+   "id": "pet",
+   "name": "The pet feeder and guard",
+   "command": "python -m gamelab pet --every 1 --map 10002073",
+   "elevated": false,
+   "lifetime": "Kept running by the babysitter exactly while no hunt runs: stopped when a hunting command's process appears, started again after it ends. With no game it waits (every 5 s) rather than ending; it ends by itself (exit 0) when the client changes to another calibrated size, for the babysitter to start it with eyes for that size.",
+   "summary": "Keeps her pet fed between hunts (a food when its fullness, followed in time, is low; also through a Lie Detector) and runs the guard: once a second it reads the service's newest state and parks her with a detached `nav --park --tell` when she is touched twice in 30 s, her HP stays under the stop rule, or a stop or a dead hunt left a note.",
+   "details_md": "It is a command that sends keys but doesn't hunt: the service keeps its idle pace for it and it never holds the service's map. While the client is the wrong size, full screen or drawn off, it sends nothing (`PetWait`, with one Alt+Enter-twice try at most every 30 minutes, once the pet is due a food). The guard's switch is `lab/guard_mode.txt` (`gamelab guard off|alert|on`), its state survives restarts in `lab/guard.json`, and what the phone was told of potions and death is in `lab/vitals.json`. The guard is blind with the game behind another window or minimized, and on any map but the babysitter's `--map`.",
+   "modules": [
+    "gamelab/__main__.py",
+    "gamelab/behavior/pet.py",
+    "gamelab/behavior/guard.py",
+    "gamelab/behavior/vitals.py",
+    "gamelab/control/notify.py"
+   ],
+   "threads": [
+    "the main thread: a follow every `--every` minutes, the guard's passes once a second between them",
+    "`perceive-client`, `telemetry-writer`, the phone pushes' threads"
+   ],
+   "talks_to": [
+    {
+     "process": "player",
+     "via": "lab/inbox, lab/outbox",
+     "what": "`pet_food` plans"
+    },
+    {
+     "process": "perceive",
+     "via": "named pipe + shared memory",
+     "what": "the newest state for the guard; full frames for the Character Info read"
+    },
+    {
+     "process": "park",
+     "via": "WMI start; lab/parked.json, lab/park_note.json, lab/park.log",
+     "what": "the guard starts `nav --park --tell` and reads how it came out"
+    },
+    {
+     "process": "babysitter",
+     "via": "the process list",
+     "what": "started and stopped around hunts"
+    },
+    {
+     "process": "hunt",
+     "via": "lab/hunt.json",
+     "what": "whether a hunt runs, or died without parking her"
+    }
+   ]
+  },
+  {
+   "id": "park",
+   "name": "The parker (nav --park)",
+   "command": "python -m gamelab nav --park --tell",
+   "elevated": false,
+   "lifetime": "Short-lived: started by the guard (detached through WMI, console appended to `lab/park.log`), by `gamelab stop` when no hunt runs (a child it waits for), or by hand. Ends once she is on the safe place, or at once if a hunt runs, the game isn't in front or minimized, or no perception service runs.",
+   "summary": "Moves her, her moves alone, to the safe place (a safe platform or rope) of the map the perception service looks at, retrying when she is knocked back or blocked; never brings the game forward. Its command line matches the babysitter's hunting pattern (`nav`), so the pet feeder is held while it runs.",
+   "details_md": "It takes the map from `lab/perceive.json`, not a `--map` default, records its run as `nav-park`, and builds the Hunter with no throws and `_not_minimized`. `retreat.park` writes the outcome to `lab/parked.json` (or a note to `lab/park_note.json`), and `--tell` pushes it to the phone (`She's parked` / `She can't park`).",
+   "modules": [
+    "gamelab/__main__.py",
+    "gamelab/behavior/retreat.py",
+    "gamelab/behavior/guard.py"
+   ],
+   "threads": [
+    "the main thread; `perceive-client`; `telemetry-writer`"
+   ],
+   "talks_to": [
+    {
+     "process": "player",
+     "via": "lab/inbox, lab/outbox",
+     "what": "her moves"
+    },
+    {
+     "process": "perceive",
+     "via": "named pipe + shared memory; lab/perceive.json",
+     "what": "her place; the map"
+    },
+    {
+     "process": "pet",
+     "via": "lab/parked.json, lab/park_note.json",
+     "what": "how the park came out"
+    }
+   ]
+  },
+  {
+   "id": "babysitter",
+   "name": "The babysitter (external)",
+   "command": "babysit3.ps1 (D:/MapleHelper-scratch/pconst/finish/, not in this repo)",
+   "lifetime": "Runs all the time on the game's PC, in a loop every 5 s; its owner's to start and change.",
+   "summary": "A PowerShell script outside the repo that keeps the always-on processes up: it starts the perception service when none runs, stops the pet feeder while a hunting command's process runs and starts it again after, and hands the rolling recording over from an old `gamelab recorder` to the service.",
+   "details_md": "What the repo says of it (gamelab/README.md): it matches processes by their command lines (the README's snippet of its predecessor uses `gamelab perceive(?!.*--frames)` and `gamelab (tour|hunt|nav|probe|combo|act|do) `), which is why every subcommand also takes `--character` after its name and why the guard parks through a separate `nav` process. It starts programs detached through WMI with `D:\\MapleHelper` as their folder. It stops the old recorder only once that one has nothing left to write (no alarm up or begun in the last 5 minutes, no save asked or waiting), and starts it when no recording runs. Its idle guard moves a python whose command line has `spawn_main(parent_pid` to Idle priority within 5 s. It starts the pet feeder with a fixed `--map` (10002073 when the guard section was written), so the guard is blind on other maps. Whether it runs as administrator isn't recorded in the repo.",
+   "modules": [],
+   "threads": [],
+   "talks_to": [
+    {
+     "process": "perceive",
+     "via": "the process list; WMI start",
+     "what": "started when none runs"
+    },
+    {
+     "process": "pet",
+     "via": "the process list; WMI start, Stop-Process",
+     "what": "stopped while a hunt runs, started after"
+    },
+    {
+     "process": "hunt",
+     "via": "the process list",
+     "what": "seen running"
+    },
+    {
+     "process": "recorder",
+     "via": "the process list; lab/recorder/status.json and waiting.json",
+     "what": "the recording handed to the service"
+    }
+   ]
+  },
+  {
+   "id": "minimap",
+   "name": "The mini-map and web page",
+   "command": "python -m gamelab minimap   (or: python -m gamelab web)",
+   "elevated": false,
+   "lifetime": "Started by a person; until the window is closed or Ctrl+C (`web`).",
+   "summary": "Reads telemetry only and never touches the game: a tkinter window placed beside the game (never over it, since captures see what is on top), and a standard-library HTTP server on port 8765 that pushes the run's records to a phone as Server-Sent Events. The same server serves the review pages and `/tls/`.",
+   "details_md": "`cmd_minimap` builds the source (`LiveSource` follows the newest run and the perception service's file; `--replay FILE`; `--plan SRC DST`), starts `ui.web` (a `Feed` thread and the server's threads) unless `--window-only`, then runs `MapWindow` on the main thread. `_beside_game` places the window right of, left of or below the game's client on a monitor. Anyone who reaches the address can watch; a Cloudflare tunnel (outside gamelab) can expose it, with `/tls/` behind a Cloudflare Access login.",
+   "modules": [
+    "gamelab/__main__.py",
+    "gamelab/ui/web.py",
+    "gamelab/ui/app.py",
+    "gamelab/ui/sources.py",
+    "gamelab/ui/render.py"
+   ],
+   "threads": [
+    "the tkinter main loop (the window)",
+    "`web`: the HTTP server (a thread per request or stream)",
+    "`telemetry`: the web Feed reading the run's records"
+   ],
+   "talks_to": [
+    {
+     "process": "hunt",
+     "via": "lab/telemetry/<time>-<command>.jsonl",
+     "what": "what the command planned and did"
+    },
+    {
+     "process": "perceive",
+     "via": "lab/telemetry/<time>-perceive.jsonl",
+     "what": "what is on screen"
+    }
+   ]
+  },
+  {
+   "id": "lie-tracker",
+   "name": "The mini-game tracker",
+   "command": "python -m gamelab.control.lie_tracking <folder> <fps>",
+   "elevated": false,
+   "lifetime": "A child of the perception service: started when the Lie Detector alarm goes up, stopped 60 s after it has gone (`CHILD_IDLE_S`).",
+   "summary": "Follows the Lie Detector mini-game's target on the service's frames, in a process of its own so it neither shares the frame loop's Python lock nor its one OpenCV thread. Each round's answers go to `lab/lie_target/<time>.jsonl`; the service moves the cursor through the player.",
+   "details_md": "Below-normal priority, no window, OpenCV on 6 threads (`CHILD_THREADS`): in the service a frame took 78 ms against 52-64 here, over the 66 ms of 15 frames a second. The board's pictures go down its stdin one when it is ready; behind, it takes the newest.",
+   "modules": [
+    "gamelab/control/lie_tracking.py",
+    "gamelab/perception/lie_target.py"
+   ],
+   "threads": [
+    "its tracker's OpenCV threads"
+   ],
+   "talks_to": [
+    {
+     "process": "perceive",
+     "via": "stdin/stdout (pickled)",
+     "what": "board pictures down, the target's position up"
+    }
+   ]
+  },
+  {
+   "id": "partwriter",
+   "name": "The part writer",
+   "command": "python -m gamelab.control.partwriter",
+   "elevated": false,
+   "lifetime": "A child of the perception service, one per save of the rolling recording (an alarm's `before/` and clip, `save-recent`); ends once the part is written (600 s at most).",
+   "summary": "Decodes and encodes a saved stretch of the rolling recording to JPEG or PNG in a process of its own, so a save doesn't hold up the service's frame loop. If it can't start or fails, the service writes the part itself.",
+   "details_md": "Written inside the service, a 120 s save made the frame loop's steps wait 18-21 ms against 1-2 and dropped it to 8.4-9.7 frames a second; written apart, 3-4 ms (`rolling.write_part_apart`). It runs below normal (Idle if its parent is), its threads at the lowest priority.",
+   "modules": [
+    "gamelab/control/partwriter.py",
+    "gamelab/control/rolling.py"
+   ],
+   "threads": [
+    "its encoder threads (4, or 2 while a command hunts)"
+   ],
+   "talks_to": [
+    {
+     "process": "perceive",
+     "via": "stdin (pickled moments) / stdout (one JSON line)",
+     "what": "the frames in, the part's summary out"
+    }
+   ]
+  },
+  {
+   "id": "recorder",
+   "name": "The old rolling recorder",
+   "command": "python -m gamelab recorder",
+   "elevated": false,
+   "lifetime": "Only where the service doesn't record (a service of older code, down, or `perceive --no-record`): the babysitter starts it then, and stops it once the service waits for the recorders' mutex and it has nothing left to write.",
+   "summary": "The rolling recording as it ran until 2026-10-26: its own mss capture of the game window 10 times a second, the last 5 minutes kept in memory, saved on a Lie Detector alarm and by `save-recent`. One recorder at a time on the PC, this or the service's.",
+   "details_md": "Below-normal priority (`rolling.quiet`). It answers `save-recent` through `lab/recorder/inbox` and `outbox` and writes `lab/recorder/status.json` every 5 s (`recorder --status` reads it).",
+   "modules": [
+    "gamelab/__main__.py",
+    "gamelab/control/rolling.py"
+   ],
+   "threads": [
+    "the ticks (main), `rolling-saves`"
+   ],
+   "talks_to": [
+    {
+     "process": "perceive",
+     "via": "the mutex `Local\\gamelab-rolling-recorder`; lab/recorder/waiting.json",
+     "what": "who records"
+    },
+    {
+     "process": "tools",
+     "via": "lab/recorder/inbox, outbox, status.json",
+     "what": "`save-recent` and `recorder --status`"
+    }
+   ]
+  },
+  {
+   "id": "tools",
+   "name": "Short commands and viewers",
+   "command": "python -m gamelab stop | stop-player | clear-alarm | guard | save-recent | watch | hunt look | map | ...",
+   "elevated": false,
+   "lifetime": "Started by a person (or by Claude driving gamelab); each runs once and ends, but `watch` until Ctrl+C or `--minutes`.",
+   "summary": "The commands that steer or watch the long-lived processes: `stop` (a hunt stops and she parks), `stop-player`, `clear-alarm`, `guard`, `save-recent`, the viewers `watch`, `hunt look` and `map` (clients of the service that send nothing), and the offline tools (simulator, benches, analyses) that never touch the game.",
+   "details_md": "`stop` writes `lab/stop_hunt.json` for the running hunt, cuts the player's running plans with cancel files, touches the external grind loop's STOP file, and waits up to 300 s to say where she parked (`lab/parked.json`); with no hunt it runs `nav --park` itself. `stop-player` touches `lab/STOP` and waits 10 s for the player's log to say it stopped.",
+   "modules": [
+    "gamelab/__main__.py",
+    "gamelab/behavior/guard.py",
+    "gamelab/control/rolling.py"
+   ],
+   "threads": [],
+   "talks_to": [
+    {
+     "process": "player",
+     "via": "lab/STOP, lab/ALARM.json",
+     "what": "stop it; clear the alarm"
+    },
+    {
+     "process": "hunt",
+     "via": "lab/stop_hunt.json, `.cancel` files",
+     "what": "stop the hunt; she parks"
+    },
+    {
+     "process": "perceive",
+     "via": "named pipe (viewers); lab/recorder inbox",
+     "what": "`watch`, `hunt look`, `map`; `save-recent`"
+    },
+    {
+     "process": "pet",
+     "via": "lab/guard_mode.txt",
+     "what": "the guard's switch"
+    }
+   ]
+  }
+ ],
+ "lab_files": [
+  {
+   "path": "lab/inbox/",
+   "format": "a JSON plan a file, `<plan id>.json` (written as `.tmp`, then renamed); `.running` once taken; `.cancel`, `.splice` beside it",
+   "written_by": [
+    "gamelab/control/client.py"
+   ],
+   "read_by": [
+    "gamelab/control/player.py"
+   ],
+   "purpose": "Key plans for the elevated player. A plan renamed to `.running` is the player's; a `.cancel` file stops it and lets go of every key; a `.splice` takes over from it."
+  },
+  {
+   "path": "lab/outbox/",
+   "format": "`<plan id>.json` result; `<plan id>.npz` recorded frames and times",
+   "written_by": [
+    "gamelab/control/player.py"
+   ],
+   "read_by": [
+    "gamelab/control/client.py"
+   ],
+   "purpose": "The player's answers, read and deleted by `client.wait`."
+  },
+  {
+   "path": "lab/STOP",
+   "format": "empty file",
+   "written_by": [
+    "gamelab/__main__.py"
+   ],
+   "read_by": [
+    "gamelab/control/player.py"
+   ],
+   "purpose": "`stop-player`: the player exits at its next loop (it deletes the file when it starts)."
+  },
+  {
+   "path": "lab/player.log (player.log.1)",
+   "format": "text, a line a plan (`HH:MM:SS ran <id>: ok`)",
+   "written_by": [
+    "gamelab/control/player.py"
+   ],
+   "read_by": [
+    "gamelab/__main__.py",
+    "gamelab/behavior/guard.py"
+   ],
+   "purpose": "The player's log; `stop-player` waits for its last line, the guard reads the time of its last key. Rotated past 5 MB at start."
+  },
+  {
+   "path": "lab/player.json",
+   "format": "JSON {splice, pid, started}",
+   "written_by": [
+    "gamelab/control/player.py"
+   ],
+   "read_by": [
+    "gamelab/control/client.py"
+   ],
+   "purpose": "What the running player can do (splices), there only while it runs."
+  },
+  {
+   "path": "lab/ALARM.json (+ lab/lie_detector_<HHMMSS>.png)",
+   "format": "JSON {reason, time, at, form, cause, screenshot}",
+   "written_by": [
+    "gamelab/control/alarm.py"
+   ],
+   "read_by": [
+    "gamelab/control/client.py",
+    "gamelab/control/player.py",
+    "gamelab/__main__.py",
+    "gamelab/control/lie_tracking.py",
+    "gamelab/control/violetta_live.py",
+    "gamelab/control/rolling.py"
+   ],
+   "purpose": "The Lie Detector was seen (by the player's watchdog, or `watch --lie-detector`): gamelab's game commands refuse to run while it exists. Removed by `clear-alarm`, or by the player itself after an answered cycle with no Truth Booth."
+  },
+  {
+   "path": "lab/alarm_keys.json",
+   "format": "JSON, her moves' and pet food's key names",
+   "written_by": [
+    "gamelab/control/keymap.py"
+   ],
+   "read_by": [
+    "gamelab/control/alarm.py",
+    "gamelab/control/player.py"
+   ],
+   "purpose": "The keys the running commands follow her moves and pet food to, so the player's allowance with the alarm up presses the right ones."
+  },
+  {
+   "path": "lab/perceive.json (perceive-saved.json)",
+   "format": "JSON {pid, address, authkey, started, map, character}",
+   "written_by": [
+    "gamelab/localization/service.py"
+   ],
+   "read_by": [
+    "gamelab/localization/service.py",
+    "gamelab/__main__.py"
+   ],
+   "purpose": "How a client reaches the running service (the pipe's authkey), and which map it looks at."
+  },
+  {
+   "path": "lab/perceive.log",
+   "format": "text",
+   "written_by": [
+    "gamelab/localization/service.py"
+   ],
+   "read_by": [],
+   "purpose": "The console of a service started by a command's `ensure`."
+  },
+  {
+   "path": "lab/telemetry/<YYYYmmdd-HHMMSS>-<name>.jsonl",
+   "format": "JSON lines {t, topic, ...}; parts past 64 MB; the folder pruned to 2 GB",
+   "written_by": [
+    "gamelab/telemetry.py"
+   ],
+   "read_by": [
+    "gamelab/ui/sources.py",
+    "gamelab/analysis/coverage.py",
+    "gamelab/analysis/jumps.py",
+    "gamelab/analysis/respawn.py",
+    "gamelab/__main__.py"
+   ],
+   "purpose": "What each run (a command, the perception service, a simulation) saw, planned and did: followed live by the mini-map, read later by the analyses."
+  },
+  {
+   "path": "lab/hunt.json",
+   "format": "JSON {pid, started, command}",
+   "written_by": [
+    "gamelab/behavior/guard.py"
+   ],
+   "read_by": [
+    "gamelab/behavior/guard.py",
+    "gamelab/behavior/retreat.py"
+   ],
+   "purpose": "The command hunting now (claimed at its start by `_record`). Removed on a clean end; left behind by a hunt that died, it tells the guard to park her."
+  },
+  {
+   "path": "lab/stop_hunt.json",
+   "format": "JSON {t}",
+   "written_by": [
+    "gamelab/behavior/guard.py"
+   ],
+   "read_by": [
+    "gamelab/behavior/hunter.py",
+    "gamelab/behavior/retreat.py",
+    "gamelab/behavior/guard.py"
+   ],
+   "purpose": "`gamelab stop`: the running hunt reads it at its next look, sends nothing but her moves, and parks her."
+  },
+  {
+   "path": "lab/park_note.json",
+   "format": "JSON {t, why, urgent}",
+   "written_by": [
+    "gamelab/behavior/guard.py",
+    "gamelab/behavior/retreat.py"
+   ],
+   "read_by": [
+    "gamelab/behavior/guard.py"
+   ],
+   "purpose": "A park or stop not done (the game not in front, a hunt that died): the guard parks her at the game's return."
+  },
+  {
+   "path": "lab/parked.json",
+   "format": "JSON {t, by, there, said}",
+   "written_by": [
+    "gamelab/behavior/retreat.py"
+   ],
+   "read_by": [
+    "gamelab/behavior/guard.py"
+   ],
+   "purpose": "How the last park or stop's retreat came out."
+  },
+  {
+   "path": "lab/guard.json",
+   "format": "JSON",
+   "written_by": [
+    "gamelab/behavior/guard.py"
+   ],
+   "read_by": [
+    "gamelab/behavior/guard.py"
+   ],
+   "purpose": "The guard's state across the pet feeder's restarts."
+  },
+  {
+   "path": "lab/guard_mode.txt",
+   "format": "text: \"off\" or \"alert\"; no file: on",
+   "written_by": [
+    "gamelab/__main__.py"
+   ],
+   "read_by": [
+    "gamelab/behavior/guard.py"
+   ],
+   "purpose": "The guard's switch (`gamelab guard`), read at every pass."
+  },
+  {
+   "path": "lab/park.log",
+   "format": "text",
+   "written_by": [
+    "gamelab/__main__.py"
+   ],
+   "read_by": [],
+   "purpose": "The console of the guard's detached `nav --park --tell`."
+  },
+  {
+   "path": "lab/vitals.json",
+   "format": "JSON",
+   "written_by": [
+    "gamelab/behavior/vitals.py"
+   ],
+   "read_by": [
+    "gamelab/behavior/vitals.py"
+   ],
+   "purpose": "What the phone has been told of her potions and her death, across the pet feeder being stopped and started around hunts."
+  },
+  {
+   "path": "lab/pet.json",
+   "format": "JSON",
+   "written_by": [
+    "gamelab/behavior/pet.py"
+   ],
+   "read_by": [
+    "gamelab/behavior/pet.py"
+   ],
+   "purpose": "The pet's fullness followed, when, and the last food; and when the pet's Alt+Enter try last went."
+  },
+  {
+   "path": "lab/window_tries.json",
+   "format": "JSON",
+   "written_by": [
+    "gamelab/control/window_size.py"
+   ],
+   "read_by": [
+    "gamelab/control/window_size.py",
+    "gamelab/behavior/pet.py"
+   ],
+   "purpose": "When Alt+Enter was tried on the client, by any process: at most 4 tries an hour (`window_size.HOURLY`)."
+  },
+  {
+   "path": "lab/character.json",
+   "format": "JSON",
+   "written_by": [
+    "gamelab/character.py"
+   ],
+   "read_by": [
+    "gamelab/character.py"
+   ],
+   "purpose": "`character use <id>`: who plays when neither `--character` nor `GAMELAB_CHARACTER` names one."
+  },
+  {
+   "path": "lab/keybindings-<her>.json",
+   "format": "JSON",
+   "written_by": [
+    "gamelab/control/keymap.py"
+   ],
+   "read_by": [
+    "gamelab/control/keymap.py",
+    "gamelab/behavior/statcheck.py"
+   ],
+   "purpose": "Her key bindings as the game's window last showed them (`keys --read`, the hunt's key check): every command's keys at its start."
+  },
+  {
+   "path": "lab/stat_window.json (+ lab/stat_window/)",
+   "format": "JSON (+ cut panel pictures)",
+   "written_by": [
+    "gamelab/perception/stat_window.py"
+   ],
+   "read_by": [
+    "gamelab/perception/stat_window.py"
+   ],
+   "purpose": "Where her stat window's panels open and whose pictures find them; a hunt opens it only with this."
+  },
+  {
+   "path": "lab/her_stats.json, lab/touches.jsonl",
+   "format": "JSON; JSON lines",
+   "written_by": [
+    "gamelab/behavior/bootstrap.py",
+    "gamelab/behavior/safety.py"
+   ],
+   "read_by": [
+    "gamelab/behavior/bootstrap.py",
+    "gamelab/__main__.py"
+   ],
+   "purpose": "Her DEF, max HP and level as last read, and her touches as her HP number measured them."
+  },
+  {
+   "path": "lab/bark.json, lab/smtp.json",
+   "format": "JSON",
+   "written_by": [
+    "gamelab/control/notify.py"
+   ],
+   "read_by": [
+    "gamelab/control/notify.py"
+   ],
+   "purpose": "Where phone alerts go: the Bark app's device key; a mail account for texts (`notify --setup-bark`, `--setup-sms`; the login filled in by hand)."
+  },
+  {
+   "path": "lab/recorder/",
+   "format": "inbox/<id>.json (taken as <id>.taken), outbox/<id>.json, status.json, waiting.json",
+   "written_by": [
+    "gamelab/control/rolling.py",
+    "gamelab/control/recording.py"
+   ],
+   "read_by": [
+    "gamelab/control/rolling.py"
+   ],
+   "purpose": "The rolling recorder's (or the service's recording's) requests, answers and status; `waiting.json` says the service waits for the recorders' mutex."
+  },
+  {
+   "path": "lab/recent/<time>[-name]/",
+   "format": "JPEG (or PNG) frames, index.jsonl, summary.json",
+   "written_by": [
+    "gamelab/control/rolling.py",
+    "gamelab/control/partwriter.py"
+   ],
+   "read_by": [
+    "gamelab/analysis/recordings.py"
+   ],
+   "purpose": "`save-recent`'s saves of the last minutes (the oldest go past 20 GB)."
+  },
+  {
+   "path": "lab/alarm_clips/<time>-lie-detector[-form]/",
+   "format": "PNG frames, index",
+   "written_by": [
+    "gamelab/control/rolling.py",
+    "gamelab/control/partwriter.py"
+   ],
+   "read_by": [
+    "gamelab/__main__.py",
+    "gamelab/perception/lie_target.py"
+   ],
+   "purpose": "Each alarm's clip, 2 s before the first sight to 5 s after the test's last (3 minutes at most), lossless; 30 GB kept."
+  },
+  {
+   "path": "lab/lie_detector/<time>/",
+   "format": "index.jsonl, summary, before/",
+   "written_by": [
+    "gamelab/control/lie_recorder.py",
+    "gamelab/control/rolling.py"
+   ],
+   "read_by": [
+    "gamelab/control/lie_recorder.py"
+   ],
+   "purpose": "Each Lie Detector cycle as the player saw it, with the 5 minutes before it; `clear-alarm` refuses while one is still being written. 10 GB kept."
+  },
+  {
+   "path": "lab/lie_target/<time>.jsonl",
+   "format": "JSON lines",
+   "written_by": [
+    "gamelab/control/lie_tracking.py"
+   ],
+   "read_by": [],
+   "purpose": "Each mini-game round's target as followed live."
+  },
+  {
+   "path": "lab/booth_unknown/",
+   "format": "PNG frames, index, summary",
+   "written_by": [
+    "gamelab/control/rolling.py"
+   ],
+   "read_by": [],
+   "purpose": "The 5 minutes before a Truth Booth no test was seen before, for analysis."
+  },
+  {
+   "path": "lab/shots/",
+   "format": "PNG; statwindow-<time>/ and keybindings-<time>/ folders with report.json",
+   "written_by": [
+    "gamelab/__main__.py"
+   ],
+   "read_by": [],
+   "purpose": "The pictures and capture reports commands save (`snap`, `act`, `hunt look`, `map`, `coverage`, `stats --read --record`, `keys --read --record`)."
+  },
+  {
+   "path": "lab/recordings/<name>.npz",
+   "format": "frames and times (+ .events.json)",
+   "written_by": [
+    "gamelab/analysis/recordings.py"
+   ],
+   "read_by": [
+    "gamelab/analysis/recordings.py",
+    "gamelab/__main__.py"
+   ],
+   "purpose": "Recordings made through the player (`act --record`, `do`, `combo`, `lock`), for `track`, `sheet`, `check`."
+  },
+  {
+   "path": "lab/shots2.jsonl, lab/probe_geometry.jsonl",
+   "format": "JSON lines",
+   "written_by": [
+    "gamelab/behavior/fight.py",
+    "gamelab/behavior/probe.py"
+   ],
+   "read_by": [
+    "gamelab/__main__.py",
+    "gamelab/behavior/probe.py"
+   ],
+   "purpose": "Every throw and every probe throw, for `hunt shots` and `probe score`."
+  },
+  {
+   "path": "lab/calibration*.json, lab/tag_template*.npy",
+   "format": "JSON; numpy",
+   "written_by": [
+    "gamelab/analysis/calibration.py"
+   ],
+   "read_by": [
+    "gamelab/analysis/calibration.py",
+    "gamelab/__main__.py"
+   ],
+   "purpose": "Her name tag's template and the recording crop, one set per client size (`calibrate`)."
+  },
+  {
+   "path": "lab/harness/",
+   "format": "saved simulator harness runs",
+   "written_by": [
+    "gamelab/sim/harness.py"
+   ],
+   "read_by": [
+    "gamelab/sim/harness.py",
+    "gamelab/__main__.py"
+   ],
+   "purpose": "Runs `coverage` compares with the live telemetry."
+  },
+  {
+   "path": "lab/GPU",
+   "format": "empty file or a word",
+   "written_by": [],
+   "read_by": [
+    "gamelab/native.py"
+   ],
+   "purpose": "Switches the re-finds' matches onto the GPU for a service started through WMI, which gets none of its starter's environment (`GAMELAB_GPU` wins)."
+  },
+  {
+   "path": "lab/characters/<her files>/",
+   "format": "the same files as above",
+   "written_by": [],
+   "read_by": [],
+   "purpose": "Another character's own copies of her files (calibration, name tag, pictures, pet, grounds, logs, stats); the thief's are in lab/ itself (`paths.Files`)."
+  }
+ ],
+ "cli": [
+  {
+   "command": "player",
+   "summary": "The key player; `--elevate` starts it as administrator through a UAC prompt.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_player",
+   "line": 108,
+   "sends_keys": true,
+   "details_md": "It is the process that presses every key the other commands plan; it sends none of its own. Refused while the alarm is up."
+  },
+  {
+   "command": "stop",
+   "summary": "Stops the running hunt; she parks on a safe place and it says where. With no hunt running, she parks.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_stop",
+   "line": 125,
+   "sends_keys": true,
+   "details_md": "Keys: her moves only, through the hunt's retreat or a `nav --park` it runs. With the game not in front it leaves a note and she parks at its return."
+  },
+  {
+   "command": "guard",
+   "summary": "The guard's switch: `off`, `alert` (pushes, no moves) or `on`; no word says how it is.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_guard",
+   "line": 131,
+   "sends_keys": false
+  },
+  {
+   "command": "stop-player",
+   "summary": "Stops the key player (touches `lab/STOP`, waits 10 s for its log to confirm).",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_stop_player",
+   "line": 142,
+   "sends_keys": false
+  },
+  {
+   "command": "clear-alarm",
+   "summary": "After a Lie Detector you answered: removes the alarm so gamelab runs again; refused (exit 3) while its recording goes on.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_clear_alarm",
+   "line": 203,
+   "sends_keys": false
+  },
+  {
+   "command": "notify",
+   "summary": "Phone alerts: `--setup-bark KEY`, `--test-bark`, `--setup-sms ADDRESS`, `--test-sms`; no option says what's set up.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_notify",
+   "line": 155,
+   "sends_keys": false
+  },
+  {
+   "command": "character",
+   "summary": "Who plays and why; `use ID` chooses who plays when nothing names another (`lab/character.json`); `check` reads nothing yet.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_character",
+   "line": 563,
+   "sends_keys": false
+  },
+  {
+   "command": "stats",
+   "summary": "Her stats as perception has them; `--frame` reads W.DEF off a saved frame; `--read` opens her stat window live; `--calibrate` sets the reader up.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_stats",
+   "line": 235,
+   "sends_keys": true,
+   "details_md": "Keys only with `--read`: her stats key, a mouse move, one click on DETAIL, and her stats key or Esc to close (with the alarm up, nothing)."
+  },
+  {
+   "command": "spot",
+   "summary": "Checks the game (or `--image`) for the Lie Detector.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_spot",
+   "line": 676,
+   "sends_keys": false,
+   "details_md": "Read-only: an image file, or its own mss screenshot of the game's client area (not the perception service's frame). Prints each Lie Detector form's match against its threshold."
+  },
+  {
+   "command": "lie-target",
+   "summary": "The mini-game target tracker run on recorded alarm clips, scored against approved reference tracks.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_lie_target",
+   "line": 694,
+   "sends_keys": false
+  },
+  {
+   "command": "calibrate",
+   "summary": "Finds her on screen and saves her name tag template and the recording crop (a capture through the player).",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_calibrate",
+   "line": 725,
+   "sends_keys": false,
+   "details_md": "Brings the game to the front; refused while the alarm is up."
+  },
+  {
+   "command": "window",
+   "summary": "Resizes the game's client to 1366x768 or 1920x1080 through the player; `--recover` sets it back with Alt+Enter twice.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_window",
+   "line": 742,
+   "sends_keys": true,
+   "details_md": "The resize sends no keys; `--recover` sends Alt+Enter twice (full screen and back), checking for the Lie Detector before each."
+  },
+  {
+   "command": "snap",
+   "summary": "Saves a screenshot of the game to `lab/shots/snap.png` (a capture through the player).",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_snap",
+   "line": 796,
+   "sends_keys": false,
+   "details_md": "Brings the game to the front (no keys) and asks the player for a short capture with no events; refused while the alarm is up."
+  },
+  {
+   "command": "act",
+   "summary": "Runs explore steps (`KEY`, `KEY*MS`, `KEY+`/`KEY-`, `MS`, `@X,Y`, `click@X,Y`), then a screenshot; `--record` records her at 30 fps.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_act",
+   "line": 859,
+   "sends_keys": true
+  },
+  {
+   "command": "do",
+   "summary": "Runs one `maplehelper.actions` move in the game (walk, climb_rope, pick_up, stand_up...), recorded.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_do",
+   "line": 882,
+   "sends_keys": true
+  },
+  {
+   "command": "hunt look",
+   "summary": "What she sees now: her place, HP/MP, EXP, other players, monsters and whether a star reaches them, drops; `--every S` a look every S seconds.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_hunt",
+   "line": 1614,
+   "sends_keys": false,
+   "details_md": "A viewer of the perception service. Refused while the alarm is up, as `hunt` is in `GAME_COMMANDS`."
+  },
+  {
+   "command": "hunt kill",
+   "summary": "Kills one monster (the one nearest `--near` map units from her) and loots.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_hunt",
+   "line": 1614,
+   "sends_keys": true
+  },
+  {
+   "command": "hunt clear",
+   "summary": "Shoots every monster in reach, nearest first (`--ground`, `--kills` 6, `--seconds` 120), then mops up the drops.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_hunt",
+   "line": 1614,
+   "sends_keys": true
+  },
+  {
+   "command": "hunt shots",
+   "summary": "Hits and misses of every throw logged, by the target's height (bands of 30 map units).",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_hunt",
+   "line": 1614,
+   "sends_keys": false
+  },
+  {
+   "command": "probe list",
+   "summary": "The in-game probes of what a star hits and what each settles.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_probe",
+   "line": 1752,
+   "sends_keys": false
+  },
+  {
+   "command": "probe run",
+   "summary": "Runs one probe in the game: throws only at a lone monster in range and logs every throw to `lab/probe_geometry.jsonl`. The thief's only.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_probe",
+   "line": 1752,
+   "sends_keys": true
+  },
+  {
+   "command": "probe score",
+   "summary": "Settles the probes' questions from their log.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_probe",
+   "line": 1752,
+   "sends_keys": false
+  },
+  {
+   "command": "map",
+   "summary": "The map's platforms and her place on them (from the perception service; `--offline` just draws the map).",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_map",
+   "line": 1803,
+   "sends_keys": false
+  },
+  {
+   "command": "nav",
+   "summary": "Goes to a platform (`--x`): plans a route of ropes, jumps and drops and follows it; `--fight` shoots on the way, `--avoid KIND`, `--ways N`.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_nav",
+   "line": 1898,
+   "sends_keys": true
+  },
+  {
+   "command": "nav --walk",
+   "summary": "Movement only: random trips for MINUTES in one navigator (the QA walk), the rolling recording saved along the way, then she parks.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "_nav_walk",
+   "line": 1929,
+   "sends_keys": true
+  },
+  {
+   "command": "nav --park",
+   "summary": "She goes to the safe place of the map the service looks at, her moves alone; never brings the game forward; `--tell` pushes the outcome.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "_nav_park",
+   "line": 1857,
+   "sends_keys": true,
+   "details_md": "Started by the guard and by `stop`. Sends nothing if a hunt runs, the game isn't in front or no service runs."
+  },
+  {
+   "command": "tour",
+   "summary": "Hunts the map: sweeps the platforms worth hunting (`--stops`, `--kills` 5, `--seconds` 90 each), collects drops, then stands by on a safe platform.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_tour",
+   "line": 1958,
+   "sends_keys": true
+  },
+  {
+   "command": "tour --loop",
+   "summary": "The hunt loop for `--minutes` (20): grinding by default (a loop of stops chosen by EXP a minute), `--camp` one ground at a time; then she parks.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_tour",
+   "line": 1958,
+   "sends_keys": true
+  },
+  {
+   "command": "keys",
+   "summary": "The game's KEY BINDINGS window read: `--frame` off saved frames, `--read` live (backslash, read, Esc), `--forget` drops the remembered bindings.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_keys",
+   "line": 1169,
+   "sends_keys": true,
+   "details_md": "Keys only with `--read`: a mouse move off the window, the backslash, and Esc only once the window is seen open."
+  },
+  {
+   "command": "pet",
+   "summary": "Feeds her pet once if its fullness is low; `--read` reads it off her Character Info now (a double-click).",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_pet",
+   "line": 1362,
+   "sends_keys": true
+  },
+  {
+   "command": "pet --every",
+   "summary": "The babysitter's pet feeder: a follow every N minutes, the guard's passes in between, waiting for the game when it isn't there.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_pet",
+   "line": 1362,
+   "sends_keys": true,
+   "details_md": "Goes on through a Lie Detector with food only (`pet_food`, 3 a minute). Starts `nav --park --tell` when the guard says so."
+  },
+  {
+   "command": "perceive",
+   "summary": "The perception service: the game looked at every frame for every command and the mini-map; one per PC; `--frames DIR` on saved frames.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_perceive",
+   "line": 2649,
+   "sends_keys": false,
+   "details_md": "Sends no keys; during a Lie Detector its trackers move the cursor and click Violetta answers and the pass's OK through the player."
+  },
+  {
+   "command": "watch",
+   "summary": "What the perception service sees, on the console every 10 s; `--lie-detector` raises the alarm and pages; `--heading` says her facing.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_watch",
+   "line": 2542,
+   "sends_keys": false
+  },
+  {
+   "command": "minimap",
+   "summary": "The live mini-map: a window beside the game and a web page on port 8765; `--replay FILE`, `--plan SRC DST`.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_minimap",
+   "line": 2023,
+   "sends_keys": false
+  },
+  {
+   "command": "web",
+   "summary": "The mini-map's web page alone (`minimap --web-only`).",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_minimap",
+   "line": 2023,
+   "sends_keys": false
+  },
+  {
+   "command": "sim",
+   "summary": "Runs a scenario offline on the simulator, recorded for the mini-map; `sim list` names them.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_sim",
+   "line": 2089,
+   "sends_keys": false
+  },
+  {
+   "command": "lock",
+   "summary": "Measures how long an attack blocks the next jump: an attack, then a jump `d` ms later, recorded. The thief's only.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_lock",
+   "line": 2112,
+   "sends_keys": true
+  },
+  {
+   "command": "combo",
+   "summary": "Plays a combo as MapleHelper would (`--runs`, `--chain`) and checks every jump and throw in the recording. The thief's only.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_combo",
+   "line": 2131,
+   "sends_keys": true
+  },
+  {
+   "command": "sheet",
+   "summary": "A contact sheet of a recording or a folder of saved frames; `--video` makes an mp4; `--around-her` zooms in.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_sheet",
+   "line": 2174,
+   "sends_keys": false
+  },
+  {
+   "command": "track",
+   "summary": "Her path through a recording: screen position, height, world x and jumps.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_track",
+   "line": 2211,
+   "sends_keys": false
+  },
+  {
+   "command": "check",
+   "summary": "A recording's key send lag and the game's frame pacing.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_check",
+   "line": 2228,
+   "sends_keys": false
+  },
+  {
+   "command": "list",
+   "summary": "Lists saved recordings.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_list",
+   "line": 2239,
+   "sends_keys": false
+  },
+  {
+   "command": "bench-look",
+   "summary": "Times each stage of a look on saved frames, or `--live` on the game if it is in front (it never brings it forward).",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_bench_look",
+   "line": 2247,
+   "sends_keys": false
+  },
+  {
+   "command": "bench-capture",
+   "summary": "Times a capture through DXGI and mss on the game's window as it is.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_bench_capture",
+   "line": 2413,
+   "sends_keys": false
+  },
+  {
+   "command": "bench-paste",
+   "summary": "Draws a map's monsters and drops onto 1366x768 frames and measures how well they are found, at that size and stretched to 1920x1080.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_bench_paste",
+   "line": 2326,
+   "sends_keys": false
+  },
+  {
+   "command": "learn-colours",
+   "summary": "Learns a map's background colours from saved frames, for the colour gates of monsters without a hand-made one.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_learn_colours",
+   "line": 2379,
+   "sends_keys": false
+  },
+  {
+   "command": "bodies",
+   "summary": "Where the monster detector puts monsters' feet on saved frames, and their x from frame to frame on recordings; `--tracks` on `watch` telemetry.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_bodies",
+   "line": 2493,
+   "sends_keys": false
+  },
+  {
+   "command": "recorder",
+   "summary": "The old rolling recorder (10 frames a second, last 5 minutes); `--status` says how the running one is doing.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_recorder",
+   "line": 2726,
+   "sends_keys": false
+  },
+  {
+   "command": "save-recent",
+   "summary": "Asks the running recorder (the service's or the old one) to save its last `--seconds` (300) to `lab/recent/`.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_save_recent",
+   "line": 2744,
+   "sends_keys": false
+  },
+  {
+   "command": "heading",
+   "summary": "Which way she faces on saved frames; `--learn left|right` teaches her pictures.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_heading",
+   "line": 2442,
+   "sends_keys": false
+  },
+  {
+   "command": "lab-usage",
+   "summary": "What gamelab keeps under gamelab/lab, by kind; `--prune-telemetry` deletes what a new run would (past 2 GB).",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_lab_usage",
+   "line": 2767,
+   "sends_keys": false
+  },
+  {
+   "command": "coverage",
+   "summary": "How often each route move was planned, taken and missed, from harness runs and live telemetry, with a picture of the map.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_coverage",
+   "line": 2779,
+   "sends_keys": false
+  },
+  {
+   "command": "jitter",
+   "summary": "Her jump attacks' jitter against what came of them, from telemetry.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_jitter",
+   "line": 2831,
+   "sends_keys": false
+  },
+  {
+   "command": "respawn",
+   "summary": "Respawn times, drop life and how full the platforms are, from telemetry.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_respawn",
+   "line": 2847,
+   "sends_keys": false
+  },
+  {
+   "command": "memory",
+   "summary": "Her memory of the monsters run again on a recorded run; `--out` writes a copy with 'memory' records for `minimap --replay`.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_memory",
+   "line": 2877,
+   "sends_keys": false
+  },
+  {
+   "command": "patrol",
+   "summary": "Grinding's view of a map (its stops, the loop, camping's best); with a recorded run, the stop it would have chosen every `--every` s.",
+   "entry": "gamelab/__main__.py",
+   "symbol": "cmd_patrol",
+   "line": 2944,
+   "sends_keys": false
+  }
+ ]
+}

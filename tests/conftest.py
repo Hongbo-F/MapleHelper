@@ -99,6 +99,9 @@ def offline(monkeypatch, tmp_path):
     from gamelab.control import player
     for mod in (paths, alarm, client, player):
         monkeypatch.setattr(mod, "ALARM", tmp_path / "ALARM.json")
+    # Nor the real player's mutex: a served player in a test would refuse to start beside a live one, or beside
+    # another test's (a parallel worker's, or one left hung by a test before) (control.player.only_one).
+    monkeypatch.setattr(player, "MUTEX", f"Local\\gamelab-player-test-{os.getpid()}-{tmp_path.name}")
     monkeypatch.setattr(alarm, "page", refuse("gamelab.control.alarm.page"))
     # Nor `gamelab stop`'s request, the guard's notes and what the phone's been told: a suite in the main checkout read
     # them live, a hunt's stop among them.

@@ -1,0 +1,2800 @@
+{
+ "id": "ui",
+ "layer": "ui",
+ "title": "UI: the live mini-map, the web page and review pages",
+ "tagline": "How a run is watched: a mini-map window, a phone page, recordings frame by frame",
+ "summary": "The ui package only reads: it follows the telemetry the hunting commands and the perception service write, folds it into a State, and draws the map with what the stack sees, predicts and plans, in a tkinter window beside the game and on a web page pushed to a phone over Server-Sent Events (also reachable through a Cloudflare tunnel). The same server shows review pages (overlaid recordings, frame by frame, downloadable as video) built offline by tools/review_pages, and /tls/, a capture viewer that is not part of the player.",
+ "details_md": "**What the UI is for.** The autonomous player runs as separate processes (the elevated key player, the\nperception service, a hunting command). The perception service and the hunting commands report what they see, plan and\ndo as *telemetry*: one JSON line per record, `{\"t\": seconds, \"topic\": ..., ...}`, appended to `gamelab/lab/telemetry/<time>-<command>.jsonl` (the\nperception service to `<time>-perceive.jsonl`). The `ui` package is the only reader that turns this into something to\nlook at. It never sends keys and never touches the game; `tests/test_architecture.py` lets it import only\n`localization`, `motion`, `attack` and the shared modules, and nothing in the stack imports it.\n\n**The pipeline.**\n\n```\ntelemetry files ──> source.poll() ──> State.apply ──┬─> MapView.draw ──> Tk window (MapWindow, every 100 ms)\n (hunt command,      LiveSource /                   │\n  perception svc)    ReplaySource / planned          └─> web.Feed ──SSE──> phone page (canvas, its own copy of the drawing)\n```\n\n- **Sources** (`sources.py`) all answer `poll() -> (fresh, records)`. `LiveSource` follows the newest run as it grows\n  (looking for a newer one at most once a second, going on into a run's next part), and while the perception service's\n  file is growing (it gave records within the last 3 s) it takes what's on screen from there (`scene`, `tracks`, `exp`\n  records and the `died`, `exp_gain`, `hp_drop`, `touch`, `touch_fix` events) and the rest (routes, chains, the hunt's\n  rules, the log) from the command. `ReplaySource` plays a recording at its own pace; `planned` previews a route with no game.\n- **State** (`state.py`) keeps the latest record of each kept topic, the tour, her last 240 positions and the log.\n- **MapView** (`render.py`) is pure drawing with OpenCV: State in, RGB out, about 1 ms for the window's picture. It\n  also exports the colours and geometry the web page uses, and draws the route coverage report.\n- **MapWindow** (`app.py`) shows it in tkinter beside the game, never taking the focus (the player only presses keys\n  while the game is in front, and screen captures see whatever is on top).\n- **The web server** (`web.py`, standard library) runs in the same process when `python -m gamelab minimap` starts\n  (port 8765; `web` or `--web-only` for the page alone). A Feed thread reads every 25 ms; each open page gets a\n  Server-Sent Events stream: a snapshot, then the new records (coalesced), text changes at most 5 times a second, and a\n  ping after 5 s with nothing to send. The page draws the map on a canvas at the phone's frame rate, her position interpolated 100 ms behind\n  the run's clock. Pushing records instead of JPEGs took the page from 1.6 pictures a second, 280 ms old, 45-70 KB/s\n  to ~20 ms latency at ~2 KB/s (measured on 2026-10-20 from the moment a record is in the file; since 2026-10-26 the\n  telemetry recorder writes in batches `FLUSH_S` = 0.2 s apart, so a record can wait up to 0.2 s before it is there).\n\n**Exposure.** Since 2026-10-24 the page asks for no key: the user serves it through a named Cloudflare tunnel\n(cloudflared, configured outside the repo) and on the LAN; anyone who reaches it can watch and steer a replay. The one\nexception is `/tls/`, which requires a Cloudflare Access login for requests that come through the tunnel.\n\n**Review pages.** The same server serves `/review` (`review.py`): folders of frames with perception's outcome drawn on\nthem, stepped through one frame at a time on a phone, with smaller frames on request, preloading, and a Download video\nbutton (`video.py` + `h264.ps1`: Windows' own H.264 encoder, then the MP4 index moved first so a phone can play it as\nit arrives). The Lie Detector and Violetta review sets are built offline from the alarm clips by\n`tools/review_pages/build.py`.\n\n**Not the player.** `ui/tls/` is a viewer of a separate packet recorder's captures with their TLS decrypted, moved onto\nthis server on 2026-11-13 for its tunnel. It is listed here for completeness only.",
+ "groups": [
+  {
+   "id": "picture",
+   "title": "The picture of a run",
+   "summary": "State folds telemetry records; MapView draws a State as a picture, with no window or I/O.",
+   "modules": [
+    "gamelab/ui/state.py",
+    "gamelab/ui/render.py"
+   ]
+  },
+  {
+   "id": "sources",
+   "title": "Where the records come from",
+   "summary": "A run followed live (the command's plans and the perception service's view merged), a recording replayed, or a route planned offline.",
+   "modules": [
+    "gamelab/ui/sources.py"
+   ]
+  },
+  {
+   "id": "window",
+   "title": "The window beside the game",
+   "summary": "The tkinter mini-map that polls every 100 ms (redrawing when records came) and never takes the game's focus.",
+   "modules": [
+    "gamelab/ui/__init__.py",
+    "gamelab/ui/app.py"
+   ]
+  },
+  {
+   "id": "web",
+   "title": "The web page for a phone",
+   "summary": "The HTTP server: a Feed thread, Server-Sent Events streams, /map.json, replay controls, and the canvas page; served on the LAN and through the Cloudflare tunnel.",
+   "modules": [
+    "gamelab/ui/web.py"
+   ]
+  },
+  {
+   "id": "review",
+   "title": "Review pages and videos",
+   "summary": "Overlaid recordings served frame by frame, made into phone-playable videos, and the offline builders of the Lie Detector and Violetta sets.",
+   "modules": [
+    "gamelab/ui/review.py",
+    "gamelab/ui/video.py",
+    "gamelab/ui/h264.ps1",
+    "tools/review_pages/build.py",
+    "tools/review_pages/common.py"
+   ]
+  },
+  {
+   "id": "tls",
+   "title": "TLS capture viewer (not part of the player)",
+   "summary": "A viewer of the packet recorder's captures with their TLS decrypted, hosted on the same server for its tunnel; Cloudflare Access-protected.",
+   "modules": [
+    "gamelab/ui/tls/__init__.py",
+    "gamelab/ui/tls/access.py",
+    "gamelab/ui/tls/csauth.py",
+    "gamelab/ui/tls/decrypt.py",
+    "gamelab/ui/tls/ngs.py",
+    "gamelab/ui/tls/view.py",
+    "gamelab/ui/tls/static/app.js",
+    "gamelab/ui/tls/static/app.css",
+    "gamelab/ui/tls/static/index.html"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "path": "gamelab/ui/__init__.py",
+   "title": "The ui package",
+   "tagline": "Package marker: the mini-map window and its web page, from telemetry",
+   "summary": "Only a docstring. It says what the package is (a separate window drawing the map with what the stack sees, predicts and plans, from its telemetry, followed live or replayed; and the same as a web page for a phone) and which layers it may import: localization, motion, attack and the shared modules.",
+   "details_md": "The package docstring is the layer contract that `tests/test_architecture.py` enforces: its `ALLOWED` table gives `ui` the layers `localization`, `motion` and `attack`, besides itself and the shared modules (`paths`, `telemetry`, `directions`, ...). Nothing in the hunting stack imports `ui`: only `gamelab/__main__.py` (the `minimap`, `web` and `coverage` commands) and `tools/review_pages/common.py` (to find the review root) do. That is what keeps the UI strictly a reader: it can be opened, closed or crash without touching a hunt.",
+   "lines": 5,
+   "key_items": [],
+   "inputs": [],
+   "outputs": [],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [
+    {
+     "date": "2026-10-19",
+     "what": "gamelab split into layers like a self-driving stack, with a mini-map (ui) and an offline simulator added (commit bd88d67d)",
+     "why": "ui is a read-only consumer of telemetry, kept out of the stack's import graph"
+    }
+   ],
+   "gotchas": [
+    "`sim` may import everything but `ui` (gamelab/README.md's layer table), so the simulator never depends on the viewer.",
+    "`tests/test_architecture.py::test_the_elevated_player_loads_only_what_it_needs` checks that the elevated key player (`python -m gamelab player`) never loads `gamelab.ui` (nor tkinter): the viewer stays out of the process that presses keys."
+   ],
+   "tests": [
+    "tests/test_architecture.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/app.py",
+   "title": "MapWindow (the tkinter mini-map)",
+   "tagline": "A tkinter window that polls every 100 ms and redraws the mini-map without stealing focus",
+   "summary": "MapWindow polls a source (LiveSource or ReplaySource) every 100 ms, folds the records into a State, and shows `MapView.draw(state)` as a Tk PhotoImage. Live, it is shown without ever being activated, so the game keeps the keyboard focus and stays on top for screen captures; a replay is an ordinary window with keys to pause, change speed and jump.",
+   "details_md": "**Why focus matters.** The key player only presses keys while the game is the foreground window, and screen\ncaptures see whatever window is on top. So a live window must never take the focus or cover the game.\n\n**Showing it without activating it (live).**\n- `root.withdraw()` first: showing a Tk window the usual way would activate it.\n- After `update_idletasks()`, the real frame handle comes from `root.wm_frame()`; `_no_activate` ORs\n  `WS_EX_NOACTIVATE` (0x08000000) into its extended style (`GWL_EXSTYLE`, -20), so clicks no longer activate it.\n- `_show_inactive` calls `ShowWindow(hwnd, SW_SHOWNOACTIVATE)` and, only when a position was given (the command line\n  placed it beside the game, never over it), `SetWindowPos(HWND_TOPMOST, ..., SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)`\n  to keep it above other windows while still inactive.\n- If the foreground window changed anyway, `_hand_focus_back` calls `SetForegroundWindow` on the window that had it.\n- The position comes from `gamelab/__main__.py`'s `_beside_game` (right of the game's client area, else left, else\n  below, on a monitor); with no room it is `None`, the window manager places it and it is not kept on top.\n\n**Replay mode** (`--replay` or `--plan`): no focus tricks; key bindings toggle `source.paused` (space), double or halve\n`source.speed` (`+`/`-`), and jump 10 s (`Right`/`Left`) through `_seek`, which rebuilds a fresh State from every\nrecord up to the new position (`ReplaySource.seek`).\n\n**The loop.** `run()` schedules `_tick` with `root.after(POLL_MS)`. Each tick: `source.poll()` gives `(fresh, records)`;\n`fresh` (a newer run started) replaces the State; records are applied; if the state's map differs from the view's\nmodel id, `view_for(map)` gives the right `MapView`; the picture is redrawn only if something came.\n\n**Getting pixels into Tk** without Pillow: `ppm()` writes the RGB array as a binary PPM (`P6 w h 255` header + bytes),\nwhich `tk.PhotoImage(data=..., format=\"PPM\")` reads. The PhotoImage is kept on `self._photo`, because Tk shows a blank\npicture once its PhotoImage is garbage collected.",
+   "lines": 126,
+   "key_items": [
+    {
+     "name": "MapWindow",
+     "kind": "class",
+     "line": 32,
+     "signature": "class MapWindow",
+     "summary": "The window: polls a source and draws the state with the view `view_for(map id)` gives."
+    },
+    {
+     "name": "MapWindow.__init__",
+     "kind": "method",
+     "line": 36,
+     "signature": "def __init__(self, view_for: Callable[[int | None], MapView], source, live: bool, position: tuple[int, int] | None = None, title: str = \"gamelab mini-map\")",
+     "summary": "Builds the Tk root; live: hidden, no-activate, shown inactive, focus handed back; replay: key bindings."
+    },
+    {
+     "name": "MapWindow._tick",
+     "kind": "method",
+     "line": 71,
+     "signature": "def _tick(self) -> None",
+     "summary": "Every POLL_MS: poll, fold into State, switch map view on a map change, redraw if anything came."
+    },
+    {
+     "name": "MapWindow._seek",
+     "kind": "method",
+     "line": 83,
+     "signature": "def _seek(self, seconds: float) -> None",
+     "summary": "A replay's 10 s jump: a new State rebuilt from every record up to the new position."
+    },
+    {
+     "name": "MapWindow._show",
+     "kind": "method",
+     "line": 89,
+     "signature": "def _show(self) -> None",
+     "summary": "Draws the state, turns it into a PhotoImage and keeps a reference so Tk doesn't blank it."
+    },
+    {
+     "name": "ppm",
+     "kind": "function",
+     "line": 26,
+     "signature": "def ppm(rgb: np.ndarray) -> bytes",
+     "summary": "An RGB picture as binary PPM, the format Tk's PhotoImage reads without extra packages."
+    },
+    {
+     "name": "_no_activate",
+     "kind": "function",
+     "line": 103,
+     "signature": "def _no_activate(hwnd: int) -> None",
+     "summary": "Adds WS_EX_NOACTIVATE so clicks on the window don't take the game's focus."
+    },
+    {
+     "name": "_show_inactive",
+     "kind": "function",
+     "line": 111,
+     "signature": "def _show_inactive(hwnd: int, on_top: bool) -> None",
+     "summary": "ShowWindow with SW_SHOWNOACTIVATE; topmost (still inactive) when placed beside the game."
+    },
+    {
+     "name": "_hand_focus_back",
+     "kind": "function",
+     "line": 123,
+     "signature": "def _hand_focus_back(hwnd: int) -> None",
+     "summary": "SetForegroundWindow back to the window that had the focus before."
+    },
+    {
+     "name": "POLL_MS",
+     "kind": "constant",
+     "line": 20,
+     "signature": "POLL_MS = 100",
+     "summary": "How often the window polls its source, in ms."
+    }
+   ],
+   "inputs": [
+    "records from a source (`sources.LiveSource` or `sources.ReplaySource`) via `poll()` / `seek()`",
+    "a `view_for(map id)` callable from `gamelab/__main__.py` (`_map_views`) that returns a cached `MapView` per map",
+    "an optional screen position from `__main__._beside_game`"
+   ],
+   "outputs": [
+    "a Tk window showing the mini-map picture"
+   ],
+   "uses": [
+    "gamelab/ui/render.py",
+    "gamelab/ui/state.py",
+    "gamelab/ui/sources.py"
+   ],
+   "files_io": [],
+   "concurrency": "Runs Tk's mainloop on the calling (main) thread; polling is a Tk `after` timer, no threads of its own. When `minimap` also serves the web page, that server's threads run in the same process.",
+   "tunables": [
+    {
+     "name": "POLL_MS",
+     "value": "100",
+     "meaning": "ms between polls of the source"
+    },
+    {
+     "name": "WS_EX_NOACTIVATE",
+     "value": "0x08000000",
+     "meaning": "extended window style: never activate on click"
+    },
+    {
+     "name": "SW_SHOWNOACTIVATE",
+     "value": "4",
+     "meaning": "show the window without activating it"
+    },
+    {
+     "name": "HWND_TOPMOST",
+     "value": "-1",
+     "meaning": "kept above other windows when placed beside the game"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-19",
+     "what": "Live, the window is made hidden, shown without activation, never activated by clicks, and placed beside the game",
+     "why": "the player only presses keys while the game is in front, and screen captures see whatever window is on top"
+    }
+   ],
+   "gotchas": [
+    "Only the live window gets the no-activate treatment; a `--plan` preview goes through ReplaySource with `live` False, so it is an ordinary window.",
+    "The window's `+` and `-` double and halve the replay speed with no limit (the web page's `/control` clamps it to 0.125-64).",
+    "Without a position (no room beside the game, or the game isn't running) the window is not kept on top."
+   ],
+   "tests": [
+    "tests/test_ui.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/state.py",
+   "title": "State (the run as the mini-map sees it)",
+   "tagline": "Folds telemetry records into the latest record per topic, her trail and log lines",
+   "summary": "A dataclass holding what the mini-map draws: the latest record of each kept topic, the tour merged across records, her last 240 positions and the last 9 log lines. `apply(record)` folds one telemetry record in; `her()` gives her current position. The web page carries a JavaScript copy of the same rules.",
+   "details_md": "Telemetry records are plain dicts `{\"t\": seconds, \"topic\": ..., **data}` (`gamelab/telemetry.py`). `State.apply`\nhandles them by topic:\n\n| Topic | What `apply` does |\n|---|---|\n| `route` (the planned moves to a platform), `chain` (the moves being carried out in one key plan), `monsters` (as the planner predicts them), `stance` (the fight's last decision), `drops` (remembered for later), `hunt` (the hunt loop's rule and objective), `exp`, `memory` (the monsters she remembers): the `LATEST` topics | the record replaces the field of that name |\n| `session` | kept whole; its `map` (if present) sets `State.map`, which picks the map view |\n| `scene` | kept whole (her, HP, MP, monsters, loot, players); her `(x, y)` appended to the trail |\n| `glance` | the navigator's quick position checks while a chain runs: `(x, y)` appended to the trail |\n| `tour` | merged into the previous tour dict (the sweep's `order`, `safe`, `grounds` first, then each `stop` and `spot`) |\n| `trip` | arrived or gave up: `route` and `chain` cleared |\n| `event`, `log` | their `text` (or an event's `kind`) appended to the log lines |\n\nEvery record's `t` becomes `State.t`, the run's clock as far as the picture knows. Any other topic (for example\n`tracks`, `attack`, `moved`, `gc`, `perf`) is ignored.\n\n`her()` returns the last scene's `her` dict with its `x, y` replaced by the newest trail point, so a glance between two\nlooks moves her without waiting for the next scene. It returns `None` while she hasn't been placed (no scene, or\n`her.x` is `None`).\n\nThe trail and log are `deque`s with `maxlen` (`TRAIL` = 240, `LOG_LINES` = 9), so old entries fall off on their own.\nThe web server keeps its own longer log (`web.LOG_KEEP` = 40) beside the State, and its page receives `LATEST` and\n`TRAIL` written into its JavaScript so the browser's copy of `apply` keeps exactly what this one keeps.",
+   "lines": 64,
+   "key_items": [
+    {
+     "name": "State",
+     "kind": "dataclass",
+     "line": 14,
+     "signature": "@dataclass class State",
+     "summary": "The mini-map's picture of the run: latest record per topic, trail and log lines."
+    },
+    {
+     "name": "State.apply",
+     "kind": "method",
+     "line": 31,
+     "signature": "def apply(self, record: dict) -> None",
+     "summary": "Folds one telemetry record in, by topic (see the table)."
+    },
+    {
+     "name": "State.her",
+     "kind": "method",
+     "line": 56,
+     "signature": "def her(self) -> dict | None",
+     "summary": "Her position: the last look's, moved on by any glance since; None while she isn't placed."
+    },
+    {
+     "name": "LATEST",
+     "kind": "constant",
+     "line": 9,
+     "signature": "LATEST = (\"route\", \"chain\", \"monsters\", \"stance\", \"drops\", \"hunt\", \"exp\", \"memory\")",
+     "summary": "Topics kept as their latest record; also used by the web server to coalesce backlogs and build snapshots."
+    },
+    {
+     "name": "TRAIL",
+     "kind": "constant",
+     "line": 7,
+     "signature": "TRAIL = 240",
+     "summary": "Her last positions kept and drawn as a trail."
+    },
+    {
+     "name": "LOG_LINES",
+     "kind": "constant",
+     "line": 8,
+     "signature": "LOG_LINES = 9",
+     "summary": "Log lines kept for the window's text panel."
+    }
+   ],
+   "inputs": [
+    "telemetry records (dicts) from a source, via the window or the web Feed"
+   ],
+   "outputs": [
+    "the State that `MapView.draw` and the web Feed's text and snapshots read"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "None of its own; the web Feed mutates it under its lock.",
+   "tunables": [
+    {
+     "name": "TRAIL",
+     "value": "240",
+     "meaning": "positions kept for her trail"
+    },
+    {
+     "name": "LOG_LINES",
+     "value": "9",
+     "meaning": "log lines kept"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "`memory` added to LATEST: the monsters she remembers are drawn, faded by age",
+     "why": "the hunter keeps a memory of the monsters across looks (commit 09a0fce8)"
+    },
+    {
+     "date": "2026-10-21",
+     "what": "`exp` added to LATEST",
+     "why": "her EXP read off its number, and her EXP a minute, shown under the map (commit 036b7dbf)"
+    }
+   ],
+   "gotchas": [
+    "Changing `apply` means changing the JavaScript `apply` inside `web.PAGE` too: the page keeps its own copy (only the constants are injected, not the logic).",
+    "`tracks` records (the perception service's, twice a second) reach the State but are ignored by it."
+   ],
+   "tests": [
+    "tests/test_ui.py",
+    "tests/test_disk.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/render.py",
+   "title": "MapView (pure drawing)",
+   "tagline": "State in, RGB picture out: the map and every layer the stack sees and plans",
+   "summary": "MapView fits a map from the game data into a picture of a given width and draws a State on it with OpenCV: platforms, ropes and portals, the tour, predicted monsters, the planned route and running chain, drops, her attack reach, remembered and seen monsters, other players, her trail and her, plus a text panel. It is pure (no window, no I/O), so it is tested offline; it also provides the colours the web page uses and the coverage report's picture.",
+   "details_md": "**Fitting the map.** From the `MapModel` (`gamelab/localization/mapdata.py`): x bounds are the platforms' ends\nand the ropes, padded 30 map units each side; y bounds are platform tops, each segment's start height (`y1`) and rope ends, padded 110 above\nand 30 below. `scale = (width - 2 * margin) / (x1 - x0)`; the map is `map_h` px tall and the\ntext panel (`panel`, 170 px by default) sits under it. `pt(x, y)` converts map units to picture px.\n\n**Caching.** `_draw_base` draws walls, ropes, platforms (with their id) and portals once per view. `_roles_layer` keeps a\ncopy with the tour's safe platforms (teal, `SAFE`) and hunting grounds (bright green, `GROUND`) drawn in, redrawn\nonly when those lists change: drawn every time they were a quarter of a 900-px picture's 3.6 ms.\n\n**Layers** (`_layers`, in drawing order): the tour's stops numbered in order (current one filled, `HER` yellow) and the\ndiamond of the spot she shoots from; the planner's monster predictions (red bars over each monster's reach on its\nplatform); the planned route (cyan: parabolic `_arc`s for `jump`, `walk_off` and `hop`, arrows otherwise, a dot at the\nfirst move's start); the running chain (magenta spans 6 units above the platform and a dot where each leg ends);\nremembered drops (hollow squares); the hunt loop's piles (hers bright, others dim, expected ones small, urgent ones red);\nher attack reach; remembered monsters; monsters in the last look (and the sweep's `swept`), coloured by `KIND`, ringed\nred when the last throw aimed at them, with a green HP bar when the look saw one (`bar`, shown once a monster is hit); loot on the ground; other players by kind\n(`PLAYERS`); her trail; and her (a yellow dot, an arrow for her facing, a magenta ring when her name tag was hidden and\nshe was placed from her minimap dot).\n\n**Her reach** (`_reach`): a band each side from `y - SHOT_UP` to `y + SHOT_DOWN` (60 units each), from `shot_dx(0)`\nto `STAR_REACH` (434) out, cut short by `attack.reach.clear_span` at a wall of her platform's foothold group; the side\nshe faces brighter. It is alpha-blended (`REACH_ALPHA` 0.35) into only the rows the bands cover, as one block of whole\nrows plus one, so the result stays pixel-identical: blending each band's own rectangle left a px one level off in 4 of\n435 pictures (OpenCV's vector code blends all but a block's last few px).\n\n**Remembered monsters** (`_monsters_remembered`): a ring of the kind's colour faded by `remembered_alpha(age)` = max(0.25,\n1 - age / 20 s), the age counted on to the state's time; broken (six arcs) once looks covering the place have missed\nit; a cross for one killed (red) or forgotten (dim).\n\n**Crop.** `draw(state, crop=(left, top, w, h))` draws just that part of the map (used by the web server's \"around her\"\nJPEG): a shallow copy of the view with its origin moved. On a 2250-px map, cutting 900 px went from 11 ms to 1.5-2 ms.\nIt differs from cutting the full picture only where OpenCV antialiases lines cut at the edges: 11-27 px of 648,000 on\nfive recorded runs.\n\n**Text panel** (`_panel`): HP and MP bars, the mode, the clock, her x and platform and how she was placed, other\nplayers, her EXP and EXP a minute; then the fight's last decision, the chain's text, the hunt loop's rule, objective and\nEXP/s here against the rate to beat; then as many log lines as fit (cut to 110 chars).\n\n**Shared with the web page.** `STYLE`, `KIND`, `PLAYERS`, `JUMP_ARC`, `REACH_ALPHA`, `REMEMBER_FADE_S` and\n`REMEMBER_FAINT` are sent in `/map.json`, so the browser's renderer uses the same colours and numbers.\n\n**Coverage picture.** `coverage_picture(model, rows)` draws every route move by what runs did with it (taken green, thicker\nthe more often; planned but never taken yellow; never planned red), with a legend: used by\n`python -m gamelab coverage` through `analysis/coverage.py`'s rows.",
+   "lines": 443,
+   "key_items": [
+    {
+     "name": "MapView",
+     "kind": "class",
+     "line": 61,
+     "signature": "class MapView",
+     "summary": "A map fitted into a picture `width` px wide with a text panel under it; draws States."
+    },
+    {
+     "name": "MapView.__init__",
+     "kind": "method",
+     "line": 64,
+     "signature": "def __init__(self, model: MapModel, width: int = 760, panel: int = 170, margin: int = 14)",
+     "summary": "Computes bounds, scale and size from the map, and draws the cached base."
+    },
+    {
+     "name": "MapView.draw",
+     "kind": "method",
+     "line": 85,
+     "signature": "def draw(self, state: State, crop: tuple[int, int, int, int] | None = None) -> np.ndarray",
+     "summary": "The picture of a state (map plus panel), or just a cropped part of the map drawn in place."
+    },
+    {
+     "name": "MapView._layers",
+     "kind": "method",
+     "line": 106,
+     "signature": "def _layers(self, img, state: State, tour: dict) -> None",
+     "summary": "Draws every layer over the map, in a fixed order."
+    },
+    {
+     "name": "MapView._reach",
+     "kind": "method",
+     "line": 308,
+     "signature": "def _reach(self, img, her: dict) -> None",
+     "summary": "Her star reach band each side, cut at a wall, blended into only the rows it covers."
+    },
+    {
+     "name": "MapView._monsters_remembered",
+     "kind": "method",
+     "line": 257,
+     "signature": "def _monsters_remembered(self, img, memory: dict | None, now: float) -> None",
+     "summary": "Remembered monsters as rings faded by age, broken when missed; crosses for killed or forgotten."
+    },
+    {
+     "name": "MapView._roles_layer",
+     "kind": "method",
+     "line": 154,
+     "signature": "def _roles_layer(self, tour: dict) -> np.ndarray",
+     "summary": "The base with the tour's safe platforms and grounds drawn in, cached until they change."
+    },
+    {
+     "name": "MapView._panel",
+     "kind": "method",
+     "line": 372,
+     "signature": "def _panel(self, img, state: State) -> None",
+     "summary": "The text panel: bars, where she is, fight, moving, hunt rule, log lines."
+    },
+    {
+     "name": "MapView._arc",
+     "kind": "method",
+     "line": 205,
+     "signature": "def _arc(self, img, a, b, colour, width: int = 1) -> None",
+     "summary": "A jump's path as a 13-point parabola lifted by JUMP_ARC."
+    },
+    {
+     "name": "MapView.pt",
+     "kind": "method",
+     "line": 80,
+     "signature": "def pt(self, x: float, y: float) -> tuple[int, int]",
+     "summary": "Map units to picture px (offset by a crop's corner)."
+    },
+    {
+     "name": "coverage_picture",
+     "kind": "function",
+     "line": 428,
+     "signature": "def coverage_picture(model: MapModel, rows, width: int = 1600, title: str = \"\") -> np.ndarray",
+     "summary": "The route coverage report's picture: each move coloured by taken / planned / never planned."
+    },
+    {
+     "name": "remembered_alpha",
+     "kind": "function",
+     "line": 417,
+     "signature": "def remembered_alpha(age: float) -> float",
+     "summary": "1 when just seen, down to REMEMBER_FAINT at REMEMBER_FADE_S and after."
+    },
+    {
+     "name": "STYLE",
+     "kind": "constant",
+     "line": 55,
+     "signature": "STYLE = {\"background\": BACKGROUND, ...}",
+     "summary": "The map's colours by name, sent to the web page in /map.json."
+    },
+    {
+     "name": "KIND",
+     "kind": "constant",
+     "line": 38,
+     "signature": "KIND = {\"pig\": ..., \"slime\": ..., ...}",
+     "summary": "Colour per monster kind (pig, slime, snail, orange-, horny- and green-mushroom)."
+    },
+    {
+     "name": "REMEMBER_FADE_S",
+     "kind": "constant",
+     "line": 43,
+     "signature": "REMEMBER_FADE_S = 20.0",
+     "summary": "Seconds over which a remembered monster fades to REMEMBER_FAINT (0.25)."
+    }
+   ],
+   "inputs": [
+    "a `MapModel` (`localization.mapdata.load(map id)`)",
+    "a `State`",
+    "reach geometry from `attack.reach` (`SHOT_UP`, `SHOT_DOWN`, `STAR_REACH`, `shot_dx`, `clear_span`)",
+    "coverage rows `(move, planned, taken)` from `analysis.coverage.picture_rows`"
+   ],
+   "outputs": [
+    "an RGB numpy picture (window, `/frame.jpg`, coverage report PNG)",
+    "the colour and geometry constants the web page's `/map.json` carries"
+   ],
+   "uses": [
+    "gamelab/ui/state.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/attack/reach.py",
+    "gamelab/directions.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "width",
+     "value": "760 (window), 900 (web picture), 1600 (coverage)",
+     "meaning": "picture width in px"
+    },
+    {
+     "name": "panel",
+     "value": "170",
+     "meaning": "text panel height in px (44 for the coverage picture)"
+    },
+    {
+     "name": "margin",
+     "value": "14",
+     "meaning": "px around the map"
+    },
+    {
+     "name": "JUMP_ARC",
+     "value": "77",
+     "meaning": "how high a jump's arc is drawn, in map units (physics.JUMP_HEIGHT)"
+    },
+    {
+     "name": "REACH_ALPHA",
+     "value": "0.35",
+     "meaning": "opacity of the reach bands"
+    },
+    {
+     "name": "REMEMBER_FADE_S",
+     "value": "20.0",
+     "meaning": "seconds a remembered monster takes to fade"
+    },
+    {
+     "name": "REMEMBER_FAINT",
+     "value": "0.25",
+     "meaning": "the faintest a remembered monster is drawn"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-20",
+     "what": "Reach bands blended into the rows they cover only, and the tour's platforms drawn into a kept copy of the map; `draw(crop=...)` draws only the part cut out around her (commit fb1d94f1)",
+     "why": "the window's 760-px picture went from 2.5-2.7 ms to 1.0-1.3 ms, and /frame.jpg?view=her from 10-12 ms (under the feed's lock) to 1.3-2.0 ms; pixel-identical on 1751 recorded states"
+    },
+    {
+     "date": "2026-10-24",
+     "what": "Remembered monsters drawn as fading rings, broken once missed, crosses when killed or forgotten",
+     "why": "the hunter's memory of monsters (commit 09a0fce8)"
+    },
+    {
+     "date": "2026-10-21",
+     "what": "Other players drawn by their minimap dots, by kind; the route coverage picture added",
+     "why": "commits 2d206af8 and 594c3db5"
+    }
+   ],
+   "gotchas": [
+    "Records may name a platform the map doesn't have: the layers placed on a platform (the tour's stops and spot, safe platforms and grounds, the route, the chain, the predicted monsters, the coverage moves) check `_known(pid)` and skip it, and `_reach` then draws the band without a wall cut; seen and remembered monsters, loot, drops, piles, players, the trail and her are drawn at their own x, y.",
+    "A cropped draw is not byte-identical to cutting a full draw (antialiased lines at the edges).",
+    "The browser re-implements these layers in JavaScript (`web.PAGE`); a new layer must be added there too."
+   ],
+   "tests": [
+    "tests/test_ui.py",
+    "tests/test_coverage.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/sources.py",
+   "title": "Sources (live, replay, a planned route)",
+   "tagline": "Where the mini-map's records come from: followed live, replayed, or planned offline",
+   "summary": "Every source answers `poll() -> (fresh, records)`. LiveSource follows the newest run's telemetry file as it grows, merging what's on screen from the perception service's file with the hunting command's plans; ReplaySource plays a recorded run at its own pace with pause, speed and seek; `load` reads a recording and `planned` makes a still picture of a route planned offline.",
+   "details_md": "**The source protocol.** `poll()` returns `(fresh, records)`: `fresh` is True when a different run started\n(the window and the page start their State over); `records` are the new telemetry dicts since the last poll.\n\n**_Followed: one kind of file, followed.** It keeps a `telemetry.Follower` (reads what was appended since the last\ncall, holding back a half-written last line) on the newest file matching its `match`. The folder is rescanned at most\nevery `rescan_s` (1 s) through `telemetry.newest`, which goes by each file's last write. When the newest file changes:\n- if its first record is a `session` record whose `continues` names the file being followed, it is the run's next part\n  (a run goes on in a new file past 64 MB): the rest of the old file is read, then the new one, and `fresh` stays False;\n- if the new file is still empty (a part is made a moment before its first line), the next scan sees it;\n- otherwise it is a new run: `fresh` is True.\n\n**LiveSource: two files merged.** Hunting commands write `<time>-<command>.jsonl`; the perception service (which looks at\nevery frame, always) writes `<time>-perceive.jsonl` (`perceive_file`). LiveSource follows both:\n- No command file yet: the service's file is the run.\n- A command file appears: it becomes the run, from its start (`fresh`).\n- While the service's file has given records within `PERCEIVE_LIVE_S` (3 s): the screen's topics come from it\n  (`PERCEIVED`: `scene`, `tracks`, `exp`, plus the events in `PERCEIVED_EVENTS`: `died`, `exp_gain`, `hp_drop`,\n  `touch`, `touch_fix`), the command's own scenes are left out, and the rest (routes, chains, the hunt's rules, the\n  log) comes from the command. The service's scenes don't know which way she faces, so the `HER_OWN` fields\n  (`facing`, `facing_by`, `facing_keys`, `facing_seen`, `facing_strong`) from the command's latest scene are copied onto\n  them. The merged list is sorted by `t`.\n- Otherwise the command's records alone.\n\nThe command files are scanned with `recent_s = COMMANDS_RECENT_S` (1 day) and the service's with telemetry's\n`RECENT_S` (7 days): `telemetry.newest` asks `os.stat` of every file the directory says was written within that time,\nbecause on NTFS the directory's copy of a still-open file's last write is stale. On the live folder (340 files, 20\nwritten within a day, 2026-10-26) a scan took 1.5 ms of CPU against 14.3 ms with 7 days.\n\n**ReplaySource.** Records sorted by `t`; `pos` (s into the recording) advances by elapsed wall time times `speed` unless\n`paused`; `poll` releases every record with `t - t0 <= pos`. `seek(seconds)` moves `pos` (never below 0) and returns\nevery record up to it, so the caller rebuilds its State. Never `fresh`.\n\n**load(path)**: a `.jsonl` telemetry file through `telemetry.read`; anything else is an older sweep track (JSON with\n`track: [[t, x, y, platform], ...]`) turned into one `session` record and a `scene` per position.\n\n**planned(model, src, x, dst)**: what `--plan SRC DST` shows, no game needed: `motion.route.Planner(model).plan(src, x,\ndst)` gives the moves (`route_record`), `motion.flow.Flow(model, names).chain(...)` the first key plan's legs\n(`chain_record`), with dummy key names since nothing is sent; plus a `session` (mode `plan`), a `scene` placing her,\nand a log line listing the moves.",
+   "lines": 183,
+   "key_items": [
+    {
+     "name": "LiveSource",
+     "kind": "class",
+     "line": 68,
+     "signature": "class LiveSource",
+     "summary": "The newest run's telemetry followed as it grows; the screen from the perception service's file, the plans from the command's."
+    },
+    {
+     "name": "LiveSource.poll",
+     "kind": "method",
+     "line": 94,
+     "signature": "def poll(self) -> tuple[bool, list[dict]]",
+     "summary": "(whether a new run started, the records since the last poll): the command's records alone, or, while the service's file is live, the command's minus `PERCEIVED` merged with the service's and sorted by t."
+    },
+    {
+     "name": "_Followed",
+     "kind": "class",
+     "line": 36,
+     "signature": "class _Followed",
+     "summary": "The newest file of one kind, followed; a newer run replaces it, a run's next part continues it."
+    },
+    {
+     "name": "_Followed.poll",
+     "kind": "method",
+     "line": 46,
+     "signature": "def poll(self, now: float) -> tuple[bool, list[dict]]",
+     "summary": "Rescans at most every rescan_s; decides new run vs next part vs nothing yet."
+    },
+    {
+     "name": "LiveSource._with_her",
+     "kind": "method",
+     "line": 116,
+     "signature": "def _with_her(self, r: dict) -> dict",
+     "summary": "Copies HER_OWN (her facing) from the command's latest scene onto a service scene."
+    },
+    {
+     "name": "ReplaySource",
+     "kind": "class",
+     "line": 123,
+     "signature": "class ReplaySource",
+     "summary": "Recorded records played at their own pace, times `speed`, pausable."
+    },
+    {
+     "name": "ReplaySource.seek",
+     "kind": "method",
+     "line": 146,
+     "signature": "def seek(self, seconds: float) -> list[dict]",
+     "summary": "Jumps back or on; returns every record up to the new position to rebuild the state."
+    },
+    {
+     "name": "load",
+     "kind": "function",
+     "line": 153,
+     "signature": "def load(path: Path, map_id: int | None = None) -> list[dict]",
+     "summary": "A recorded run: a telemetry .jsonl, or an older sweep track's positions."
+    },
+    {
+     "name": "planned",
+     "kind": "function",
+     "line": 166,
+     "signature": "def planned(model, src: int, x: float, dst: int) -> list[dict]",
+     "summary": "Records for a still picture of a route and its first chain, planned offline."
+    },
+    {
+     "name": "PERCEIVED",
+     "kind": "constant",
+     "line": 16,
+     "signature": "PERCEIVED = (\"scene\", \"tracks\", \"exp\")",
+     "summary": "Topics taken from the perception service's file while it grows."
+    },
+    {
+     "name": "PERCEIVE_LIVE_S",
+     "kind": "constant",
+     "line": 18,
+     "signature": "PERCEIVE_LIVE_S = 3.0",
+     "summary": "Seconds since the service's file last grew within which its records are the screen's."
+    },
+    {
+     "name": "COMMANDS_RECENT_S",
+     "kind": "constant",
+     "line": 25,
+     "signature": "COMMANDS_RECENT_S = 86400.0",
+     "summary": "How recent a command file must be to have its last write asked with os.stat."
+    },
+    {
+     "name": "HER_OWN",
+     "kind": "constant",
+     "line": 28,
+     "signature": "HER_OWN = (\"facing\", \"facing_by\", \"facing_keys\", \"facing_seen\", \"facing_strong\")",
+     "summary": "Her-facing fields only the command's scenes carry."
+    },
+    {
+     "name": "perceive_file",
+     "kind": "function",
+     "line": 31,
+     "signature": "def perceive_file(name: str) -> bool",
+     "summary": "Whether a telemetry file is the perception service's (`-perceive` in its name)."
+    }
+   ],
+   "inputs": [
+    "telemetry files in `gamelab/lab/telemetry/` (via `telemetry.newest`, `telemetry.Follower`, `telemetry.read`)",
+    "a `MapModel` for `planned`"
+   ],
+   "outputs": [
+    "`(fresh, records)` to `MapWindow._tick` and `web.Feed.step`"
+   ],
+   "uses": [
+    "gamelab/telemetry.py",
+    "gamelab/motion/route.py",
+    "gamelab/motion/flow.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamelab/lab/telemetry/<time>-<command>.jsonl",
+     "mode": "read",
+     "what": "a hunting command's records, followed live"
+    },
+    {
+     "path": "gamelab/lab/telemetry/<time>-perceive.jsonl",
+     "mode": "read",
+     "what": "the perception service's records (what's on screen)"
+    },
+    {
+     "path": "--replay FILE (.jsonl or an older sweep track .json)",
+     "mode": "read",
+     "what": "a recorded run"
+    }
+   ],
+   "concurrency": "None of its own: polled from the Tk timer (window) or the web Feed's thread.",
+   "tunables": [
+    {
+     "name": "rescan_s",
+     "value": "1.0",
+     "meaning": "folder rescanned for a newer run at most this often"
+    },
+    {
+     "name": "PERCEIVE_LIVE_S",
+     "value": "3.0",
+     "meaning": "the service's file counts as live this long after it last grew"
+    },
+    {
+     "name": "COMMANDS_RECENT_S",
+     "value": "86400.0",
+     "meaning": "command files asked their real last write within this age"
+    },
+    {
+     "name": "speed",
+     "value": "1.0 (--speed)",
+     "meaning": "replay speed"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-20",
+     "what": "The window and the page go on into a run's next part instead of starting over (commit 7b68bffc)",
+     "why": "a run past 64 MB continues in a new file; its first record names the file it continues"
+    },
+    {
+     "date": "2026-10-20",
+     "what": "The live source looks for a newer run at most once a second (commit e3be3b3e)",
+     "why": "the web page polls 40 times a second; a new run is still picked up within a second"
+    },
+    {
+     "date": "2026-10-25",
+     "what": "What's on screen comes from the perception service's file while it grows, the rest from the newest command's (commit 25695af1)",
+     "why": "the service looks at every frame at all times; the command's own scenes are left out meanwhile"
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Command files asked their last write only within one day (COMMANDS_RECENT_S)",
+     "why": "1.5 ms of CPU a scan against 14.3 ms with 7 days, on the live folder (340 files), once a second while the page is open"
+    }
+   ],
+   "gotchas": [
+    "A `--replay` with both window and page makes two independent ReplaySources: each UI plays it with its own controls.",
+    "A command file written to for longer than a day, its directory entry not brought up to date, is judged by when it was made; the comment at `COMMANDS_RECENT_S` accepts that because a hunt lasts hours and the pet babysitter (`pet --every 1`, the long-running command that keeps her in-game pet fed) is started again after each. The perception service's files keep telemetry's 7-day `RECENT_S`: it runs for days."
+   ],
+   "tests": [
+    "tests/test_ui.py",
+    "tests/test_disk.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/web.py",
+   "title": "The web page server (Feed, SSE stream, page)",
+   "tagline": "The mini-map for a phone: records pushed over Server-Sent Events, drawn on a canvas",
+   "summary": "A standard-library HTTP server that follows the same sources as the window, keeps the State in a Feed updated by a thread every 25 ms, and pushes a snapshot then each batch of records to every open page over Server-Sent Events. The page draws the map itself on a canvas with the window's colours from /map.json. It also routes /review (recordings) and /tls (decrypted captures), and is what the Cloudflare tunnel serves.",
+   "details_md": "`python -m gamelab minimap` starts this server and the window in one process (`--web-only` or `python -m\ngamelab web`: the page only, `--window-only`: no page); default `--host 0.0.0.0 --port 8765`. Standard library only:\n`ThreadingHTTPServer` with HTTP/1.1 keep-alive, Nagle off, a 30 s handler timeout.\n\n| Path | What |\n|---|---|\n| `/` | the page (`PAGE`, with URLs and State constants written in) |\n| `/events` | the Server-Sent Events stream: a snapshot, then updates, pings |\n| `/map.json` | the map geometry, view bounds, colours and reach (`map_payload`) |\n| `/control` (POST) | replay only: `action=pause|faster|slower|back|on` |\n| `/frame.jpg`, `/state.json`, `/clock.json` | the map as JPEG (`?view=her`), the text, the run's clock; the page doesn't need them (tests, a quick look, the no-JavaScript image, `?debug=1`'s round trip) |\n| `/review...` | `ui.review` |\n| `/tls...` | `ui.tls` (Cloudflare Access-checked) |\n\n**The Feed** holds the State. Its `telemetry` thread calls `step()` every `POLL_S` (25 ms): `source.poll()`, then under\nthe lock either `_restart` (a new run: fresh State, ring cleared, `epoch` + 1) or `_apply` (fold, append each record\nto `ring` with a rising `seq`, `version` + 1). Both `notify_all` on a Condition the streams wait on. Live, `_timed`\nnotes the newest record's `t`: within 5 s of this computer's clock, the run is on this computer; otherwise (a simulated\nrun, which stamps the simulator's own clock) the page's clock is the newest record's `t` moved on at the pace records\narrive, measured every 2 s and clamped to 0-64.\n\n**A stream.** Each `/events` connection gets its own handler thread and a `Cursor`. `Feed.updates(cursor, 5 s)` waits on\nthe Condition and returns:\n- `snapshot` when the cursor's epoch is old or it fell behind the ring (4096 records): the session, the tour, the latest\n  of each `LATEST` topic, the scene, her trail, the log lines and the text;\n- `update` with the records since the cursor, `_coalesce`d (of the `LATEST` topics only the last one stays; every\n  position and log line is kept, so the page's State ends up the same), and what changed in the text, at most every\n  `STATUS_EVERY_S` (0.2 s);\n- `ping` after 5 s with nothing to send. Snapshots, updates and pings all carry `now` and `rate`, the run's clock.\n`_event` writes `id: <seq>` for updates and `event: <name>` for the others, in one write each. Past `MAX_STREAMS` (16)\nthe oldest is ended `crowded`: it gets a `crowded` event and its page stops rather than reconnect and crowd out the next.\n\n**The page** (`PAGE`, about 600 lines of HTML, CSS and JavaScript) keeps a copy of `State.apply`, opens an `EventSource`,\nand draws on a canvas at the device's pixel ratio, layer for layer as `MapView.draw`, with `/map.json`'s colours.\nHer position is drawn `DELAY` (0.1 s of the run) behind the run's clock and interpolated (`herAt`) between trail points\nless than `GAP` (0.6 s) apart; it redraws only when something moved. \"Around her\" (the default under 700 px wide) is\n`ZOOM` (2.5) times bigger, `AROUND` (0.8) of the width tall, with an eased camera. A stream quiet for 12.5 s is reopened\n(iOS Safari can leave one dead behind a locked screen), and one quiet over 6 s when the page is shown again. Text,\nlog and clock refresh 4 times a second; replay buttons POST to `/control`. On a desktop-width page opened on\n127.0.0.1 it shows the LAN address and a QR code (qrcodejs from cdnjs). `?debug=1` adds a corner with fps, draw time,\nKB/s, reconnects and lateness; `?delay=0` draws the newest position.\n\n**Why push and draw on the phone** (the module docstring): the page used to fetch the text every 400 ms and a 40 KB JPEG:\n1.6 pictures a second, 280 ms old on average (540 at worst), 43% of her positions, 45-70 KB/s. Pushed, a record reaches\nthe page in about 20 ms for about 2 KB/s.\n\n**Exposure.** It asks for no key or password: whoever reaches the address (the LAN, or the Cloudflare tunnel's hostname)\ncan watch and steer a replay. It only reads telemetry and never sends keys. `/tls/` is the one path that requires a\nCloudflare Access login for requests that came through the tunnel.",
+   "lines": 1190,
+   "key_items": [
+    {
+     "name": "Feed",
+     "kind": "class",
+     "line": 78,
+     "signature": "class Feed",
+     "summary": "The run's State kept up to date from a source by a thread, and everything the page needs of it."
+    },
+    {
+     "name": "Feed.updates",
+     "kind": "method",
+     "line": 184,
+     "signature": "def updates(self, cursor: Cursor, timeout: float) -> tuple[str, dict] | None",
+     "summary": "What a stream sends next: snapshot, update or ping; None once the cursor has ended."
+    },
+    {
+     "name": "Feed._snapshot",
+     "kind": "method",
+     "line": 219,
+     "signature": "def _snapshot(self, cursor: Cursor) -> dict",
+     "summary": "Everything a page starts from; moves the cursor to the current seq and epoch."
+    },
+    {
+     "name": "Feed.step",
+     "kind": "method",
+     "line": 114,
+     "signature": "def step(self) -> None",
+     "summary": "Polls the source and applies or restarts under the lock."
+    },
+    {
+     "name": "Feed.clock",
+     "kind": "method",
+     "line": 169,
+     "signature": "def clock(self) -> tuple[float, float]",
+     "summary": "The run's time now and its rate: a replay's position and speed, this computer's clock, or a sim's measured pace."
+    },
+    {
+     "name": "Feed.control",
+     "kind": "method",
+     "line": 307,
+     "signature": "def control(self, action: str) -> bool",
+     "summary": "A replay's controls: pause, faster (x2, max 64), slower (/2, min 0.125), back/on 10 s."
+    },
+    {
+     "name": "Feed.frame",
+     "kind": "method",
+     "line": 276,
+     "signature": "def frame(self, view: str = \"all\") -> bytes",
+     "summary": "/frame.jpg: the map (or the part around her, ZOOM bigger) as a JPEG, cached per version."
+    },
+    {
+     "name": "_coalesce",
+     "kind": "function",
+     "line": 328,
+     "signature": "def _coalesce(records: list[dict]) -> list[dict]",
+     "summary": "Drops records a later one of the same LATEST topic replaces; keeps every position and log line."
+    },
+    {
+     "name": "map_payload",
+     "kind": "function",
+     "line": 337,
+     "signature": "def map_payload(view: MapView) -> dict",
+     "summary": "/map.json: platforms, walls, ropes, portals, view bounds, colours, reach and wall stops."
+    },
+    {
+     "name": "WebServer.open_stream",
+     "kind": "method",
+     "line": 401,
+     "signature": "def open_stream(self) -> Cursor",
+     "summary": "A new stream's cursor; past MAX_STREAMS the oldest is ended as crowded."
+    },
+    {
+     "name": "_Handler._stream",
+     "kind": "method",
+     "line": 519,
+     "signature": "def _stream(self) -> None",
+     "summary": "/events: writes `retry: 1000`, then one event per write until the page goes or the stream ends."
+    },
+    {
+     "name": "_Handler.do_GET",
+     "kind": "method",
+     "line": 477,
+     "signature": "def do_GET(self) -> None",
+     "summary": "Routes /, /events, /map.json, /frame.jpg, /state.json, /clock.json, then ui.review, then ui.tls."
+    },
+    {
+     "name": "start",
+     "kind": "function",
+     "line": 547,
+     "signature": "def start(feed: Feed, host: str = \"0.0.0.0\", port: int = 8765, announce: Callable[[str], None] = print, ends: str = \"Ctrl+C stops it\") -> WebServer",
+     "summary": "Serves in background threads and prints the addresses; raises OSError if the port is taken."
+    },
+    {
+     "name": "page",
+     "kind": "function",
+     "line": 583,
+     "signature": "def page(urls: list[str]) -> bytes",
+     "summary": "The page with the URLs, LATEST, TRAIL, LOG_KEEP and HEARTBEAT_S written in."
+    },
+    {
+     "name": "herAt",
+     "kind": "function",
+     "line": 753,
+     "signature": "function herAt(t)",
+     "summary": "JavaScript in PAGE: where she was at run time t, interpolated between trail points at most GAP apart."
+    }
+   ],
+   "inputs": [
+    "a source (`LiveSource` or `ReplaySource`) and `view_for(map id)` from `gamelab/__main__.py`",
+    "HTTP requests from browsers on the LAN or through the Cloudflare tunnel"
+   ],
+   "outputs": [
+    "the page, the SSE stream, /map.json, /frame.jpg, /state.json, /clock.json",
+    "replay control actions applied to the ReplaySource"
+   ],
+   "uses": [
+    "gamelab/ui/render.py",
+    "gamelab/ui/state.py",
+    "gamelab/ui/sources.py",
+    "gamelab/attack/reach.py",
+    "gamelab/ui/review.py",
+    "gamelab/ui/tls/__init__.py"
+   ],
+   "files_io": [],
+   "concurrency": "A daemon thread `telemetry` (Feed._run, every 25 ms); a daemon thread `web` running `serve_forever` (poll 0.25 s); ThreadingHTTPServer's daemon thread per connection, each /events connection blocking in `Condition.wait` on the Feed's lock. In `minimap` mode these share the process with the Tk window on the main thread; closing the window calls `web.stop(server)` (`cmd_minimap`'s `finally`).",
+   "tunables": [
+    {
+     "name": "POLL_S",
+     "value": "0.025",
+     "meaning": "how often the telemetry is read (at 0.1 s records reached the page in 58 ms, at 0.025 s in 21 ms)"
+    },
+    {
+     "name": "RING",
+     "value": "4096",
+     "meaning": "records kept for the streams; a stream further behind gets a snapshot"
+    },
+    {
+     "name": "HEARTBEAT_S",
+     "value": "5.0",
+     "meaning": "a stream with nothing to send pings after this; the page reopens one quiet for 12.5 s (2.5 pings)"
+    },
+    {
+     "name": "MAX_STREAMS",
+     "value": "16",
+     "meaning": "past this many, the oldest stream ends"
+    },
+    {
+     "name": "STATUS_EVERY_S",
+     "value": "0.2",
+     "meaning": "the text's changes go to a stream at most this often"
+    },
+    {
+     "name": "LOG_KEEP",
+     "value": "40",
+     "meaning": "log lines the page shows"
+    },
+    {
+     "name": "SEEK_S",
+     "value": "10.0",
+     "meaning": "a replay's jump"
+    },
+    {
+     "name": "ZOOM",
+     "value": "2.5",
+     "meaning": "the 'around her' view's magnification"
+    },
+    {
+     "name": "AROUND",
+     "value": "0.8",
+     "meaning": "the 'around her' view's height as a share of its width"
+    },
+    {
+     "name": "JPEG_QUALITY",
+     "value": "80",
+     "meaning": "/frame.jpg quality"
+    },
+    {
+     "name": "HANDLER_TIMEOUT_S",
+     "value": "30",
+     "meaning": "a connection quiet this long is closed"
+    },
+    {
+     "name": "OWN_CLOCK_S",
+     "value": "5.0",
+     "meaning": "records within this of this computer's clock come from a run on it"
+    },
+    {
+     "name": "DELAY (page)",
+     "value": "0.1",
+     "meaning": "s of the run her position is drawn behind the clock (`?delay=`)"
+    },
+    {
+     "name": "GAP (page)",
+     "value": "0.6",
+     "meaning": "s: positions further apart aren't interpolated"
+    },
+    {
+     "name": "--port / --host",
+     "value": "8765 / 0.0.0.0",
+     "meaning": "where it serves (127.0.0.1: this computer only)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-19",
+     "what": "The mini-map as a web page (`python -m gamelab web`, commit eea08c72), then started together with the window by one command (commit 9f928cee)",
+     "why": "to watch a run from a phone on the same network"
+    },
+    {
+     "date": "2026-10-20",
+     "what": "Push records over Server-Sent Events and draw the map on the phone (commit b4e5ae77)",
+     "why": "polling the text every 400 ms and a 40 KB JPEG showed 1.6 pictures a second, 280 ms old, 43% of her positions, for 45-70 KB/s; pushed: ~20 ms, ~2 KB/s, every position"
+    },
+    {
+     "date": "2026-10-20",
+     "what": "A page crowded out stops and waits to be shown again instead of reconnecting (commit dd028522)",
+     "why": "coming back by itself it would end the next oldest a second later, and so on round every open page"
+    },
+    {
+     "date": "2026-10-24",
+     "what": "No key in the addresses any more: the page is served open through a named Cloudflare tunnel (cloudflared, config outside the repo) at the user's request (commit 79c829f4)",
+     "why": "the user wanted no access control on it for now; through the tunnel the stream arrived as locally (161 events in 8 s against 162)"
+    },
+    {
+     "date": "2026-10-29",
+     "what": "/review routes added (ui.review)",
+     "why": "the user: \"Can you serve this on webui? I need to look at th on my phone\""
+    },
+    {
+     "date": "2026-11-13",
+     "what": "/tls routes added (ui.tls), Access-checked",
+     "why": "the TLS viewer moved onto this server and its tunnel"
+    }
+   ],
+   "gotchas": [
+    "No authentication on the map, the stream or /control: anyone who reaches the address can watch and steer a replay. Only /tls/ checks Cloudflare Access.",
+    "gamelab/README.md's \"On a phone\" paragraph still says each address ends in a key and offers `--key`; both were removed on 2026-10-24 (commit 79c829f4), so that paragraph is out of date.",
+    "/frame.jpg, /state.json and /clock.json are not used by the page (tests, a quick look, the no-JavaScript fallback image, and ?debug=1's round trip).",
+    "The page re-implements MapView and State.apply in JavaScript; constants are shared (map.json, page()), logic is not. tests/test_ui.py checks the two maps and reach cuts match.",
+    "A POST body over 64 KB isn't read and the connection is closed, so it can't be taken for the next request.",
+    "A connection dropped by the client (ConnectionError) is not printed (`handle_error`)."
+   ],
+   "tests": [
+    "tests/test_ui.py",
+    "tests/test_review.py",
+    "tests/test_tls.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/review.py",
+   "title": "Review pages (/review)",
+   "tagline": "Overlaid recordings served frame by frame to a phone, with smaller frames and video",
+   "summary": "Serves folders of overlaid frames (perception's outcome drawn on each frame of a recording) under /review: a listing of sets and groups, a mobile viewer that steps and plays frames, meta.json, the frames (optionally re-encoded smaller), the set's files with byte ranges, and the set as a downloadable MP4. The sets are made elsewhere (the overlay tool, and tools/review_pages for the Lie Detector and Violetta).",
+   "details_md": "**Where sets live.** `ROOT` is `GAMELAB_REVIEW_ROOT`, else `MapleHelper-scratch/golden-tree` beside the repo.\nA *set* is a folder with a `frames/` folder of `00000.jpg ...`; it may also hold `legend.png`, `overlay.mp4`,\n`README.md`, `LEGEND.md` and `problems.json` (`[{\"frames\": [a, b], \"what\": \"...\"}]`, the frames worth a look). A\n*group* is a folder with no `frames/` of its own and sets inside (one level only).\n\n**Routes** (`handle`, called from `web._Handler.do_GET`):\n- `/review`: the groups and sets; `/review/<group>/`: a group's sets;\n- `/review/[<group>/]<set>/`: the viewer (`_VIEWER`);\n- `.../meta.json`: `meta()` — frame count, last frame number, problems, files present, frame rate and version;\n- `.../frames/N.jpg[?w=W&q=Q]`: a frame, as it is or made smaller (`smaller`);\n- `.../legend.png`, `overlay.mp4`, `README.md`, `LEGEND.md`: sent by `_file` with byte ranges;\n- `.../video.mp4`: `video_of()` sent as an attachment.\nNames must match `[A-Za-z0-9_-]+` and frames `\\d{5}.jpg`, so nothing outside a set is served.\n\n**Smaller frames.** `w` clamped to 64-4096 and `q` to 30-95; never wider than the frame (INTER_AREA resize), quality 85\nwhen only `w` is given. Kept in an in-memory LRU of 96 MB (`SMALL_CACHE`), keyed by path, mtime, size, width and\nquality; sent with `Cache-Control: max-age=86400`. A 750 px frame of 178 KB is about 40 KB at 540 px. JPEG, not WebP:\nWebP took 40-100 ms a frame against 1-4 ms for 10-25% less (commit 9a51e6f4).\n\n**Version.** `version()` is the newest frame mtime in ms, hex; the viewer puts it in each frame URL (`&v=`) so a set\ndrawn again is fetched again instead of read from the day-long browser cache.\n\n**Frame rate.** `fps()`: the `overlay.mp4`'s rate (0-120), else the `NNfps` in the set's name, else 15.\n\n**The viewer** (inline HTML/JS): back/on by 1 and 15, play at 2, 5, 15 fps or the recorded rate (added and marked\n\"(recorded)\"), a slider, a frame number box, swipe (over 50 px) and arrow keys, full size with scrolling, a data saver\n(on by default, remembered: frames as wide as shown, at most 1.5 device px per CSS px, in 60 px steps, quality 60),\nproblem buttons, links to the set's files, the frame in the URL `#`. It preloads from the start: the frames nearest\nahead of the one shown, then just behind, 8 at a time, up to 600 ahead and 60 behind (\"loading n/N\"). No double-tap\nzoom (`touch-action: manipulation`).\n\n**Video.** `video_of`: the set's `overlay.mp4` if any; else one made from its frames by `ui.video.frames_video` at its\nframe rate, kept in `ROOT/.videos/<set>-<version>.mp4` (`<group>__<set>-...` for a set in a group) (written as `.making.mp4` then renamed; older versions\ndeleted); one making at a time per set (a lock per set name), others wait.\n\n**Byte ranges** (`_file`): `Range: bytes=a-b`, `a-` and `-N` (the last N bytes); 416 when unsatisfiable; 206 with\n`Content-Range`; written in 1 MB chunks. Phones' video players ask this way.",
+   "lines": 438,
+   "key_items": [
+    {
+     "name": "handle",
+     "kind": "function",
+     "line": 168,
+     "signature": "def handle(handler, path: str, root: Path | None = None, query: dict | None = None) -> bool",
+     "summary": "Answers a GET under /review (listing, group, viewer, meta, frames, files, video); True if answered."
+    },
+    {
+     "name": "smaller",
+     "kind": "function",
+     "line": 125,
+     "signature": "def smaller(file: Path, width: int | None, quality: int | None) -> bytes | None",
+     "summary": "A frame at most `width` px wide at JPEG `quality`, kept in a 96 MB LRU."
+    },
+    {
+     "name": "video_of",
+     "kind": "function",
+     "line": 220,
+     "signature": "def video_of(folder: Path, cache: Path, label: str) -> Path",
+     "summary": "The set's video: its overlay.mp4, else one made from its frames, cached by version, one making per set."
+    },
+    {
+     "name": "_file",
+     "kind": "function",
+     "line": 244,
+     "signature": "def _file(handler, file: Path, kind: str, cache: bool = False, download: str | None = None) -> None",
+     "summary": "A file whole or by byte range (206/416), optionally as an attachment."
+    },
+    {
+     "name": "meta",
+     "kind": "function",
+     "line": 82,
+     "signature": "def meta(folder: Path) -> dict",
+     "summary": "A set's meta.json: frames, last, problems, files, fps, version."
+    },
+    {
+     "name": "version",
+     "kind": "function",
+     "line": 93,
+     "signature": "def version(folder: Path, frames: list[str]) -> str",
+     "summary": "The frames' newest change (ms, hex), put into frame URLs to bust the browser cache."
+    },
+    {
+     "name": "fps",
+     "kind": "function",
+     "line": 106,
+     "signature": "def fps(folder: Path) -> float",
+     "summary": "The set's frame rate: overlay.mp4's, else its name's NNfps, else 15."
+    },
+    {
+     "name": "sets",
+     "kind": "function",
+     "line": 56,
+     "signature": "def sets(root: Path | None = None) -> list[str]",
+     "summary": "Folders under root with a frames/ folder."
+    },
+    {
+     "name": "groups",
+     "kind": "function",
+     "line": 65,
+     "signature": "def groups(root: Path | None = None) -> list[str]",
+     "summary": "Folders with no frames/ of their own and sets inside."
+    },
+    {
+     "name": "_VIEWER",
+     "kind": "constant",
+     "line": 292,
+     "signature": "_VIEWER = r\"\"\"<!doctype html>...\"\"\"",
+     "summary": "The frame-by-frame viewer page (HTML, CSS and JavaScript)."
+    },
+    {
+     "name": "ROOT",
+     "kind": "constant",
+     "line": 39,
+     "signature": "ROOT = Path(os.environ.get(\"GAMELAB_REVIEW_ROOT\") or paths.REPO.parent / \"MapleHelper-scratch\" / \"golden-tree\")",
+     "summary": "Where the sets are looked for."
+    },
+    {
+     "name": "SMALL_CACHE",
+     "kind": "constant",
+     "line": 49,
+     "signature": "SMALL_CACHE = 96 << 20",
+     "summary": "Bytes of smaller frames kept in memory, least recently sent first out."
+    },
+    {
+     "name": "NAME",
+     "kind": "constant",
+     "line": 40,
+     "signature": "NAME = re.compile(r\"^[A-Za-z0-9_-]+$\")",
+     "summary": "Allowed set and group names (keeps requests inside ROOT)."
+    }
+   ],
+   "inputs": [
+    "set folders under ROOT (frames, legend, overlay video, problems.json)",
+    "HTTP GETs routed by web._Handler"
+   ],
+   "outputs": [
+    "listings, the viewer page, meta.json, frames (original or smaller), files with byte ranges, MP4 downloads"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/ui/video.py"
+   ],
+   "files_io": [
+    {
+     "path": "$GAMELAB_REVIEW_ROOT or ../MapleHelper-scratch/golden-tree/<set>/",
+     "mode": "read",
+     "what": "frames/, legend.png, overlay.mp4, README.md, LEGEND.md, problems.json"
+    },
+    {
+     "path": "<ROOT>/.videos/<set or group__set>-<version>.mp4",
+     "mode": "read-write",
+     "what": "videos made from a set's frames, kept for next time (written as .making.mp4, then renamed; older versions deleted)"
+    }
+   ],
+   "concurrency": "Runs in the web server's per-connection threads; a module-level lock guards the smaller-frame LRU, and a lock per set serialises video making.",
+   "tunables": [
+    {
+     "name": "SMALL_W",
+     "value": "(64, 4096)",
+     "meaning": "widths a smaller frame may ask for (clamped)"
+    },
+    {
+     "name": "SMALL_Q",
+     "value": "(30, 95)",
+     "meaning": "JPEG qualities a smaller frame may ask for (clamped)"
+    },
+    {
+     "name": "SMALL_CACHE",
+     "value": "96 MB",
+     "meaning": "in-memory LRU of smaller frames"
+    },
+    {
+     "name": "FPS",
+     "value": "15",
+     "meaning": "a set's frame rate when nothing tells it (perception's)"
+    },
+    {
+     "name": "CHUNK",
+     "value": "1 MB",
+     "meaning": "bytes per write sending a big file"
+    },
+    {
+     "name": "AHEAD / BEHIND / PARALLEL (viewer)",
+     "value": "600 / 60 / 8",
+     "meaning": "frames preloaded ahead, behind, and at once"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-29",
+     "what": "Overlaid recordings served in the web UI",
+     "why": "the user: \"Can you serve this on webui? I need to look at th on my phone\""
+    },
+    {
+     "date": "2026-10-29",
+     "what": "No double-tap zoom on the viewer",
+     "why": "the user: \"Fix the buttons, double tap on phone zooms in\""
+    },
+    {
+     "date": "2026-11-01",
+     "what": "Groups one level down",
+     "why": "the user: \"put all of them under the same review folder? e.g. `/review/ld-movers-kf/xxxx`\""
+    },
+    {
+     "date": "2026-11-02",
+     "what": "Frames made smaller on request; preloading; the recorded frame rate by default",
+     "why": "the user: bandwidth on mobile, \"can ui preload the clip in browser\", \"default to the recorded fps instead of 5fps\""
+    },
+    {
+     "date": "2026-11-02",
+     "what": "The frames' version in each frame URL",
+     "why": "the user saw a redrawn set's old frames from the day-long cache"
+    },
+    {
+     "date": "2026-11-02",
+     "what": "A Download video button (video.mp4)",
+     "why": "the user: \"a button to download a review clip as video\""
+    }
+   ],
+   "gotchas": [
+    "Through the tunnel a frame takes 0.5-1 s to arrive (60 ms locally), hence the preloading.",
+    "The first video request for a frames-only set encodes it (the button says \"Preparing the video...\" for 30 s); the request blocks until done.",
+    "`tools/review_pages/common.root()` reads `review.ROOT`, so the builders and the server agree on where sets go (a test checks)."
+   ],
+   "tests": [
+    "tests/test_review.py",
+    "tests/test_review_pages.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/video.py",
+   "title": "Review video helpers (H.264 via Windows)",
+   "tagline": "Frames to a phone-playable H.264 MP4 using Windows' own encoder, index first",
+   "summary": "Turns a review set's frames into an MP4 a phone can play: frames into a temporary MJPEG AVI with OpenCV, re-encoded to H.264 by Windows Media Foundation through h264.ps1, then the MP4 index (moov) moved before the media (faststart). If Windows' step fails, OpenCV's MPEG-4 Part 2 ('mp4v') file is the result.",
+   "details_md": "**Why this detour.** An iPhone plays no MPEG-4 Part 2, which is all OpenCV writes here ('mp4v'); OpenCV's\nFFmpeg has no H.264 encoder on this machine (it asks for OpenH264's DLL). Windows 10 ships an H.264 encoder, reachable\nfrom PowerShell through WinRT's `MediaTranscoder`, with nothing downloaded or installed.\n\n**frames_video(frames, fps, dst)**:\n1. Reads the first frame for the size; the output is padded to even width and height (H.264 takes even sizes only:\n   a black column or row via `copyMakeBorder`). Frames of another size are resized to the first's; unreadable ones\n   become black.\n2. Writes the frames to `dst` with its suffix swapped for `.mjpg.avi` (fourcc `MJPG`, at `fps`).\n3. `h264()` runs `powershell -NoProfile -ExecutionPolicy Bypass -File h264.ps1 -In ... -Out <dst stem>.h264.mp4 -Width W\n   -Height H -Fps round(fps) -Bitrate 8*W*H` with `CREATE_NO_WINDOW` and a 600 s timeout; success means exit 0 and a\n   non-empty output.\n4. On success `faststart(raw, dst)` and returns `\"h264\"`; otherwise `mp4v(avi, dst, fps)` re-writes the AVI as OpenCV's\n   MPEG-4 Part 2 and returns `\"mp4v\"`.\n5. The temporary AVI and raw MP4 are always deleted.\n\n**faststart(src, dst)**: walks the top-level MP4 boxes (`_boxes`, handling 64-bit sizes and size 0 = to the end). If\n`moov` is already before `mdat` it copies the file. Otherwise it takes `moov` out, adds its size to every chunk offset\ninside it (`_shift` recurses through the container boxes in `CONTAINERS` and rewrites `stco` 32-bit and `co64` 64-bit\noffsets; an `stco` offset past 4 GB raises), and writes ftyp, moov, then the rest, via a `.tmp` file renamed into\nplace. This is what ffmpeg's `-movflags +faststart` does, so a phone can start playing as the file arrives.",
+   "lines": 152,
+   "key_items": [
+    {
+     "name": "frames_video",
+     "kind": "function",
+     "line": 25,
+     "signature": "def frames_video(frames: list[Path], fps: float, dst: Path) -> str",
+     "summary": "Frames to an MP4 at fps: \"h264\", or \"mp4v\" where Windows' encoder failed."
+    },
+    {
+     "name": "h264",
+     "kind": "function",
+     "line": 60,
+     "signature": "def h264(src: Path, dst: Path, width: int, height: int, fps: float, bitrate: int) -> tuple[bool, str]",
+     "summary": "Runs h264.ps1 through PowerShell; whether it worked and the last 600 chars it said."
+    },
+    {
+     "name": "faststart",
+     "kind": "function",
+     "line": 125,
+     "signature": "def faststart(src: Path, dst: Path) -> bool",
+     "summary": "Rewrites an MP4 with moov right after ftyp, shifting chunk offsets; whether it had to move."
+    },
+    {
+     "name": "_shift",
+     "kind": "function",
+     "line": 107,
+     "signature": "def _shift(moov: bytearray, delta: int) -> None",
+     "summary": "Adds delta to every stco/co64 chunk offset inside moov."
+    },
+    {
+     "name": "_boxes",
+     "kind": "function",
+     "line": 92,
+     "signature": "def _boxes(b: bytes, start: int, end: int)",
+     "summary": "Iterates MP4 boxes (kind, offset, size, header length)."
+    },
+    {
+     "name": "mp4v",
+     "kind": "function",
+     "line": 74,
+     "signature": "def mp4v(src: Path, dst: Path, fps: float) -> None",
+     "summary": "Fallback: re-writes the video as OpenCV's MPEG-4 Part 2 MP4."
+    },
+    {
+     "name": "BITS_PER_PIXEL",
+     "kind": "constant",
+     "line": 20,
+     "signature": "BITS_PER_PIXEL = 8.0",
+     "summary": "The H.264 bitrate in bits per pixel per second (750 x 554 at 15 fps: 3.3 Mbit/s)."
+    },
+    {
+     "name": "TIMEOUT_S",
+     "kind": "constant",
+     "line": 21,
+     "signature": "TIMEOUT_S = 600",
+     "summary": "How long the PowerShell encode may run."
+    }
+   ],
+   "inputs": [
+    "a set's frame JPEGs and its frame rate, from `review.video_of`"
+   ],
+   "outputs": [
+    "an MP4 at `dst` (H.264 faststart, or mp4v)"
+   ],
+   "uses": [
+    "gamelab/ui/h264.ps1"
+   ],
+   "files_io": [
+    {
+     "path": "<dst stem>.mjpg.avi",
+     "mode": "write",
+     "what": "temporary MJPEG AVI (always deleted)"
+    },
+    {
+     "path": "<dst stem>.h264.mp4",
+     "mode": "write",
+     "what": "Windows' raw H.264 output, index last (always deleted)"
+    },
+    {
+     "path": "<dst>",
+     "mode": "write",
+     "what": "the final MP4 (faststart writes it via <dst>.tmp, renamed into place)"
+    }
+   ],
+   "concurrency": "Starts a PowerShell child process (h264.ps1) and waits for it, up to 600 s.",
+   "tunables": [
+    {
+     "name": "BITS_PER_PIXEL",
+     "value": "8.0",
+     "meaning": "H.264 bitrate = 8 x W x H bits/s"
+    },
+    {
+     "name": "TIMEOUT_S",
+     "value": "600",
+     "meaning": "seconds the encoder may take"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-02",
+     "what": "Videos encoded to H.264 by Windows' Media Foundation through PowerShell, faststart applied in Python",
+     "why": "an iPhone plays no 'mp4v' and OpenCV has no H.264 encoder here; nothing to download or install"
+    }
+   ],
+   "gotchas": [
+    "Windows-only for H.264; elsewhere (or if the transcoder refuses) the result is 'mp4v', which an iPhone won't play — the return value says which.",
+    "Odd frame sizes are padded, not cropped (a 151 x 101 frame comes out 152 x 102).",
+    "`faststart` raises `ValueError` on a file without both `moov` and `mdat`; `review.video_of` lets it reach `handle`, which answers 500 \"no video: ...\"."
+   ],
+   "tests": [
+    "tests/test_review.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/h264.ps1",
+   "title": "h264.ps1 (Windows H.264 transcoder)",
+   "tagline": "PowerShell: re-encode a video to H.264 MP4 with WinRT's MediaTranscoder",
+   "summary": "A PowerShell script that loads WinRT types and re-encodes any video Media Foundation reads into an H.264 MP4 of a given size, frame rate and bitrate, with no audio. Called by `ui/video.py`'s `h264()`; uses only Windows 10's built-in codecs.",
+   "details_md": "Parameters: `-In` and `-Out` (required), `-Width` (default 1696), `-Height` (1030), `-Fps` (15), `-Bitrate`\n(12000000). `$ErrorActionPreference = 'Stop'`.\n\nSteps:\n1. `Add-Type System.Runtime.WindowsRuntime` and reference the WinRT types `StorageFile`, `MediaTranscoder` and\n   `MediaEncodingProfile`.\n2. `Await($op, $type)`: finds the generic `AsTask` overload on `System.WindowsRuntimeSystemExtensions` by reflection,\n   turns a WinRT `IAsyncOperation` into a .NET Task and waits for its result (a second `AsTask` overload is used for the\n   transcode's `IAsyncActionWithProgress<double>`).\n3. Opens the input `StorageFile` from its full path, the output folder, and creates the output file\n   (`ReplaceExisting`).\n4. `MediaEncodingProfile.CreateMp4(HD1080p)`, audio removed, video width, height, bitrate and frame rate `Fps/1` set.\n5. A `MediaTranscoder` with `HardwareAccelerationEnabled = $false`; `PrepareFileTranscodeAsync(src, dst, profile)`; if it\n   can't transcode, prints `cannot transcode: <reason>` and exits 2; else runs `TranscodeAsync()` and prints\n   `h264: <path>`.",
+   "lines": 54,
+   "key_items": [
+    {
+     "name": "param",
+     "kind": "function",
+     "line": 5,
+     "signature": "param([string]$In, [string]$Out, [int]$Width = 1696, [int]$Height = 1030, [int]$Fps = 15, [int]$Bitrate = 12000000)",
+     "summary": "The script's parameters; video.py passes all six."
+    },
+    {
+     "name": "Await",
+     "kind": "function",
+     "line": 25,
+     "signature": "function Await($op, [Type]$type)",
+     "summary": "Waits for a WinRT async operation by turning it into a .NET Task via reflection."
+    },
+    {
+     "name": "MediaEncodingProfile.CreateMp4",
+     "kind": "method",
+     "line": 37,
+     "signature": "[MediaEncodingProfile]::CreateMp4([VideoEncodingQuality]::HD1080p)",
+     "summary": "The H.264 MP4 profile, then resized, re-rated and stripped of audio."
+    },
+    {
+     "name": "HardwareAccelerationEnabled",
+     "kind": "constant",
+     "line": 46,
+     "signature": "$tr.HardwareAccelerationEnabled = $false",
+     "summary": "The transcoder runs in software."
+    },
+    {
+     "name": "PrepareFileTranscodeAsync",
+     "kind": "method",
+     "line": 47,
+     "signature": "$tr.PrepareFileTranscodeAsync($src, $dst, $profile)",
+     "summary": "Checks the transcode can run; exit 2 with the failure reason if not."
+    }
+   ],
+   "inputs": [
+    "a video file (the temporary MJPEG AVI from video.py)"
+   ],
+   "outputs": [
+    "an H.264 MP4 at -Out; a line on stdout"
+   ],
+   "uses": [],
+   "files_io": [
+    {
+     "path": "-In",
+     "mode": "read",
+     "what": "the source video"
+    },
+    {
+     "path": "-Out",
+     "mode": "write",
+     "what": "the H.264 MP4"
+    }
+   ],
+   "concurrency": "Runs as its own powershell.exe child process, started and waited for by video.h264().",
+   "tunables": [
+    {
+     "name": "-Bitrate default",
+     "value": "12000000",
+     "meaning": "used only when video.py doesn't pass one (it always does)"
+    },
+    {
+     "name": "HardwareAccelerationEnabled",
+     "value": "$false",
+     "meaning": "software encoding"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-02",
+     "what": "Windows' own encoder through WinRT MediaTranscoder",
+     "why": "no download, nothing installed: Windows 10's built-in codecs"
+    }
+   ],
+   "gotchas": [
+    "Exit code 2 means Media Foundation refused the transcode; video.py then falls back to 'mp4v'."
+   ],
+   "tests": [
+    "tests/test_review.py"
+   ]
+  },
+  {
+   "path": "tools/review_pages/build.py",
+   "title": "Review page builder (Lie Detector and Violetta)",
+   "tagline": "One command that builds the /review sets for the Lie Detector's two mini-games",
+   "summary": "Builds the web UI's review sets for the Lie Detector mini-game (`ld`) and the Violetta game (`violetta`) from the alarm clips, by running the two studies' scripts in `tools/review_pages/ld/` and `violetta/`. It lists or builds the clips that have no page, never writes over a page unless `--force` names its clip, and never rebuilds an approved reference. Offline: no game, no keys.",
+   "details_md": "`python tools/review_pages/build.py {ld,violetta} [clip keys ...] [--missing] [--list] [--root DIR] [--force]\n[--weights FILE]`. A clip's key is the first 15 characters of its folder name (its stamp, `20261104-180343`).\n\n**Clips and groups.** Clips are folders in `gamelab/lab/alarm_clips` (`paths.ALARM_CLIPS`) matching `FORMS`:\n`*mini-game-notice*` for `ld`, `*countdown*` for `violetta`. Each form has page groups (`GROUPS`): `ld-reference`,\n`ld-outline-pf3`, `ld-speed-compare`; and `violetta`, `violetta-yolo`. A clip's page in a group is\n`<root>/<group>/<key>-<fps>fps/` (`pages`).\n\n**Planning.** `--list` prints, per group, the clips with no page and builds nothing. Otherwise `plan()` decides per clip\nwhich groups to build, printing why it skips: an approved clip's `ld-reference` is never rebuilt; an existing page is\nskipped unless `--force`. With `--force`, `clear()` deletes the pages about to be rebuilt first (the builders never write\nover one). For `ld`, a clip with no worked-out range (`lib.clip(k)` is `None`) is dropped, having said why.\n\n**build_ld.** First, in the main process, each clip's frames (`lib.load_clip`) and board scrolls (`scrolls`) are made,\nbecause parallel workers would each make them and read each other's half-written files. Clips needing a reference (not\napproved, and either the reference page is wanted or no reference file exists) get `reference.one` run for every seed\n(`reference.SEEDS` = 0, 1, 2: three runs, their median is the reference) in a `ProcessPoolExecutor(WORKERS=4)`; once all seeds of a clip are back, `reference.build` writes it (and its page if\nasked). Then `review_pf3.render(k, \"ld-outline-pf3\", PF3)` and `review_compare.render(k)`.\n\n**build_violetta.** Runs in `<work>/violetta` (the scripts use relative folders): per clip, a first pass `track2.py` from\n14 s after the alarm to a second after the countdown's last sighting (checked on every third frame with\n`LieDetectorSpotter.near`), then `solve.main` into `solved/`, `track5.py` sprite matches into `dets5/`; YOLO\n(`yolo_detect.py` with the weights) into `detsY.part/` then moved into `detsY/`; the rules solver's tally\n(`rules.py`) for each detector; then `build_review.py` for each group. Each step is skipped when its output exists;\nthe trackers and YOLO write under a `.part` name first and rename when done, so a crash leaves no half file taken for\ndone.\n\n`--root` sets `GAMELAB_REVIEW_ROOT` in the environment so workers and child steps see it too.",
+   "lines": 213,
+   "key_items": [
+    {
+     "name": "main",
+     "kind": "function",
+     "line": 169,
+     "signature": "def main(argv=None)",
+     "summary": "Parses the command line, lists or plans, clears on --force, then builds ld or violetta."
+    },
+    {
+     "name": "plan",
+     "kind": "function",
+     "line": 47,
+     "signature": "def plan(form, keys, root, force=False, approved=lambda key: False)",
+     "summary": "Clip -> groups to build, printing what is skipped and why."
+    },
+    {
+     "name": "build_ld",
+     "kind": "function",
+     "line": 71,
+     "signature": "def build_ld(todo)",
+     "summary": "Frames and board scrolls first (in the main process), then each needed reference's 3 seeds in 4 worker processes, then the outline (pf3) and speed-compare pages."
+    },
+    {
+     "name": "build_violetta",
+     "kind": "function",
+     "line": 110,
+     "signature": "def build_violetta(todo, weights)",
+     "summary": "First pass, solve, sprite matches, YOLO, tallies, then the two groups' pages; each step skipped when done."
+    },
+    {
+     "name": "missing",
+     "kind": "function",
+     "line": 42,
+     "signature": "def missing(form, keys, root)",
+     "summary": "Each group's clips with no page."
+    },
+    {
+     "name": "pages",
+     "kind": "function",
+     "line": 37,
+     "signature": "def pages(root, group, key)",
+     "summary": "A clip's page folders in a group: <root>/<group>/<key>-*fps."
+    },
+    {
+     "name": "clear",
+     "kind": "function",
+     "line": 62,
+     "signature": "def clear(todo, root)",
+     "summary": "--force: deletes the pages about to be rebuilt."
+    },
+    {
+     "name": "run",
+     "kind": "function",
+     "line": 97,
+     "signature": "def run(script, *args, **kw)",
+     "summary": "Runs one of the violetta study's scripts in its own Python process (`-X utf8`)."
+    },
+    {
+     "name": "tally",
+     "kind": "function",
+     "line": 103,
+     "signature": "def tally(dets, names)",
+     "summary": "The rules solver's output; its last line (the tally) kept."
+    },
+    {
+     "name": "GROUPS",
+     "kind": "constant",
+     "line": 27,
+     "signature": "GROUPS = {\"ld\": (REFERENCE, \"ld-outline-pf3\", \"ld-speed-compare\"), \"violetta\": (\"violetta\", \"violetta-yolo\")}",
+     "summary": "The page groups each form builds."
+    },
+    {
+     "name": "FORMS",
+     "kind": "constant",
+     "line": 25,
+     "signature": "FORMS = {\"ld\": \"*mini-game-notice*\", \"violetta\": \"*countdown*\"}",
+     "summary": "Which alarm clips each game is on."
+    },
+    {
+     "name": "PF3",
+     "kind": "constant",
+     "line": 28,
+     "signature": "PF3 = dict(mu=1.0, track=0.0, reseed=0.0, gamma=3.0, lam=0.3, offboard=1.0, turn=0.1, turn_edge=0.3)",
+     "summary": "The tracker settings the ld-outline-pf3 pages use."
+    },
+    {
+     "name": "WORKERS",
+     "kind": "constant",
+     "line": 29,
+     "signature": "WORKERS = 4",
+     "summary": "Worker processes for references and the violetta trackers."
+    }
+   ],
+   "inputs": [
+    "alarm clips in `gamelab/lab/alarm_clips/` (frames, index.jsonl, summary.json)",
+    "the live tracker's round files (`gamelab/lab/lie_target`, `paths.LIE_TARGETS`, read by `ld/lib.py` to work out each clip's range) and the game's lieDetector sprites (`common.PICTURES`, used by the violetta scripts' `overlay.py`)",
+    "the Violetta detector weights (`gamelab/assets/violetta.pt` by default)"
+   ],
+   "outputs": [
+    "review sets under the review root, served by `gamelab/ui/review.py`",
+    "work data under the work folder"
+   ],
+   "uses": [
+    "tools/review_pages/common.py",
+    "tools/review_pages/ld/lib.py",
+    "tools/review_pages/ld/reference.py",
+    "tools/review_pages/ld/review_pf3.py",
+    "tools/review_pages/ld/review_compare.py",
+    "tools/review_pages/ld/scrolls.py",
+    "tools/review_pages/violetta/solve.py",
+    "tools/review_pages/violetta/track2.py",
+    "tools/review_pages/violetta/track5.py",
+    "tools/review_pages/violetta/yolo_detect.py",
+    "tools/review_pages/violetta/rules.py",
+    "tools/review_pages/violetta/build_review.py",
+    "gamelab/perception/lie_detector.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamelab/lab/alarm_clips/<clip>/",
+     "mode": "read",
+     "what": "the clips"
+    },
+    {
+     "path": "<review root>/<group>/<key>-<fps>fps/",
+     "mode": "write",
+     "what": "the built pages (not in git)"
+    },
+    {
+     "path": "gamelab/lab/review_work/ (or GAMELAB_REVIEW_WORK)",
+     "mode": "read-write",
+     "what": "ld/cache, ld/ranges, ld/references-unchecked, violetta/dets, solved, dets5, detsY"
+    },
+    {
+     "path": "tools/review_pages/ld/references/<key>.json",
+     "mode": "read",
+     "what": "approved reference tracks (in git)"
+    }
+   ],
+   "concurrency": "A ProcessPoolExecutor of 4 workers for the ld references; the violetta steps each run as a child Python process (some with `--workers 4`).",
+   "tunables": [
+    {
+     "name": "WORKERS",
+     "value": "4",
+     "meaning": "worker processes"
+    },
+    {
+     "name": "--root",
+     "value": "GAMELAB_REVIEW_ROOT or review.ROOT",
+     "meaning": "where pages go"
+    },
+    {
+     "name": "--weights",
+     "value": "gamelab/assets/violetta.pt",
+     "meaning": "the Violetta detector"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-06",
+     "what": "The page builders committed (each is a study's script with its paths taken out); the built pages stay outside git",
+     "why": "the user: \"looks like we should commit the page builders? The built page can stay outside of git\""
+    }
+   ],
+   "gotchas": [
+    "A page that exists is never written over without `--force` for that clip, and an approved clip's reference is never rebuilt even then.",
+    "Building a clip's ld-reference page remakes its unchecked reference, over any hand fix in it (tools/review_pages/README.md).",
+    "YOLO runs on the GPU (`device=0` in yolo_detect.py, per the README)."
+   ],
+   "tests": [
+    "tests/test_review_pages.py"
+   ]
+  },
+  {
+   "path": "tools/review_pages/common.py",
+   "title": "Review builders' shared paths",
+   "tagline": "Where the review builders find clips, pictures, weights, the page root and work folder",
+   "summary": "Imported by build.py and both studies' scripts: puts the repo on sys.path (so `gamelab` imports from any folder, including spawned workers) and says where things are, with nothing tied to one PC.",
+   "details_md": "- On import, inserts the repo root (two folders up from this file) at the front of `sys.path`, then imports\n  `gamelab.paths`. A worker spawned on Windows re-imports it the same way.\n- `PICTURES`: `gamedata/data/out/pictures/UI/AntiMacro.img/lieDetector` (the game's own sprites).\n- `WEIGHTS`: `gamelab/assets/violetta.pt`, the Violetta detector in git.\n- `root()`: `GAMELAB_REVIEW_ROOT`, else `gamelab.ui.review.ROOT`, read when called rather than when `common` is\n  imported: `build.py` sets the variable from `--root` before it imports the page scripts, which call `root()` at their\n  own import. `gamelab.ui.review` is imported inside `root()`, so workers that never write a page don't load it.\n- `work()`: `GAMELAB_REVIEW_WORK`, else `gamelab/lab/review_work` (git-ignored, like all of `lab/`).\n\nA test (`test_nothing_in_the_builders_is_tied_to_one_pc`) scans the builders for drive letters, `appdata` or the scratch\nfolder's name, and another checks `root()` equals `review.ROOT`.",
+   "lines": 25,
+   "key_items": [
+    {
+     "name": "root",
+     "kind": "function",
+     "line": 15,
+     "signature": "def root() -> Path",
+     "summary": "Where the pages go: GAMELAB_REVIEW_ROOT, else the folder the web UI serves (review.ROOT)."
+    },
+    {
+     "name": "work",
+     "kind": "function",
+     "line": 22,
+     "signature": "def work() -> Path",
+     "summary": "Work data: GAMELAB_REVIEW_WORK, else gamelab/lab/review_work."
+    },
+    {
+     "name": "PICTURES",
+     "kind": "constant",
+     "line": 11,
+     "signature": "PICTURES = paths.REPO / \"gamedata/data/out/pictures/UI/AntiMacro.img/lieDetector\"",
+     "summary": "The game's Lie Detector sprites."
+    },
+    {
+     "name": "WEIGHTS",
+     "kind": "constant",
+     "line": 12,
+     "signature": "WEIGHTS = paths.ASSETS / \"violetta.pt\"",
+     "summary": "The Violetta detector's weights."
+    }
+   ],
+   "inputs": [
+    "environment variables GAMELAB_REVIEW_ROOT and GAMELAB_REVIEW_WORK"
+   ],
+   "outputs": [
+    "paths for build.py and the ld/ and violetta/ scripts"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/ui/review.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [
+    {
+     "date": "2026-11-06",
+     "what": "Nothing in the builders tied to one PC",
+     "why": "they were committed to git (a test checks)"
+    }
+   ],
+   "gotchas": [
+    "Importing it changes `sys.path` (repo root first)."
+   ],
+   "tests": [
+    "tests/test_review_pages.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/tls/__init__.py",
+   "title": "TLS viewer routes (/tls/)",
+   "tagline": "Serves the TLS viewer's static page and JSON API on the mini-map's server",
+   "summary": "Not part of the autonomous player. `handle()` answers /tls/ requests on the web server: checks Cloudflare Access (ui.tls.access), serves the static page, and an API to list captures, decrypt one in the background, and fetch its connections, items, bodies, records, streams, searches and the x-csauth timeline.",
+   "details_md": "Routes: `/tls/` (index.html, app.js, app.css), `/tls/api/captures`, `open`, `summary`, `item`, `conn`, `body`,\n`record`, `stream`, `search`, `csauth`. `ROOT` is `GAMELAB_TLS_ROOT`, else `.analysis/captures` in the repo. The\ndecryption modules are imported on the first request (`library()` builds one `view.Library`), so the mini-map runs\nwithout the `cryptography` package. Every response carries `SAFE` headers (nosniff, no referrer, no framing, and a Content-Security-Policy\nof `default-src 'self'`: only the page's own scripts); bodies go out as `application/octet-stream` and the page inserts them as text only. A\ndecrypted stream is served at most 4 MB (`STREAM_MAX`) per request; a request on a capture still decrypting gets 409; an exception is printed on the console and returned as JSON with\nstatus 500. `/tls` redirects to `/tls/`; the Access check (`access.refused`) runs before anything else, a refusal being\na 403 with its reason.",
+   "lines": 154,
+   "key_items": [
+    {
+     "name": "handle",
+     "kind": "function",
+     "line": 55,
+     "signature": "def handle(handler, path: str, query: dict | None = None) -> bool",
+     "summary": "Answers /tls...: Access check, static files, or the API."
+    },
+    {
+     "name": "_api",
+     "kind": "function",
+     "line": 91,
+     "signature": "def _api(send, name: str, q: dict) -> None",
+     "summary": "The JSON/bytes API over the Library's captures."
+    },
+    {
+     "name": "library",
+     "kind": "function",
+     "line": 46,
+     "signature": "def library()",
+     "summary": "The one view.Library over ROOT, made on first use."
+    },
+    {
+     "name": "ROOT",
+     "kind": "constant",
+     "line": 34,
+     "signature": "ROOT = Path(os.environ.get(\"GAMELAB_TLS_ROOT\") or paths.REPO / \".analysis\" / \"captures\")",
+     "summary": "Where the captures are."
+    },
+    {
+     "name": "SAFE",
+     "kind": "constant",
+     "line": 38,
+     "signature": "SAFE = {\"X-Content-Type-Options\": \"nosniff\", ...}",
+     "summary": "Security headers on every /tls response."
+    }
+   ],
+   "inputs": [
+    "GETs routed by web._Handler.do_GET"
+   ],
+   "outputs": [
+    "the viewer's files and API responses"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/ui/tls/access.py",
+    "gamelab/ui/tls/view.py",
+    "gamelab/ui/tls/csauth.py"
+   ],
+   "files_io": [
+    {
+     "path": ".analysis/captures/ (or GAMELAB_TLS_ROOT)",
+     "mode": "read",
+     "what": "the recorder's .pcap files and key logs"
+    }
+   ],
+   "concurrency": "Runs in the web server's connection threads; decryption runs in view.Library's background threads.",
+   "tunables": [
+    {
+     "name": "STREAM_MAX",
+     "value": "4 MB",
+     "meaning": "bytes of a decrypted stream one request gets"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-13",
+     "what": "The TLS viewer moved onto the mini-map's server and tunnel",
+     "why": "the user: \"this should probably go to the maplehelper project as we already have a webui setup there with cloudflare tunnels\""
+    }
+   ],
+   "gotchas": [
+    "Not part of the autonomous player: it views network captures made by a separate recorder."
+   ],
+   "tests": [
+    "tests/test_tls.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/tls/access.py",
+   "title": "Cloudflare Access check for /tls/",
+   "tagline": "Requests through Cloudflare must carry a valid, signed Cloudflare Access token",
+   "summary": "Decides who may read /tls/: requests straight to the server (this computer, the home network) pass; requests that came through Cloudflare (Cf-Ray, Cf-Connecting-IP, Cf-Visitor or a cloudflare Cdn-Loop header) must carry an Access JWT whose RS256 signature, audience, issuer and times check out. Without its config file, every request through Cloudflare is refused (fail closed).",
+   "details_md": "The captures hold live session tokens, the HWID and the machine's inventory, while the rest of the page asks\nfor no password and the tunnel puts it on the internet. `CONFIG` is `gamelab/lab/cloudflare_access.json` with\n`{\"team\", \"aud\"}`. The token is read from `Cf-Access-Jwt-Assertion` or the `CF_Authorization` cookie. `verify` checks\nRS256 with the team's public key `kid` (fetched from `<team>/cdn-cgi/access/certs`, cached `KEYS_TTL_S` = 3600 s, refetched\nfor an unknown kid at most every `REFETCH_S` = 60 s), the `aud`, the issuer equal to the team URL, and `exp`/`nbf`\nwith `LEEWAY_S` = 60 s. Uses the `cryptography` package, imported inside the functions.",
+   "lines": 149,
+   "key_items": [
+    {
+     "name": "refused",
+     "kind": "function",
+     "line": 58,
+     "signature": "def refused(headers, now: float | None = None, cfg: dict | None = None) -> str | None",
+     "summary": "Why this request may not read /tls/, or None."
+    },
+    {
+     "name": "verify",
+     "kind": "function",
+     "line": 91,
+     "signature": "def verify(token: str, team: str, aud: str, now: float, keys=None) -> dict",
+     "summary": "The token's claims if Access signed it for aud, else Refused."
+    },
+    {
+     "name": "through_cloudflare",
+     "kind": "function",
+     "line": 39,
+     "signature": "def through_cloudflare(headers) -> bool",
+     "summary": "Whether Cloudflare's edge headers are present."
+    },
+    {
+     "name": "team_key",
+     "kind": "function",
+     "line": 124,
+     "signature": "def team_key(team: str, kid)",
+     "summary": "The team's public key kid, cached and refetched as needed."
+    },
+    {
+     "name": "CONFIG",
+     "kind": "constant",
+     "line": 27,
+     "signature": "CONFIG = paths.LAB / \"cloudflare_access.json\"",
+     "summary": "The team and audience tag."
+    }
+   ],
+   "inputs": [
+    "request headers",
+    "gamelab/lab/cloudflare_access.json",
+    "the team's certs over HTTPS"
+   ],
+   "outputs": [
+    "a refusal reason or None"
+   ],
+   "uses": [
+    "gamelab/paths.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamelab/lab/cloudflare_access.json",
+     "mode": "read",
+     "what": "the Access team and audience tag"
+    }
+   ],
+   "concurrency": "A lock guards the key cache.",
+   "tunables": [
+    {
+     "name": "KEYS_TTL_S",
+     "value": "3600",
+     "meaning": "the team's keys refetched after this"
+    },
+    {
+     "name": "REFETCH_S",
+     "value": "60",
+     "meaning": "an unknown kid triggers a refetch at most this often"
+    },
+    {
+     "name": "LEEWAY_S",
+     "value": "60",
+     "meaning": "clock skew allowed on exp and nbf"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-13",
+     "what": "Cloudflare Access in front of /tls/",
+     "why": "the user chose \"Cloudflare Access\" of the ways offered"
+    }
+   ],
+   "gotchas": [
+    "A header alone proves nothing: the signature is what counts."
+   ],
+   "tests": [
+    "tests/test_tls.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/tls/csauth.py",
+   "title": "x-csauth timeline",
+   "tagline": "The anti-cheat's session calls per computer over time, each showing only what changed",
+   "summary": "Builds the viewer's x-csauth tab from a decrypted capture: the NGS anti-cheat's /v1/issue, /v2 heartbeats and /v1/close calls to x-csauth.ngs.nexon.com, grouped by the request's hwid, each event the diff against that computer's previous state, with decoy report entries and per-heartbeat noise left out.",
+   "details_md": "`timeline(cap)` walks a ready `view.Capture`'s HTTP items for `HOST` (`x-csauth.ngs.nexon.com`; NGS is Nexon's anti-cheat). A *computer* is the request's `hwid` (the NGS machine id), named from its inventory report (`0xC210F070`) when the capture has one. Per computer (`Computer`) each event gets:\n\n- `changes`: fields whose value differs from the last value that computer sent (`diff`), and `introduced`: fields sent for the first time;\n- `reports`: `detected_info` / `collected_info` entries other than the `0x221FFFFF` decoys and the `0x00000000` heartbeat marker, which are only counted (`hidden`); an entry already in the previous heartbeat (but for its `log_id` / `log_timestamp`) is counted as `repeated`; known codes get a label (`LABELS`: drivers, process, USB device, VPN suspicion, ...);\n- `response`: the reply's changed fields, and `config_changed` / `emergency_stop` / `detected` when set;\n- `gap`: when a heartbeat comes more than `GAP_FACTOR` (2) periods after the last (60 s unless the server's `auth_cycle` said otherwise).\n\nLeft out as noise: the chained `csauthtoken`; `app_crc` / `module_crc`, which rotate through 5 answer sets the token picks (`crc32(token) % 5`), so each is compared only with the last heartbeat of the same set; `sequence` ticks (only ids joining or leaving, and a value an id never had, the latter marked `minor`). Events with nothing of note are `quiet` (the page folds runs of them). Bodies that aren't JSON are listed as `damaged`. x-csauth connections that couldn't be decrypted (no key) are counted per client address (`unkeyed`). The result is cached on the capture by `ui.tls._api`.",
+   "lines": 286,
+   "key_items": [
+    {
+     "name": "timeline",
+     "kind": "function",
+     "line": 210,
+     "signature": "def timeline(cap) -> dict",
+     "summary": "{computers: [...events], unkeyed: [...]} from a ready Capture."
+    },
+    {
+     "name": "Computer",
+     "kind": "class",
+     "line": 73,
+     "signature": "class Computer",
+     "summary": "One machine's state as its calls arrive."
+    },
+    {
+     "name": "diff",
+     "kind": "function",
+     "line": 52,
+     "signature": "def diff(old, new, path=\"\")",
+     "summary": "Changed/added/removed paths between two JSON values."
+    },
+    {
+     "name": "answer_set",
+     "kind": "function",
+     "line": 47,
+     "signature": "def answer_set(token) -> int | None",
+     "summary": "Which of the 5 CRC answer sets a heartbeat answers."
+    },
+    {
+     "name": "DECOY",
+     "kind": "constant",
+     "line": 34,
+     "signature": "DECOY, MARKER = \"0x221FFFFF\", \"0x00000000\"",
+     "summary": "The report codes counted, not shown."
+    }
+   ],
+   "inputs": [
+    "a ready `view.Capture`"
+   ],
+   "outputs": [
+    "the JSON timeline for /tls/api/csauth (cached on the capture)"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "GAP_FACTOR",
+     "value": "2.0",
+     "meaning": "a heartbeat later than this many periods is a gap"
+    },
+    {
+     "name": "PERIOD_S",
+     "value": "60.0",
+     "meaning": "the heartbeat period when no response gave one"
+    },
+    {
+     "name": "HOST",
+     "value": "x-csauth.ngs.nexon.com",
+     "meaning": "the host whose calls make the timeline"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-14",
+     "what": "x-csauth calls as a timeline per computer, each the diff against the last, decoys removed",
+     "why": "the user asked for it, \"so I can focus on real important things\""
+    }
+   ],
+   "gotchas": [],
+   "tests": [
+    "tests/test_tls.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/tls/decrypt.py",
+   "title": "TLS decryption (copy of tls_decrypt.py)",
+   "tagline": "Decrypts a pcap's TLS 1.2 and 1.3 connections with an SSLKEYLOGFILE key log",
+   "summary": "A copy of `D:/log decoding/.tools/tls_decrypt.py` (as of 2026-11-13): reassembles TCP from a pcap, decrypts TLS 1.3 (handshake and traffic secrets, KeyUpdate followed) and TLS 1.2 AEAD suites from key logs, and parses HTTP/1.x (chunked, gzip / deflate / zstd bodies, and the NGS servers' `CE: G` responses via `decode_g`; HTTP/2 is only detected and its frames listed, HPACK being view.py's). It also decides which frames over 1500 bytes are intact or were zero-filled by the router's TZSP stream. Used by view.py; also runnable on its own.",
+   "details_md": "Frames over 1500 B: a MikroTik TZSP stream carries GRO-merged frames with everything after the first part\nzero-filled (lost), while Npcap on this PC captures intact Large Send Offload super-frames. `frame_sources` works out\neach frame's source: `--local`, a `tzsp.raw` beside the pcap, a `summary.json` beside it (a local recording), or else all\nbig frames are treated as damaged. Records overlapping lost bytes are decrypted without authentication (GCM and\nChaCha20 are stream ciphers) and the lost bytes reported. Its header comment: that repo's copy is where it was made, and a fix to one belongs in the other.\n\nRun on its own (`main`), it writes `index.tsv`, HTTP transcripts, the decrypted streams and the bodies to `<pcap folder>/tls`; the web page uses only its functions, in memory, and writes nothing.",
+   "lines": 1019,
+   "key_items": [
+    {
+     "name": "frame_sources",
+     "kind": "function",
+     "line": 985,
+     "signature": "def frame_sources(a)",
+     "summary": "Builds the connections with each big frame judged intact or damaged by the rules above."
+    },
+    {
+     "name": "decrypt_conn",
+     "kind": "function",
+     "line": 806,
+     "signature": "def decrypt_conn(c, keys, with_records=False)",
+     "summary": "One TCP connection's TLS decrypted (or why not)."
+    },
+    {
+     "name": "build_conns",
+     "kind": "function",
+     "line": 192,
+     "signature": "def build_conns(pcap, trust_all=False, router=None)",
+     "summary": "TCP connections reassembled from the pcap."
+    },
+    {
+     "name": "load_keylogs",
+     "kind": "function",
+     "line": 868,
+     "signature": "def load_keylogs(paths)",
+     "summary": "Several SSLKEYLOGFILE key logs merged by client random (the first file that has a secret wins)."
+    },
+    {
+     "name": "Dir13",
+     "kind": "class",
+     "line": 467,
+     "signature": "class Dir13",
+     "summary": "One direction of a TLS 1.3 connection's record decryption."
+    },
+    {
+     "name": "Dir12",
+     "kind": "class",
+     "line": 521,
+     "signature": "class Dir12",
+     "summary": "One direction of a TLS 1.2 AEAD connection."
+    },
+    {
+     "name": "decode_g",
+     "kind": "function",
+     "line": 686,
+     "signature": "def decode_g(body)",
+     "summary": "NGS `CE: G` response bodies: base64 of a gzip-shaped blob XORed with one byte (blob[3]), raw deflate from offset 10; a body cut by lost bytes decoded up to the cut."
+    }
+   ],
+   "inputs": [
+    ".pcap files and keys*.log key logs"
+   ],
+   "outputs": [
+    "decrypted connections, records and HTTP/1.x parses (in memory for view.py)"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [
+    {
+     "date": "2026-11-13",
+     "what": "Copied in from D:/log decoding for the /tls/ page",
+     "why": "the viewer moved onto this server"
+    }
+   ],
+   "gotchas": [
+    "A copy of `D:/log decoding`'s `tls_decrypt.py`, where it was made: a fix to one belongs in the other."
+   ],
+   "tests": [
+    "tests/test_tls.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/tls/ngs.py",
+   "title": "NGS AE: G body decoder (copy of decode_ngs_request.py)",
+   "tagline": "Decodes the NGS anti-cheat's obfuscated HTTPS request bodies from the ciphertext alone",
+   "summary": "A copy of `D:/log decoding/.tools/decode_ngs_request.py` (its commit d52ddb8, 2026-11-13): decodes the \"AE: G\" request bodies the NGS client sends to x-update / x-phaethon / x-csauth / x-init / x-config .ngs.nexon.com, a self-synchronising 16-bit-word stream cipher whose seed is pinned by the known JSON prefix `{\"`. view.py uses it to show those bodies decoded.",
+   "details_md": "The base64 body decodes to `[1 byte n][n+2 IV bytes][ciphertext]`, length-preserving. On little-endian 16-bit\nwords, `ct_j = pt_j XOR k_j` and `k_(j+1) = (k_j + ct_j) mod 2^16`; the first plaintext word is `{\"`, which fixes `k_0`\nfrom the ciphertext. Optional: view.py imports it inside a try and the page works without it.",
+   "lines": 403,
+   "key_items": [
+    {
+     "name": "decode_body",
+     "kind": "function",
+     "line": 267,
+     "signature": "def decode_body(b64_body, prefix=JSON_PREFIX)",
+     "summary": "A base64 AE: G body decoded."
+    },
+    {
+     "name": "decrypt",
+     "kind": "function",
+     "line": 240,
+     "signature": "def decrypt(iv, ct, prefix=JSON_PREFIX)",
+     "summary": "The ciphertext decrypted with the seed the known prefix gives."
+    },
+    {
+     "name": "keystream_decrypt",
+     "kind": "function",
+     "line": 97,
+     "signature": "def keystream_decrypt(ct, seed)",
+     "summary": "The word-wise XOR with ciphertext feedback."
+    },
+    {
+     "name": "DecodeResult",
+     "kind": "class",
+     "line": 205,
+     "signature": "class DecodeResult",
+     "summary": "What a decode found."
+    },
+    {
+     "name": "JSON_PREFIX",
+     "kind": "constant",
+     "line": 74,
+     "signature": "JSON_PREFIX = b'{\"'",
+     "summary": "The known first two plaintext bytes."
+    }
+   ],
+   "inputs": [
+    "AE: G request bodies"
+   ],
+   "outputs": [
+    "decoded JSON bytes"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [
+    {
+     "date": "2026-11-13",
+     "what": "Copied in for the /tls/ page",
+     "why": "decode NGS request bodies in the viewer"
+    }
+   ],
+   "gotchas": [
+    "A copy: the other repository's version is the one worked on."
+   ],
+   "tests": [
+    "tests/test_tls.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/tls/view.py",
+   "title": "TLS viewer model (Library, Capture)",
+   "tagline": "Captures decrypted in memory and shaped for the page: connections, requests, bodies",
+   "summary": "Finds the .pcap captures under the root with their key logs, decrypts one in a background thread when the page opens it (a few seconds for 90 MB, nothing written), and turns it into connections and items: HTTP/1.x exchanges, HTTP/2 streams (HPACK decoded here) and WebSocket messages, with bodies decoded (gzip, deflate, zstd, NGS CE: G responses, NGS AE: G requests, brotli if installed). Keeps the 4 most recently used.",
+   "details_md": "`discover` finds every `.pcap` up to 4 folders down (skipping the recorder's own `tls`, `streams`, `bodies` and `replay` output folders), with the `keys*.log` / `sslkeys*.log` / `*.keylog` files beside it as its key logs.\n`Library.open(cid, local)` returns the `Capture` for a capture id (a hash of its path) and frame-trust setting,\nstarting a `tls-decrypt` daemon thread on first open; it keeps the 4 most recently used in memory. `Capture.stale()` says\nwhen its pcap or key logs changed since (a recording still going), so the page can offer Reload. `Capture._run` calls `decrypt.frame_sources`, `load_keylogs` and `decrypt_conn` for every TCP connection, reporting progress every 25 connections, and builds the summary the page shows (connections, decrypted, records, lost bytes, hosts, seconds taken, whether the NGS decoder and brotli are there). A capture under a\nfolder named `local` (the parent of the pcap's own folder) is taken as captured on this PC unless the page says\notherwise.",
+   "lines": 893,
+   "key_items": [
+    {
+     "name": "Library",
+     "kind": "class",
+     "line": 855,
+     "signature": "class Library",
+     "summary": "The captures under the roots and up to 4 decrypted ones in memory."
+    },
+    {
+     "name": "Library.open",
+     "kind": "method",
+     "line": 871,
+     "signature": "def open(self, cid, local, reload=False)",
+     "summary": "The Capture, decrypting it in a background thread if needed."
+    },
+    {
+     "name": "Capture",
+     "kind": "class",
+     "line": 638,
+     "signature": "class Capture",
+     "summary": "A decrypted capture: summary, connections, items, data."
+    },
+    {
+     "name": "Capture._run",
+     "kind": "method",
+     "line": 663,
+     "signature": "def _run(self)",
+     "summary": "Frame sources, key logs, every connection decrypted and turned into items."
+    },
+    {
+     "name": "discover",
+     "kind": "function",
+     "line": 611,
+     "signature": "def discover(paths, extra_keylogs)",
+     "summary": "The .pcap files (4 levels down) with their key logs."
+    },
+    {
+     "name": "Hpack",
+     "kind": "class",
+     "line": 152,
+     "signature": "class Hpack",
+     "summary": "An HPACK decoder (RFC 7541) with its dynamic table."
+    }
+   ],
+   "inputs": [
+    "captures and key logs under ROOT"
+   ],
+   "outputs": [
+    "summaries, item and connection details, bodies, for ui.tls's API"
+   ],
+   "uses": [
+    "gamelab/ui/tls/decrypt.py",
+    "gamelab/ui/tls/ngs.py"
+   ],
+   "files_io": [
+    {
+     "path": ".analysis/captures/**/*.pcap and keys*.log",
+     "mode": "read",
+     "what": "captures and their key logs"
+    }
+   ],
+   "concurrency": "One `tls-decrypt` daemon thread per capture being decrypted; a lock guards the Library.",
+   "tunables": [
+    {
+     "name": "captures kept",
+     "value": "4",
+     "meaning": "decrypted captures kept in memory (most recently used)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-13",
+     "what": "Built as D:/log decoding's tls_web.py, a server of its own, then moved onto this server",
+     "why": "the user: \"build a webui for me to view the captured and decrypted tls packets\""
+    }
+   ],
+   "gotchas": [],
+   "tests": [
+    "tests/test_tls.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/tls/static/app.js",
+   "title": "TLS viewer front end (JavaScript)",
+   "tagline": "The /tls/ page's script: capture picker, request and connection lists, details, x-csauth",
+   "summary": "Plain JavaScript for the TLS viewer: lists captures, opens one through the API and polls until it is decrypted, shows the Requests, Connections and x-csauth tabs with filters, and a detail pane (headers, bodies as JSON tree, text or hex, TLS records). Captured data is only ever put into the page as text nodes.",
+   "details_md": "All captured bytes go through `el()`, which builds elements with text nodes, never HTML. `openCap` asks `api/open` every 250 ms until the capture is `ready` (showing its progress), then loads `api/summary`; `checkStale` asks every 10 s whether the capture's files changed and lights the Reload button. State lives in one object `S`; the selected capture and view are kept in the URL hash; the list width in localStorage. Its header comment still says it is served by `.tools/tls_web.py` (its origin); here `gamelab/ui/tls/__init__.py` serves it.",
+   "lines": 1119,
+   "key_items": [
+    {
+     "name": "el",
+     "kind": "function",
+     "line": 5,
+     "signature": "function el(tag, attrs, ...kids)",
+     "summary": "Builds a DOM element; strings become text nodes."
+    },
+    {
+     "name": "S",
+     "kind": "constant",
+     "line": 64,
+     "signature": "const S = {...}",
+     "summary": "The page's state: captures, items, connections, selection, caches."
+    },
+    {
+     "name": "api",
+     "kind": "function",
+     "line": 71,
+     "signature": "async function api(path, params, as = \"json\")",
+     "summary": "Fetches the /tls/api endpoints."
+    },
+    {
+     "name": "openCap",
+     "kind": "function",
+     "line": 152,
+     "signature": "async function openCap(h, reload)",
+     "summary": "Opens (decrypts) a capture and loads its summary."
+    },
+    {
+     "name": "loadCsauth",
+     "kind": "function",
+     "line": 857,
+     "signature": "async function loadCsauth()",
+     "summary": "Loads the x-csauth timeline."
+    }
+   ],
+   "inputs": [
+    "the /tls/api JSON and bytes"
+   ],
+   "outputs": [
+    "the TLS viewer's UI in the browser"
+   ],
+   "uses": [
+    "gamelab/ui/tls/__init__.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [],
+   "gotchas": [
+    "Its header comment names `.tools/tls_web.py`, the server it came from."
+   ],
+   "tests": [
+    "tests/test_tls.py"
+   ]
+  },
+  {
+   "path": "gamelab/ui/tls/static/app.css",
+   "title": "TLS viewer styles",
+   "tagline": "The /tls/ page's stylesheet, light and dark",
+   "summary": "Colour tokens on `:root`, redefined for `prefers-color-scheme: dark`, and the layout: a top bar, a tab bar, and a list and detail pane split by a draggable divider whose width is `--listw`.",
+   "details_md": "A plain stylesheet served at /tls/app.css. The list/detail split is a CSS grid on `main` with `grid-template-columns: var(--listw) 5px minmax(0, 1fr)`; app.js sets `--listw` while dragging and remembers it.",
+   "lines": 205,
+   "key_items": [
+    {
+     "name": ":root",
+     "kind": "constant",
+     "line": 1,
+     "signature": ":root { --bg: ...; --listw: 58%; ... }",
+     "summary": "The light theme's colour tokens and the list width."
+    },
+    {
+     "name": "@media",
+     "kind": "constant",
+     "line": 12,
+     "signature": "@media (prefers-color-scheme: dark) { :root { ... } }",
+     "summary": "The dark theme's tokens."
+    },
+    {
+     "name": "main",
+     "kind": "constant",
+     "line": 68,
+     "signature": "main { display: grid; grid-template-columns: var(--listw) 5px minmax(0, 1fr); }",
+     "summary": "The list | divider | detail layout."
+    }
+   ],
+   "inputs": [],
+   "outputs": [],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "--listw",
+     "value": "58%",
+     "meaning": "the list pane's starting width"
+    }
+   ],
+   "decisions": [],
+   "gotchas": [],
+   "tests": []
+  },
+  {
+   "path": "gamelab/ui/tls/static/index.html",
+   "title": "TLS viewer page",
+   "tagline": "The /tls/ page's HTML shell: capture picker, tabs, filters, list and detail panes",
+   "summary": "The static HTML the viewer starts from: a capture select, a frame-trust select (auto, router rules, local), Reload, stats; tabs Requests, Connections and x-csauth; a filter box, a host select and toggles; the list and detail sections; a loading overlay. It loads app.css and app.js.",
+   "details_md": "No inline script (the Content-Security-Policy in ui.tls allows only the page's own files). The frames select maps to decrypt.py's `--local` choice: empty is automatic, `0` router rules, `1` trust big frames as captured on this PC.",
+   "lines": 51,
+   "key_items": [
+    {
+     "name": "cap",
+     "kind": "constant",
+     "line": 12,
+     "signature": "<select id=\"cap\">",
+     "summary": "The capture picker."
+    },
+    {
+     "name": "frames",
+     "kind": "constant",
+     "line": 13,
+     "signature": "<select id=\"frames\">",
+     "summary": "How frames over 1500 bytes are treated."
+    },
+    {
+     "name": "csauth",
+     "kind": "constant",
+     "line": 25,
+     "signature": "<button data-view=\"csauth\">",
+     "summary": "The x-csauth timeline tab."
+    }
+   ],
+   "inputs": [],
+   "outputs": [],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [],
+   "gotchas": [],
+   "tests": [
+    "tests/test_tls.py"
+   ]
+  }
+ ],
+ "data_types": [
+  {
+   "name": "State",
+   "module": "gamelab/ui/state.py",
+   "line": 14,
+   "summary": "The run as the mini-map sees it. Built by MapWindow and web.Feed from source records; read by MapView.draw, the Feed's text and snapshots. The page's JavaScript keeps the same shape.",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "the newest record's time (the run's clock)"
+    },
+    {
+     "name": "map",
+     "type": "int | None",
+     "meaning": "the map id from the session record; picks the MapView"
+    },
+    {
+     "name": "session",
+     "type": "dict",
+     "meaning": "the session record (command, mode, map, ...)"
+    },
+    {
+     "name": "scene",
+     "type": "dict | None",
+     "meaning": "her, hp, mp, monsters, loot, players (map units)"
+    },
+    {
+     "name": "route",
+     "type": "dict | None",
+     "meaning": "the planned moves to a platform; cleared by a trip record"
+    },
+    {
+     "name": "chain",
+     "type": "dict | None",
+     "meaning": "the moves in the running key plan, predicted"
+    },
+    {
+     "name": "monsters",
+     "type": "dict | None",
+     "meaning": "monsters as the planner predicts them"
+    },
+    {
+     "name": "stance",
+     "type": "dict | None",
+     "meaning": "the fight's last decision (act, text, aimed)"
+    },
+    {
+     "name": "drops",
+     "type": "dict | None",
+     "meaning": "drops remembered for later"
+    },
+    {
+     "name": "tour",
+     "type": "dict | None",
+     "meaning": "the sweep's order, safe platforms, grounds, current stop and spot (merged)"
+    },
+    {
+     "name": "hunt",
+     "type": "dict | None",
+     "meaning": "the hunt loop's rule, objective, rates and piles"
+    },
+    {
+     "name": "exp",
+     "type": "dict | None",
+     "meaning": "her EXP read off its number, and EXP a minute"
+    },
+    {
+     "name": "memory",
+     "type": "dict | None",
+     "meaning": "the monsters she remembers, with ages and states"
+    },
+    {
+     "name": "trail",
+     "type": "deque[(x, y)]",
+     "meaning": "her last 240 positions"
+    },
+    {
+     "name": "logs",
+     "type": "deque[str]",
+     "meaning": "the last 9 log/event lines"
+    }
+   ]
+  },
+  {
+   "name": "Cursor",
+   "module": "gamelab/ui/web.py",
+   "line": 67,
+   "summary": "How far one /events stream has got. Made by WebServer.open_stream, advanced by Feed.updates and Feed._snapshot, ended by the server.",
+   "fields": [
+    {
+     "name": "seq",
+     "type": "int",
+     "meaning": "the last record sent"
+    },
+    {
+     "name": "epoch",
+     "type": "int",
+     "meaning": "the Feed epoch it was sent in (a new run or a replay jump bumps it)"
+    },
+    {
+     "name": "version",
+     "type": "int",
+     "meaning": "the text version last sent"
+    },
+    {
+     "name": "status_at",
+     "type": "float",
+     "meaning": "monotonic time the text was last sent"
+    },
+    {
+     "name": "text",
+     "type": "dict",
+     "meaning": "the text last sent, to send only what changed"
+    },
+    {
+     "name": "ended",
+     "type": "str | None",
+     "meaning": "\"stopping\" or \"crowded\" ends the stream"
+    }
+   ]
+  },
+  {
+   "name": "Feed._snapshot",
+   "module": "gamelab/ui/web.py",
+   "line": 219,
+   "summary": "The `snapshot` event's data: everything a page starts from, sent on connect, after a new run or a replay jump, and to a stream that fell behind the ring.",
+   "fields": [
+    {
+     "name": "epoch, seq",
+     "type": "int",
+     "meaning": "where the stream now stands"
+    },
+    {
+     "name": "now, rate",
+     "type": "float",
+     "meaning": "the run's clock and its speed (Feed.clock)"
+    },
+    {
+     "name": "map, t",
+     "type": "int | None, float",
+     "meaning": "the State's map and time"
+    },
+    {
+     "name": "records",
+     "type": "list[dict]",
+     "meaning": "session, tour, the latest of each LATEST topic, and the scene"
+    },
+    {
+     "name": "trail",
+     "type": "list[(x, y)]",
+     "meaning": "her trail"
+    },
+    {
+     "name": "logs",
+     "type": "list[str]",
+     "meaning": "the Feed's last 40 log lines"
+    },
+    {
+     "name": "status",
+     "type": "dict",
+     "meaning": "the text (Feed._status)"
+    }
+   ]
+  },
+  {
+   "name": "Feed.updates",
+   "module": "gamelab/ui/web.py",
+   "line": 184,
+   "summary": "The `update` event's data (sent as the default SSE message, `id:` its seq) and the `ping` event's.",
+   "fields": [
+    {
+     "name": "seq",
+     "type": "int",
+     "meaning": "the newest record's number"
+    },
+    {
+     "name": "now, rate",
+     "type": "float",
+     "meaning": "the run's clock and speed"
+    },
+    {
+     "name": "records",
+     "type": "list[dict]",
+     "meaning": "records since the cursor, coalesced (update only)"
+    },
+    {
+     "name": "status",
+     "type": "dict (optional)",
+     "meaning": "the text fields that changed, at most every 0.2 s"
+    }
+   ]
+  },
+  {
+   "name": "Feed._status",
+   "module": "gamelab/ui/web.py",
+   "line": 238,
+   "summary": "The text the page shows (and /state.json returns), made once per version.",
+   "fields": [
+    {
+     "name": "version, live, t, map, run, mode",
+     "type": "mixed",
+     "meaning": "what is shown and from what run"
+    },
+    {
+     "name": "her",
+     "type": "dict | None",
+     "meaning": "x, y, platform, how she was placed"
+    },
+    {
+     "name": "hp, mp",
+     "type": "float | None",
+     "meaning": "bar fractions"
+    },
+    {
+     "name": "monsters, loot, players",
+     "type": "int",
+     "meaning": "counts in the last scene"
+    },
+    {
+     "name": "fight, moving",
+     "type": "str | None",
+     "meaning": "stance text, chain text"
+    },
+    {
+     "name": "hunt",
+     "type": "dict | None",
+     "meaning": "rule, objective, ground, rate_here, rate_to_beat"
+    },
+    {
+     "name": "exp",
+     "type": "dict | None",
+     "meaning": "exp, level, per_minute"
+    },
+    {
+     "name": "stop",
+     "type": "int | None",
+     "meaning": "the tour's current stop"
+    },
+    {
+     "name": "replay",
+     "type": "dict (replays only)",
+     "meaning": "paused, speed, pos, length, start"
+    }
+   ]
+  },
+  {
+   "name": "map_payload",
+   "module": "gamelab/ui/web.py",
+   "line": 337,
+   "summary": "/map.json: what the page draws the map with, so its drawing matches MapView's.",
+   "fields": [
+    {
+     "name": "id, name",
+     "type": "int, str",
+     "meaning": "the map"
+    },
+    {
+     "name": "x0, x1, y0, y1, margin",
+     "type": "float",
+     "meaning": "the MapView's bounds (map units) and margin (px)"
+    },
+    {
+     "name": "platforms, walls, ropes, portals",
+     "type": "lists",
+     "meaning": "geometry; a platform's id is its index"
+    },
+    {
+     "name": "style, kind, players",
+     "type": "dict[str, hex]",
+     "meaning": "render.STYLE, KIND, PLAYERS as #rrggbb"
+    },
+    {
+     "name": "reach",
+     "type": "dict",
+     "meaning": "star, up, down, min, alpha, shot_h"
+    },
+    {
+     "name": "stops",
+     "type": "list",
+     "meaning": "per platform, the foothold-group walls that stop a star"
+    },
+    {
+     "name": "jump_arc, zoom, around, remember",
+     "type": "numbers",
+     "meaning": "drawing constants"
+    }
+   ]
+  },
+  {
+   "name": "meta",
+   "module": "gamelab/ui/review.py",
+   "line": 82,
+   "summary": "A review set's meta.json, read by the viewer.",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str",
+     "meaning": "the set's folder name"
+    },
+    {
+     "name": "frames, last",
+     "type": "int",
+     "meaning": "frame count and the last frame's number"
+    },
+    {
+     "name": "problems",
+     "type": "list",
+     "meaning": "problems.json: [{frames: [a, b], what}]"
+    },
+    {
+     "name": "files",
+     "type": "list[str]",
+     "meaning": "which of legend.png, overlay.mp4, README.md, LEGEND.md exist"
+    },
+    {
+     "name": "fps",
+     "type": "float",
+     "meaning": "the recorded frame rate"
+    },
+    {
+     "name": "version",
+     "type": "str",
+     "meaning": "newest frame mtime (ms, hex), put in frame URLs"
+    }
+   ]
+  }
+ ],
+ "flows": [
+  {
+   "id": "record-to-phone",
+   "title": "How a record reaches a phone",
+   "summary": "From a telemetry record to her dot moving on the phone's canvas: about 20 ms once the line is in the file (measured 2026-10-20), plus up to 0.2 s waiting for the recorder's next batched write.",
+   "trigger": "A hunting command or the perception service emits a telemetry record while the web page is open.",
+   "steps": [
+    {
+     "module": "gamelab/telemetry.py",
+     "symbol": "Recorder",
+     "text": "The recorder's own thread appends the record as one JSON line, in batches FLUSH_S (0.2 s) apart at most.",
+     "process": "hunting command / perception service"
+    },
+    {
+     "module": "gamelab/ui/web.py",
+     "symbol": "Feed.step",
+     "text": "The Feed's `telemetry` thread wakes every 25 ms and polls its source.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/sources.py",
+     "symbol": "LiveSource.poll",
+     "text": "Reads what was appended to the command's and the service's files; while the service's file is live (records within 3 s) the screen's topics come from it and the merged list is sorted by t, otherwise the command's records come alone.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/web.py",
+     "symbol": "Feed._apply",
+     "text": "Under the lock: each record folded into the State and appended to the ring with the next seq; version + 1; every waiting stream notified.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/web.py",
+     "symbol": "Feed.updates",
+     "text": "Each stream's thread wakes, takes the records after its cursor, coalesces superseded LATEST records, adds text changes if 0.2 s have passed.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/web.py",
+     "symbol": "_Handler._stream",
+     "text": "Writes one SSE message (`id: seq`, `data: JSON`) in one write, Nagle off, so it goes out at once.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/web.py",
+     "symbol": "update",
+     "text": "In the browser: the page sets its clock from now/rate and applies each record to its copy of the State.",
+     "process": "browser"
+    },
+    {
+     "module": "gamelab/ui/web.py",
+     "symbol": "frame",
+     "text": "On the next animation frame the canvas is redrawn if anything moved, her position interpolated 100 ms behind the run's clock.",
+     "process": "browser"
+    }
+   ]
+  },
+  {
+   "id": "window-tick",
+   "title": "One tick of the mini-map window",
+   "summary": "How the tkinter window refreshes its picture.",
+   "trigger": "Tk's `after(POLL_MS)` timer, every 100 ms.",
+   "steps": [
+    {
+     "module": "gamelab/ui/app.py",
+     "symbol": "MapWindow._tick",
+     "text": "Polls the source for (fresh, records).",
+     "process": "minimap"
+    },
+    {
+     "module": "gamelab/ui/state.py",
+     "symbol": "State.apply",
+     "text": "A fresh run starts a new State; each record is folded in.",
+     "process": "minimap"
+    },
+    {
+     "module": "gamelab/ui/app.py",
+     "symbol": "MapWindow._tick",
+     "text": "If the State's map changed, `view_for(map)` gives that map's MapView (made once per map).",
+     "process": "minimap"
+    },
+    {
+     "module": "gamelab/ui/render.py",
+     "symbol": "MapView.draw",
+     "text": "The cached base with the tour's platforms, then every layer and the text panel, as an RGB array.",
+     "process": "minimap"
+    },
+    {
+     "module": "gamelab/ui/app.py",
+     "symbol": "MapWindow._show",
+     "text": "The array becomes PPM bytes, a Tk PhotoImage kept on the window, shown in its label.",
+     "process": "minimap"
+    }
+   ]
+  },
+  {
+   "id": "replay-jump",
+   "title": "A replay jumped back from the phone",
+   "summary": "Every open page restarts from a snapshot when a replay jumps.",
+   "trigger": "The page's \"« 10 s\" button while `minimap --replay FILE` (or `web --replay`) runs.",
+   "steps": [
+    {
+     "module": "gamelab/ui/web.py",
+     "symbol": "_Handler.do_POST",
+     "text": "POST /control?action=back: the body (if any) is read, the action passed to the Feed; 200 or 400.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/web.py",
+     "symbol": "Feed.control",
+     "text": "Under the lock, calls the source's seek with -SEEK_S.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/sources.py",
+     "symbol": "ReplaySource.seek",
+     "text": "Moves the position back 10 s and returns every record up to it.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/web.py",
+     "symbol": "Feed._restart",
+     "text": "A new State built from those records, the ring cleared, epoch + 1, streams notified.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/web.py",
+     "symbol": "Feed.updates",
+     "text": "Each stream sees its epoch is old and sends a snapshot.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/web.py",
+     "symbol": "snapshot",
+     "text": "In the browser: the page rebuilds its State from the snapshot and resets its clock and camera.",
+     "process": "browser"
+    }
+   ]
+  },
+  {
+   "id": "review-video",
+   "title": "Downloading a review set as a video",
+   "summary": "The viewer's Download video button, for a set with only frames.",
+   "trigger": "GET /review/<set>/video.mp4 from the viewer.",
+   "steps": [
+    {
+     "module": "gamelab/ui/review.py",
+     "symbol": "handle",
+     "text": "Checks the set name and routes video.mp4.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/review.py",
+     "symbol": "video_of",
+     "text": "No overlay.mp4: looks for ROOT/.videos/<set>-<version>.mp4; if missing, takes the set's lock and makes it.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/video.py",
+     "symbol": "frames_video",
+     "text": "Writes the frames into a temporary MJPEG AVI at the set's frame rate, padded to even sizes.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/video.py",
+     "symbol": "h264",
+     "text": "Runs h264.ps1 in PowerShell: Windows' MediaTranscoder re-encodes to H.264 at 8 bits a pixel a second. If it fails, `mp4v` re-writes the AVI as OpenCV's MPEG-4 Part 2 instead and the next step is skipped.",
+     "process": "powershell"
+    },
+    {
+     "module": "gamelab/ui/video.py",
+     "symbol": "faststart",
+     "text": "Moves moov before mdat and shifts the chunk offsets, so a phone plays it as it arrives.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/review.py",
+     "symbol": "video_of",
+     "text": "Renames the finished `.making.mp4` to `<set>-<version>.mp4` and deletes the set's older versions; then releases the set's lock.",
+     "process": "minimap / web"
+    },
+    {
+     "module": "gamelab/ui/review.py",
+     "symbol": "_file",
+     "text": "Sends the MP4 as an attachment, whole or by byte range.",
+     "process": "minimap / web"
+    }
+   ]
+  }
+ ],
+ "not_done": [
+  "The pushed web page was not tried on an iPhone when it was written (gamelab/README.md, The mini-map: \"Not tried on an iPhone yet\").",
+  "The mini-map page, its stream and the replay controls have no access control while served through the tunnel (\"for now\", commit 79c829f4 of 2026-10-24); only /tls/ checks Cloudflare Access.",
+  "gamelab/README.md's \"On a phone\" paragraph still describes a per-run key in the address and `--key`, removed on 2026-10-24.",
+  "WebRTC was left out (it would need aiortc and FFmpeg's libraries for a 2 KB/s stream on a home network).",
+  "The page duplicates the window's drawing and State logic in JavaScript; only the constants are shared.",
+  "A cropped 'around her' JPEG differs from the full picture in 11-27 of 648,000 px (antialiasing at the edges).",
+  "Review videos are H.264 only on Windows with Media Foundation; elsewhere, or if it refuses, they fall back to 'mp4v', which an iPhone won't play.",
+  "The references of the 5 Lie Detector clips of Nov 4 and 5 are unchecked until the user approves them (tools/review_pages/README.md)."
+ ]
+}

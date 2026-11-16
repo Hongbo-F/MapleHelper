@@ -1,0 +1,2399 @@
+{
+  "id": "motion",
+  "layer": "motion",
+  "title": "Motion: physics, routes and key timelines",
+  "tagline": "Pure planning that gets her from A to B: physics, routes, chained key plans",
+  "summary": "The motion layer plans how she gets from here to there without touching the game. `body` re-creates the client's own movement from its Physics.img, `physics` turns that into the planner's numbers and cached landings, `route` builds every move between platforms and finds routes with Dijkstra, and `flow` chains several moves into one key timeline checked against the monsters' bodies. control.navigator and control.mover carry the plans out.",
+  "details_md": "The motion layer answers one question without touching the game: **how does she get from here to there, and which keys, pressed when?** Everything here is planning. It imports only localization (the map, the monsters' tracks), the shared modules (`tests/test_architecture.py` checks) and two pieces of maplehelper (`config` for her stats, `engine`'s LEFT/RIGHT names), and the closed loops that carry its plans out live a layer up, in `control.navigator` (a route, chained) and `control.mover` (one move, closed loop).\n\n### Bottom up\n\n| Module | What it is | Main entry |\n|---|---|---|\n| `body` | The movement engine: the client's own step, from Physics.img | `Shoe`, `fly`, `replay`, the closed forms |\n| `physics` | The planner's numbers, cached landings, jump timing, her walk from SPEED | `flight`, `sure_jump_ms`, `set_speed` |\n| `route` | Every move between platforms; Dijkstra; route diversity | `Planner` |\n| `flow` | Several moves as one key timeline, checked against monsters | `Flow.chain` |\n| `bodies` | Her body box and a monster's, for touches | `touches`, `Arc`, `Climb` |\n| `steady` | Her walks and climbs measured from a run, offline | `measure` |\n\n**body** re-creates how the game moves her. The constants are the game's own (Physics.img: speeding up at 1400 units/s², braking at 800, a jump at 555 units/s that rises 77 units, gravity 2000, a fall cap of 670), and her walk is 125 x (SPEED + 20)/100 units/s (the client's hidden +20 Speed). The game acts on keys once every **30 ms step**, a measured 66 ms (arrow down), 68 ms (arrow up) and 65 ms (jump) after the key on average. Everything else is built on this engine: the planner's closed forms are its mean over where the steps fall, the planner's landings are its flights, and the simulator's world moves her by it too, so planner and simulator share one physics.\n\n**physics** turns the engine into planner constants (`WALK_SPEED`, `RUN_LAG` 0.119 s, `STOP_RUN` 24 units, `LAND_SLIDE` 13.9 ..., at a walk of 149) and answers \"where does this jump land?\" with `flight`, cached by its rounded start (20,000 landings) and flown in C when the DLL is built. It enforces a rule learned from in-game jump sweeps: **a jump from standing is never keyed sooner than 150 ms after its arrow** (`BLIND_ENDS_MS`), because a jump three game steps into her run leaves at 126 units/s instead of full speed and lands 13 units short. It also owns her planned walk and climb: set from her stat window's SPEED, and re-derived in every module at once when that changes.\n\n**route** builds every move the physics allows between platforms (climbs, climb-downs, rope jumps, jumps up, running jumps, walk-offs, drops), each flown and checked to land surely even if she leaves early, late or slow, and costs it in seconds plus a miss allowance. `Planner` runs Dijkstra over (platform, landing x) nodes, answers route-time questions for the hunt loop, and can offer several distinct ways (off by default).\n\n**flow** turns a route into one continuous key plan, as a player moves: running through landings, jumping on the way, grabbing ropes on the run. It predicts her body leg by leg, picks for each move the variant (keep running, stop, jump straight up) the next move can follow on from, checks every leg's path against the monsters' boxes (`bodies`), hops a monster in the way of a run, and can land where monsters are least likely to touch her. A chain stops at a move it can't predict (climbing down, rope jumps), at a monster it can't get past, or after 5 legs / 3.5 s, and the navigator takes a fresh look.\n\n### Conventions\nMap units (the game's own world coordinates: one unit is one game pixel at the 1366x768 client; the minimap shows the map at 1/16), seconds, x to the right and **y down** (a jump leaves at vy = -555). An arrow is -1 (left), 0 or +1 (right). Platforms are referred to by id; a \"place\" is a platform that isn't a twin (a twin is a platform lying on another's footholds, `MapModel.twins`: it counts as that one). Walk-dependent numbers quoted here (the 119 kick, the 24-unit stop, the 13.9-unit slide, 0.119 s) are the code comments', worked out at a walk of 149 units/s; at today's 150-151.25 (SPEED 100-101) they come out slightly larger (120-121, 24.3-24.6, 14.1-14.3, 0.120 s).\n\n### Why it's built this way\n- **One physics everywhere.** Planner and simulator fly her with the same engine, so the simulator tests the plans against the same model rather than a looser one.\n- **Secondhand where it agrees.** The step rules come from a v83 decompile (RustMS); they are used where her recordings agree, and the few that aren't measured are listed as such.\n- **Margins for an open-loop plan.** A chain is planned from one look and played blind until the next, so every jump must still land taking off 8-12 units early or late, 10% slower or at 0.85x her speed, and each landing adds 25 ms of timing slack.\n- **Costs in seconds.** Every move costs its flight, climb or fall plus a fixed extra and an allowance for how often that kind goes wrong (`route.RISK`, from how often chained moves landed elsewhere; the rope jump's a guess), so Dijkstra's quickest route already trades speed against misses.",
+  "groups": [
+    {
+      "id": "engine",
+      "title": "The movement engine and her physics",
+      "summary": "How the game moves her, step by step from its own constants, and the planner's numbers, landings and jump-timing rules built on it.",
+      "modules": [
+        "gamelab/motion/body.py",
+        "gamelab/motion/physics.py"
+      ]
+    },
+    {
+      "id": "routes",
+      "title": "Routes between platforms",
+      "summary": "Every move the physics allows on a map, costed in seconds, and Dijkstra over them (with route diversity).",
+      "modules": [
+        "gamelab/motion/route.py"
+      ]
+    },
+    {
+      "id": "chains",
+      "title": "Chains: moves as one key timeline",
+      "summary": "Several moves predicted and keyed as one plan, each leg checked against the monsters' boxes.",
+      "modules": [
+        "gamelab/motion/flow.py",
+        "gamelab/motion/bodies.py"
+      ]
+    },
+    {
+      "id": "offline",
+      "title": "The package and the offline walk measure",
+      "summary": "The package's docstring and layer rule, and the estimator walkfit uses to check her walk and climb against the formula.",
+      "modules": [
+        "gamelab/motion/__init__.py",
+        "gamelab/motion/steady.py"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "path": "gamelab/motion/body.py",
+      "title": "Body: the movement engine",
+      "tagline": "The client's own movement re-created step by step from Physics.img",
+      "summary": "The one movement engine of the stack: one step on the ground and in the air, the jump's kick, the game's 30 ms step and the key lags, closed forms on flat ground for planning, flights over a map, and a whole key timeline replayed. Pure: no files, no clock, no keys. The planner (physics, flow), the simulator's world and the checks against recordings all move her by it.",
+      "details_md": "**Where the numbers come from.** `PHYSICS_IMG` copies the game's own Map.wz/Physics.img (every map shares it; a test checks the copy). Forces over the client's mass of 100 (`MASS`) are accelerations: speeding up at 140000/100 = **1400 units/s²**, braking at 80000/100 = **800**, a jump leaving at **555 units/s** (77 units high), gravity **2000**, the fall cap **670**. `Shoe.from_physics` turns these, her SPEED and JUMP stats (clamped to 80-140 and 80-120: `SPEED_RANGE`, `JUMP_RANGE`) and the client's hidden Speed bonus into a `Shoe`. A character walks 125 x (SPEED + 20)/100 (`SPEED_BONUS`: the client's hidden +20 Speed; 150 units/s at SPEED 100); a monster gets no bonus.\n\nThe step rules are a v83 client decompile's (RustMS's port), used where her recordings agree; turning round on the ground, the fall-cap drag and the rope side-jump are the decompile's alone.\n\n**One step.**\n- `ground_step`: with an arrow she speeds up toward it at `acc` (turning round too, with no extra braking); with none she brakes at `drag`. She moves the mean of the two speeds times dt.\n- `air_step`: gravity up to the fall cap. An arrow only steers toward `air_speed` (8.9 units/s), so the arrow she runs with does nothing in the air and the opposite one brakes her at 200 units/s². No arrow: the air drags her 1 unit/s² sideways (100 once she falls at the cap).\n- `takeoff` is the jump's **kick**: below 0.8 x her walk toward the arrow, she gets 0.8 x her walk more, capped at her walk. From standing she leaves at 119; after one or two 30 ms steps of running (42 or 84 units/s) she is kicked to full speed; after three (126) she is too fast for the kick and short of full speed, and lands 13 units short.\n\n**The game's step and the lags.** The game acts on what it has seen of the keys, sets her ground speed and lifts her off once every `STEP` (30 ms). `Lags` are the medians of the recordings from a key going out to the game acting on it: an arrow pressed 66 ms, let go 68 ms, a jump 65 ms, a drop 0.28 s. `Lags.seen` is when the game sees a key (half a step before it acts); the step engine (`replay`, the simulator) spreads that by sd 7.7 ms. Landing between two steps she stands still until the next (`LANDING_ENDS_STEP`; `landing_wait` is 15 ms on average).\n\n**Closed forms for planning** (the mean over where the game's steps fall against the keys): `run_x`, `run_speed`, `run_time` (from standing, full speed 0.106 s and 7.9 units after the game sees the arrow), `slide` (v²/2·drag: 13.9 units from full speed), `stop_distance` (24.0 units) and `stop_time` (0.25 s), `steps_run`, `hold_distance` and its inverse `hold_for` (46 ms of arrow for 5 units, 104 for 20, 294 for 50), `held_for`. `steps_held_chances`, `short_takeoff_chance`, `jump_window_ok` and `blind_ends_ms` give the chance that a jump keyed some ms after the arrow leaves short of full speed; physics turns that into the 150 ms rule. (These are the comments' numbers, at a walk of 149; the thief's 151.25 gives 0.108 s, 8.2, 14.3, 24.6 and 46/103/289 ms.)\n\n**Over a map.** `fly` flies her on the engine's own 5 ms `TICK` until her feet cross a platform's surface (`_lands_at`: from at or above it, read under the step's start or its end, to at or below it), stopping her sideways at the walls it is given and the map's sides: every wall by default (`EVERY_WALL`); the planner always passes the game's rule, `wall_table`: HeavenClient's (the wall pieces joined to the floor under her, within two links of its end, overlapping the 50 units above her feet: `WINDOW`) plus every wall of a layer's group 0 (`JOINED_WALLS`, `ZERO_WALLS`). It returns a `Flight`. `replay` runs a key timeline on flat ground at one phase of the step grid (`phases`); `analysis.physics_check` compares it with recordings.\n\n**Fit.** With fixed lags it follows 18 tracked recordings to 1.94 units RMS in x and 1.67 in y (the 5 ms engine before it: 2.49 and 1.58).",
+      "lines": 727,
+      "key_items": [
+        {
+          "name": "Shoe",
+          "kind": "dataclass",
+          "line": 103,
+          "signature": "@dataclass(frozen=True) class Shoe",
+          "summary": "How the game moves her: her limits and accelerations in units/s and units/s² on the ground, in the air, for the jump's kick and off a rope.",
+          "details_md": "From Physics.img (via `from_physics`): `vmax` = walkSpeed x (SPEED + bonus)/100; `acc` = walkForce/mass (1400); `drag` = walkDrag/mass (800); `vjump` = jumpSpeed x JUMP/100 (555); `gravity` 2000; `fall` 670; `air_acc` = 2 x floatDrag2/mass (200); `air_speed` = walkSpeed/walkForce x floatDrag2 (8.9); `air_drag` = floatDrag2/mass x floatCoefficient (1); `air_drag_fall` = floatDrag2/mass (100). `kick` 0.8, `rope_vx` 1.3 and `rope_vy` 0.5 are the decompile's (the kick confirmed by the jump sweeps; the rope jump only weakly, by one minimap trace). Frozen and hashable, so it keys caches (`steps_run`, the C flight's shoes)."
+        },
+        {
+          "name": "Shoe.from_physics",
+          "kind": "method",
+          "line": 122,
+          "signature": "def from_physics(cls, physics: dict, speed: float, jump: float, fs: float = 1.0, bonus: float = 0.0) -> \"Shoe\"",
+          "summary": "Builds a Shoe from Physics.img's values, her SPEED and JUMP (%), the map's friction `fs` and the Speed the client adds to a character (`bonus`: SPEED_BONUS for her, 0 for a monster).",
+          "details_md": "SPEED and JUMP are clamped to the client's ranges first, then the bonus is added. A friction below 1 is halved (the decompile's; untested: no map in the game data has fs below 1)."
+        },
+        {
+          "name": "Lags",
+          "kind": "dataclass",
+          "line": 140,
+          "signature": "@dataclass(frozen=True) class Lags",
+          "summary": "Median delays from a key going out to the game acting on it, the wait for its 30 ms step included: arrow pressed 66 ms, let go 68 ms, jump 65 ms, a drop (down + jump) 0.28 s.",
+          "details_md": "From the jump sweeps of 2026-10-21 at 30 fps and earlier 60 fps recordings. The step engine has the game see each key half a step sooner (`seen`), spread by sd 7.7 ms (`sd_on`, `sd_off`, `sd_jump`); the wait for the step adds 8.7 ms of spread (30/√12), which makes the 11-13 ms measured. Only their differences matter to a key plan."
+        },
+        {
+          "name": "STEP",
+          "kind": "constant",
+          "line": 82,
+          "signature": "STEP = 0.030",
+          "summary": "0.030 s: the game acts on the keys, sets her speed on the ground and lifts her off once every 30 ms.",
+          "details_md": "Found from the jump sweeps of 2026-10-21: 18 jumps keyed 40-160 ms after the arrow had run 0.45-0.96, 2.34-2.79, 5.19-6.54, 10.09-10.68 or 14.04-15.23 units at lift-off, which are 1-5 steps of 30 ms at 1400 units/s² (0.63, 2.52, 5.67, 9.80, 14.27), with nothing between. Every jump that lifted off three steps after the arrow left at 124.7-126.9 units/s. With a 5 ms step those would spread over 119-149."
+        },
+        {
+          "name": "ground_step",
+          "kind": "function",
+          "line": 184,
+          "signature": "def ground_step(v: float, d: int, shoe: Shoe, dt: float = TICK) -> tuple[float, float]",
+          "summary": "One step on flat ground: her new speed and how far she moved. An arrow speeds her up toward it at 1400 (turning round too); none brakes her at 800; faster than her walk (off a rope jump) she is braked back down."
+        },
+        {
+          "name": "air_step",
+          "kind": "function",
+          "line": 193,
+          "signature": "def air_step(vx: float, vy: float, d: int, shoe: Shoe, dt: float = TICK) -> tuple[float, float, float, float]",
+          "summary": "One step in the air: new speeds and (dx, dy), y down. Gravity up to the fall cap; an arrow steers toward 8.9 units/s that way (so it only ever brakes a jump going that way fast); no arrow, the air drags her a little."
+        },
+        {
+          "name": "takeoff",
+          "kind": "function",
+          "line": 206,
+          "signature": "def takeoff(v: float, d: int, shoe: Shoe) -> float",
+          "summary": "Her sideways speed leaving the ground (the kick): below 0.8 x her walk toward the arrow, she gets 0.8 x her walk more, then at most her walk.",
+          "details_md": "So from standing she leaves at 119, a jump just after the arrow leaves at full speed, and one just below full speed (three game steps into her run: 126) gets no kick and leaves as she was going."
+        },
+        {
+          "name": "run_x",
+          "kind": "function",
+          "line": 241,
+          "signature": "def run_x(tau: float, v0: float, d: int, shoe: Shoe) -> float",
+          "summary": "How far she has moved, t s after the game sees an arrow held, from any starting speed: about 700t² up to full speed (0.106 s, 7.9 units), then her walk; running the other way she brakes and turns first."
+        },
+        {
+          "name": "stop_distance",
+          "kind": "function",
+          "line": 282,
+          "signature": "def stop_distance(v: float, shoe: Shoe, lags: Lags) -> float",
+          "summary": "How far she goes on after letting go of the arrow at speed v: on for the release's lag, then a slide. 24.0 units from full speed (18 stops measured at 30 fps: 24.0 ± 2.0)."
+        },
+        {
+          "name": "hold_for",
+          "kind": "function",
+          "line": 359,
+          "signature": "def hold_for(units: float, shoe: Shoe, lags: Lags, step: float = STEP) -> int",
+          "summary": "How many ms to hold an arrow from standing to move a distance and stop there, on average over the game's steps: 46 ms for 5 units, 104 for 20, 294 for 50 at a walk of 149 (46/103/289 at 151.25): the inverse of hold_distance.",
+          "details_md": "A hold is seen a whole number of steps, so short taps are bimodal: a 50 ms tap moves her 1.8 or 7.0 units (5.6 on average). Of three 50 ms taps in game, two moved her 0 and one 7.1."
+        },
+        {
+          "name": "short_takeoff_chance",
+          "kind": "function",
+          "line": 392,
+          "signature": "def short_takeoff_chance(gap_ms: float, shoe: Shoe, lags: Lags, slower: float = 0.94, step: float = STEP) -> float",
+          "summary": "The chance that a jump keyed gap_ms after the arrow, from standing, leaves slower than 0.94 x her walk, over where the game's steps fall and the lags' spread.",
+          "details_md": "`steps_held_chances` gives the chance of each number k of steps between the arrow's and the jump's: k below 0 leaves straight up, k = 0 at 119, k = 1-2 kicked to full speed, k = 3 at 126 (short), 4 or more at full speed. `jump_window_ok` and `blind_ends_ms` build on it."
+        },
+        {
+          "name": "wall_table",
+          "kind": "function",
+          "line": 478,
+          "signature": "def wall_table(model, zero: bool | None = None) -> Walls",
+          "summary": "The walls that stop her in the air by the game's rule, laid out for fly and worked out once per map: HeavenClient's joined, one-way wall pieces plus every group-0 wall either way.",
+          "details_md": "For each floor, the wall pieces within two links of its ends (prev, prev's prev; next, next's next) that rise above it, stopping her only going over that floor into them, while her feet are within `WINDOW` (50) under the piece's bottom. Plus (`ZERO_WALLS`) every wall of a layer's group 0, the map's own frame. Kept in `_TABLES` by id(model) with the model itself, so a freed model's reused id can't hand its walls to another."
+        },
+        {
+          "name": "fly",
+          "kind": "function",
+          "line": 588,
+          "signature": "def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: int = 0, skip=None, group=EVERY_WALL, walls: Walls | None = None, sides: tuple[float, float] | None = None, dt: float = TICK, limit: float = 4.0, path: bool = False, airborne: bool = False) -> Flight",
+          "summary": "Where she lands from (x, y) moving at (vx, vy) with an arrow held: 5 ms air steps, walls stop her sideways, the first platform whose surface her feet cross lands her. Returns a Flight.",
+          "details_md": "Only platforms within her sideways reach and whose lowest point is at or below the top of the jump are tried. Walls: `walls` if given (physics passes the game's rule), else `walls_by(model, group)`, every wall by default. A wall at exactly her start (her platform's end) stops her only going into it. `skip` is a platform she falls through (a drop). With `path=True` it also returns every step's position and speed, so the simulator can fly on from mid-air with another arrow. Not cached: `physics.flight` is the cached front door."
+        },
+        {
+          "name": "replay",
+          "kind": "function",
+          "line": 663,
+          "signature": "def replay(events, until: float, shoe: Shoe, lags: Lags, *, start: float = -0.1, dt: float = TICK, step: float = STEP, phase: float = 0.0, floors=()) -> Replay",
+          "summary": "Her body on flat ground under a whole key timeline, as the game moves it, at one phase of its 30 ms step grid: what physics_check and the recordings tests put against her tracked recordings.",
+          "details_md": "Keys are (t, 'left'/'right'/'jump', down). The game sees each at `Lags.seen` after it and acts at its next step; of the arrows held, the one pressed last counts; a jump seen in the air is ignored. `phases` lists the six phases (0, 5, ... 25 ms); the closed forms are their mean."
+        },
+        {
+          "name": "LANDING_ENDS_STEP",
+          "kind": "constant",
+          "line": 93,
+          "signature": "LANDING_ENDS_STEP = True",
+          "summary": "True: landing between two of the game's steps, she stands where she lands until the next one (15 ms on average), so the planner's run on from a landing starts that much later.",
+          "details_md": "In game on 2026-10-21, between landing and letting go of the arrow she ran 3.3 ± 0.8 units less than the engine without it had her (all 18 jumps of the sweep); this makes it 2.2 on average."
+        }
+      ],
+      "inputs": [
+        "Physics.img's constants (PHYSICS_IMG, a copy of Map.wz/Physics.img)",
+        "her SPEED and JUMP stats, passed in by motion.physics.shoe_of (and a monster's speed by sim.world)",
+        "a map model from localization.mapdata (platforms, walls, foothold links and groups) for fly and wall_table",
+        "a key timeline [(t, action, down)] for replay"
+      ],
+      "outputs": [
+        "Shoe and Lags objects for physics, flow and the simulator",
+        "closed-form distances and times on flat ground (run_x, stop_distance, hold_for, ...) for physics and flow",
+        "Flight landings for physics.flight (the planner) and sim.world (the simulator)",
+        "Replay paths for analysis.physics_check and tests/test_recordings_physics.py"
+      ],
+      "uses": [
+        "gamelab/localization/mapdata.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "STEP",
+          "value": "0.030",
+          "meaning": "s between the game's movement steps"
+        },
+        {
+          "name": "TICK",
+          "value": "0.005",
+          "meaning": "s per step of the engine's own integration in the air (fly) and the simulator's tick"
+        },
+        {
+          "name": "SPEED_BONUS",
+          "value": "20.0",
+          "meaning": "Speed the client adds to a character's stat window behind the scenes: walk = 125 x (SPEED + 20)/100"
+        },
+        {
+          "name": "SPEED_RANGE",
+          "value": "(80.0, 140.0)",
+          "meaning": "the SPEED stat's limits (the decompile's; meowdb's cap 140)"
+        },
+        {
+          "name": "JUMP_RANGE",
+          "value": "(80.0, 120.0)",
+          "meaning": "the JUMP stat's limits (meowdb: cap dropped from 123 to 120)"
+        },
+        {
+          "name": "MASS",
+          "value": "100.0",
+          "meaning": "the client's mass for a character: Physics.img forces / MASS = accelerations"
+        },
+        {
+          "name": "Lags.on / off / jump / drop",
+          "value": "0.066 / 0.068 / 0.065 / 0.28",
+          "meaning": "s from key to the game acting (medians of the recordings)"
+        },
+        {
+          "name": "Shoe.kick",
+          "value": "0.8",
+          "meaning": "the jump's kick: below kick x walk toward the arrow she gets kick x walk more"
+        },
+        {
+          "name": "Shoe.rope_vx / rope_vy",
+          "value": "1.3 / 0.5",
+          "meaning": "a jump off a rope: 1.3 x her walk out and half a jump's speed up (the decompile's; the minimap's one traced rope jump agrees only weakly)"
+        },
+        {
+          "name": "LANDING_ENDS_STEP",
+          "value": "True",
+          "meaning": "landing between game steps, she stands still until the next"
+        },
+        {
+          "name": "JOINED_WALLS",
+          "value": "True",
+          "meaning": "walls in the air by the game's rule (HeavenClient's joined pieces); False: every wall stops her"
+        },
+        {
+          "name": "ZERO_WALLS",
+          "value": "True",
+          "meaning": "every wall of a layer's group 0 stops her in the air too"
+        },
+        {
+          "name": "WINDOW",
+          "value": "50.0",
+          "meaning": "a joined wall piece counts where it overlaps this many units above her feet"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-21",
+          "what": "The game's 30 ms step (STEP) and the lags measured on it replaced a 5 ms engine.",
+          "why": "The jump sweeps' run-ups at lift-off fell in five tight groups matching 1-5 steps of 30 ms, and every jump three steps into a run left at 124.7-126.9 units/s; on 5 ms steps they would spread over 119-149."
+        },
+        {
+          "date": "2026-10-24",
+          "what": "A falling step lands her if it crosses a floor's surface by either end's reading (_lands_at), as HeavenClient's FootholdTree::limit_movement does.",
+          "why": "Judged by the surface under the step's end alone, a step onto a floor rising the way she flew went through it: on West Rocky Mountain II from 13 up onto 10 on 3 of 6 seeds, and on Tree Dungeon (floors sloping 0.1 a unit) down through the floor and out of the map."
+        },
+        {
+          "date": "2026-10-31",
+          "what": "Walls stop her in the air by the game's rule (JOINED_WALLS, ZERO_WALLS), the user's choice, replacing 'her own foothold group's walls only' (OWN_GROUP_WALLS).",
+          "why": "Six telemetry flights went through other groups' walls and came down within 13 units of where this rule puts them (54-142 units off with every wall stopping her); on Tree Dungeon she was placed at the tower's walls 351 times, never past them, where HeavenClient's rule alone lets her through."
+        },
+        {
+          "date": "2026-11-01",
+          "what": "fly only skips platforms entirely above the jump's top by Platform.bottom (the platform's lowest point), not its lower end.",
+          "why": "A floor dipping between its ends was passed through by a flight flown on in mid-air (Tree Dungeon 14 -> 13: 10 of the branch's 18 landings elsewhere than planned on 48 seeds)."
+        },
+        {
+          "date": "2026-11-02",
+          "what": "SPEED_BONUS: a character walks 125 x (SPEED + 20)/100.",
+          "why": "meowdb's guide (measured frame by frame) says this client adds 20 Speed behind the scenes; her recordings agree: the magician (SPEED 100) walked 149.4 over 66 walks, the thief (101) 151.2 over 243, where v83's 125 x SPEED/100 was 16% short."
+        }
+      ],
+      "gotchas": [
+        "y is down: a jump leaves at vy = -555. `d` is the arrow the game sees: -1 left, 0 none, +1 right.",
+        "fly is not cached; physics.flight is the cached front door the planner uses.",
+        "The engine flies 5 ms steps in the air but moves her on the ground in 30 ms steps (replay, sim.world); the closed forms are the mean over the steps' phase, so a single real tap may move her more or less than they say.",
+        "A wall at exactly her start (her platform's end) stops her only going into it; counted both ways, a jump away from it went straight up.",
+        "In replay a jump key seen while she is in the air is ignored, and holding it doesn't jump her again on landing.",
+        "Turning round on the ground, the fall-cap drag and the rope side-jump are the decompile's alone, not measured."
+      ],
+      "tests": [
+        "tests/test_body.py",
+        "tests/test_recordings_physics.py",
+        "tests/test_walk_speed.py",
+        "tests/test_panel_speed.py",
+        "tests/test_sim_tree.py",
+        "tests/test_flow.py",
+        "tests/test_navigation.py",
+        "tests/test_replan.py",
+        "tests/test_sim.py",
+        "tests/test_sim_magic.py",
+        "tests/test_control.py",
+        "tests/test_locate.py",
+        "tests/test_steady.py"
+      ]
+    },
+    {
+      "path": "gamelab/motion/physics.py",
+      "title": "Physics: her movement as the planner takes it",
+      "tagline": "Planner constants, cached landings, safe jump timing, and her walk from SPEED",
+      "summary": "Turns the engine into the numbers and helpers the planner uses: her walk, climb, lags, slides and holds; where a jump or fall lands on a map (`flight`, cached, and run in C when the DLL is built); and when a jump from standing may be keyed so it surely leaves at full speed. It also owns her planned walk and climb, set from her stat window's SPEED and re-derived everywhere at once when that changes.",
+      "details_md": "**Her stats and shoe.** At import, `CHARACTER = character.active().stats`: the character this process plays (the thief unless `--character`, `GAMELAB_CHARACTER`, lab/character.json or config.toml's [characters] default names another), her stats from config.toml, or her class's fixed copy when `GAMELAB_FIXED_STATS` is set (`FIXED_STATS`: tests, goldens and the harness, so config.toml edits change nothing they check). `shoe_of` builds a `body.Shoe` from Physics.img, her SPEED plus `body.SPEED_BONUS`, and her JUMP. `walk_of(speed)` is 125 x (SPEED + 20)/100 and `climb_of(speed)` SPEED + 20: the thief's SPEED 101 walks 151.25 and climbs 121, the magician's 100 walks 150 and climbs 120.\n\n**The planner's constants**, from the engine with the median lags: `WALK_SPEED` (the shoe's vmax), `CLIMB_SPEED`, `JUMP_SPEED` 555, `GRAVITY` 2000, `FALL_SPEED` 670, `JUMP_HEIGHT` 77, `RUN_LAG` 0.119 s (how far a standing start lags full-speed running), `JUMP_LAG` 0.065, `DROP_LAG` 0.28, `STOP_RUN` 24.0 units and `STOP_S` 0.25 s (after letting go at full speed), `LAND_SLIDE` 13.9 (at a walk of 149; the thief's 151.25: 0.120 s, 24.6, 0.26 s, 14.3), `LAND_MARGIN` 18, `GRAB_SURE` 82 (JUMP_HEIGHT + 5: HeavenClient grabs a rope when a point 5 above her feet is on it), `ROPE_REACH` 95 (a guess). The jump-attack timings of control.actions and attack.reach live here too (`JUMP_ATTACK_MS` 40, `AIR_TURN_MS` 60, ...), as does the planner's knock (`KNOCK_VX` 180, `KNOCK_VY` 220).\n\n**Landings.** `flight(model, x, y, vx, vy, ...)` returns (platform, landing x, seconds, landing vx); `fly` is its first three. The start is rounded (to 0.01 units and 0.1 units/s) and is the cache key, so call order never changes an answer. `_FLY_CACHE` keeps the 20,000 most recently used landings (`FLY_CACHE_SIZE`, about 9 MB). A miss is flown by `native.fly` (the same steps in C, identical to the bit: 0.019 ms a flight instead of 0.85-0.95 in Python, by the README) when the DLL is built, else by `body.fly`. Walls (`_rule`): any foothold group gets the game's rule (`body.wall_table`, one set of landings for every group); the default `body.EVERY_WALL` has every wall stop her. Route and flow pass the platform's group. The arrow is held the way she leaves. `_MODELS` keeps the last 4 maps (`MODELS_KEPT`), each with a serial number in the key, so a reused id can't get another map's landings. `sure_landing` re-flies a jump taking off 12 units early or late, 10% slower, or at `SLOW_TAKEOFF` (0.85 x its speed: three game steps into a run is 126, 0.846 x 149), and requires the same platform each time.\n\n**When to key a jump from standing.** A jump keyed after the arrow lifts off after 0, 1-2, 3, or 4+ game steps of running: at 119 (the kick from standing), kicked to full speed, at 126 (13 units short), or at full speed. `BLIND_ENDS_MS` (150 ms) is the worst case of `body.blind_ends_ms` over the jump sweeps' range of the lags' gap (`SWEEP_LAG_GAP`, -13 to -1 ms) and spread (`SWEEP_LAG_GAP_SD`, 4-17 ms), allowing `BLIND_RISK` (5%) short. `sure_jump_ms` never keys a jump from standing sooner; `run_ms(units)` gives the jump key for a run-up, so a run-up under about 14 units is keyed 150 ms in. `KICK_JUMPS` (off) would also allow the kick's window (40-52 ms).\n\n**Jump shapes for attacks.** `Jump`, `jump_of`, `jump_variants`, `jump_landing` and `pose` say where she is t s after a jump key ('up', 'forward', 'back', 'run'), for attack.reach and attack.stance; `rise_after`, `lift_time`, `air_time`, `fall_time` and `jump_rise` are the arc in closed form (top 0.2775 s after lift-off, `APEX_S`). `hold_ms(units)` is how long to hold an arrow to walk a distance (at least `MIN_HOLD_MS` 30).\n\n**Changing her walk mid-run.** `set_speed(speed)` (and `set_planned`, the simulator's) builds a new shoe and calls `_apply`: `_derive` recomputes every name in `WALK_NAMES`; in every loaded `gamelab.*` module a global still bound to an old object of those names is rebound to the new one; each `@follows` hook runs (route's and flow's `_follow`, control.actions', control.navigator's); and `EPOCH` goes up so a navigator rebuilds its route graph. Only where no chain runs: behavior.hunter calls `propose`, and `settle` makes it (at once at a hunter's start; in the hunt loop at the next pass of `Hunt.run` or `Navigator._follow_walk`), so a running chain keeps its timings. `reset` returns to the profile's walk. Landings aren't re-flown: her air steps use Physics.img and her JUMP only.",
+      "lines": 686,
+      "key_items": [
+        {
+          "name": "flight",
+          "kind": "function",
+          "line": 260,
+          "signature": "def flight(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None, dt: float = body.TICK, limit: float = 4.0, group=body.EVERY_WALL, arrow: int | None = None, cache: bool = True) -> tuple[Platform | None, float, float, float]",
+          "summary": "Where a jump or fall lands on a map, and her sideways speed then: (platform, landing x, seconds, landing vx). The start is rounded and cached; flown in C when built, else by body.fly.",
+          "details_md": "`group` picks the wall rule (any group means the game's rule; `body.EVERY_WALL` every wall). `arrow` defaults to the way she leaves. `cache=False` (attack.knock's) works it out from the same rounded start without touching the planner's cache. The landing vx is 0 after a wall stopped her."
+        },
+        {
+          "name": "fly",
+          "kind": "function",
+          "line": 248,
+          "signature": "def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None, dt: float = body.TICK, limit: float = 4.0, group=body.EVERY_WALL, arrow: int | None = None) -> tuple[Platform | None, float, float]",
+          "summary": "flight's first three values, (platform, landing x, seconds): the route's and flow's usual call."
+        },
+        {
+          "name": "sure_landing",
+          "kind": "function",
+          "line": 327,
+          "signature": "def sure_landing(model: MapModel, x: float, y: float, vx: float, vy: float, land: Platform, slop: float = 12.0, group=body.EVERY_WALL) -> bool",
+          "summary": "Whether a jump from (x, y) still lands on `land` if she leaves `slop` (12) units early or late, 10% slower, or as slow as SLOW_TAKEOFF (0.85 x its takeoff speed).",
+          "details_md": "Added after a jump down from platform 25 meant for the basin landed on platform 33, whose edge its arc passed close by."
+        },
+        {
+          "name": "shoe_of",
+          "kind": "function",
+          "line": 41,
+          "signature": "def shoe_of(stats: config.Character) -> body.Shoe",
+          "summary": "A character's shoe from her stats: Physics.img, her SPEED plus the client's hidden 20, her JUMP."
+        },
+        {
+          "name": "walk_of",
+          "kind": "function",
+          "line": 47,
+          "signature": "def walk_of(speed: float) -> float",
+          "summary": "The walk (units/s) a stat window's SPEED gives by the client's formula: 125 x (SPEED + 20)/100, SPEED clamped first (150 at 100, 151.25 at 101). climb_of is SPEED + 20."
+        },
+        {
+          "name": "sure_jump_ms",
+          "kind": "function",
+          "line": 537,
+          "signature": "def sure_jump_ms(gap: float) -> float",
+          "summary": "The soonest a jump from standing can be keyed after the arrow and surely leave at full speed: BLIND_ENDS_MS (150) for any gap up to that, the gap itself after.",
+          "details_md": "With `KICK_JUMPS` on, a gap inside the kick's window (before three game steps, short at most 5% of the time by the median lags) would be allowed too."
+        },
+        {
+          "name": "BLIND_ENDS_MS",
+          "kind": "constant",
+          "line": 188,
+          "signature": "BLIND_ENDS_MS = _blind_ends(SHOE)",
+          "summary": "150 ms: from this long after the arrow a jump from standing leaves at full speed but for at most 5% of jumps, wherever the lags are within what the jump sweeps allow.",
+          "details_md": "By the median lags alone it would be 129 ms (138 for 1%), by the sweeps' best fit 134. At the old 118 ms, 20% leave short by the median lags and 33% by the best fit. Rebuilt by `_derive` when her walk changes (the same 150 for any walk from 134 to 168)."
+        },
+        {
+          "name": "KICK_JUMPS",
+          "kind": "constant",
+          "line": 167,
+          "signature": "KICK_JUMPS = False",
+          "summary": "False: the planner does not key jumps from standing in the kick's window (40-52 ms after the arrow).",
+          "details_md": "In game all 4 jumps keyed 40 ms after the arrow and 3 of 4 at 60 left at full speed, but the step model puts them at 5% and 13% short by the median lags, up to 27% and 21% within what the sweeps allow: not reliable enough to plan on. About 20 more runs at 50-55 ms in game should confirm it first."
+        },
+        {
+          "name": "run_ms",
+          "kind": "function",
+          "line": 554,
+          "signature": "def run_ms(units: float) -> int",
+          "summary": "How long after pressing the arrow (from standing) to press jump to lift off `units` along, never in the blind spot: a run-up shorter than about 14 units is keyed 150 ms in."
+        },
+        {
+          "name": "hold_ms",
+          "kind": "function",
+          "line": 531,
+          "signature": "def hold_ms(units: float) -> int",
+          "summary": "How long to hold an arrow to walk `units` and come to rest there (body.hold_for: 46 ms for 5 units, 104 for 20, 294 for 50 at a walk of 149), MIN_HOLD_MS (30) at least."
+        },
+        {
+          "name": "jump_of",
+          "kind": "function",
+          "line": 443,
+          "signature": "def jump_of(kind: str, way: int = 0, lead_ms: float | None = None) -> Jump",
+          "summary": "The Jump a key plan's jump kind makes ('up', 'forward', 'back', 'run') toward a side, by the engine with the median lags: her speed and run at lift-off from the arrow's lead.",
+          "details_md": "'forward' (keyed FORWARD_JUMP_MS 40 after the arrow) leaves at full speed 1.1 units on by the kick; 'back' (keyed BLIND_ENDS_MS, 150 ms, after its arrow) leaves at full speed 14.3 units on; 'run' at full speed from where the jump key goes."
+        },
+        {
+          "name": "pose",
+          "kind": "function",
+          "line": 485,
+          "signature": "def pose(model: MapModel, platform: Platform, x: float, j: Jump, t: float, landing: tuple[Platform | None, float, float] | None = None) -> tuple[float, float, bool]",
+          "summary": "Her feet t s after a jump's key from a spot on a platform: (x, y, in the air?), stopped sideways by walls as body.fly stops her, on the landing once she's down. What attack.reach picks targets from."
+        },
+        {
+          "name": "set_speed",
+          "kind": "function",
+          "line": 614,
+          "signature": "def set_speed(speed: float) -> bool",
+          "summary": "Sets her planner's walk and climb from a stat window SPEED by the client's formula, re-deriving every walk-dependent name everywhere (see the module notes). Only where no chain of hers runs.",
+          "details_md": "Returns whether her walk or climb changed. Called by settle (behavior.hunter proposes, then settles at once at its start or later at a settle point), by reset and by the tests. A SPEED equal to her profile's reuses PROFILE_SHOE."
+        },
+        {
+          "name": "settle",
+          "kind": "function",
+          "line": 665,
+          "signature": "def settle() -> bool",
+          "summary": "Makes a proposed walk change now (propose queued it), and tells the caller old and new (walk, climb, SPEED). Called at the start of a navigator's pass and of the hunt loop's, where no chain runs."
+        },
+        {
+          "name": "follows",
+          "kind": "function",
+          "line": 607,
+          "signature": "def follows(fn: Callable[[], None]) -> Callable[[], None]",
+          "summary": "Decorator: registers a module's hook that rebuilds its own walk-dependent globals after every walk change, in import order (route._follow, flow._follow, and the hooks in control.actions and control.navigator)."
+        }
+      ],
+      "inputs": [
+        "her stats (SPEED, JUMP) from config.toml through gamelab.character, once at import",
+        "her stat window's SPEED from behavior.hunter (physics.propose, then settle: at once at a hunter's start, at the next settle point in the hunt loop)",
+        "map models from localization.mapdata for flight/fly/pose",
+        "the C flight from gamelab.native when its DLL is built"
+      ],
+      "outputs": [
+        "the planner's constants (WALK_SPEED, JUMP_LAG, STOP_RUN, ...) imported by route, flow, control.actions, control.mover, control.navigator, attack.* and behavior.*",
+        "cached landings (flight, fly) for route's moves, flow's legs and attack.knock",
+        "jump timing rules (sure_jump_ms, run_ms, hold_ms) for flow, control.mover, control.actions and attack.stance",
+        "Jump shapes and poses for attack.reach and attack.stance",
+        "record(): her planned walk, climb and SPEED for the telemetry 'session' record",
+        "EPOCH: a counter a navigator watches to rebuild its route graph"
+      ],
+      "uses": [
+        "gamelab/motion/body.py",
+        "gamelab/character.py",
+        "gamelab/native.py",
+        "gamelab/localization/mapdata.py",
+        "gamelab/paths.py",
+        "maplehelper/config.py"
+      ],
+      "files_io": [
+        {
+          "path": "config.toml",
+          "mode": "read",
+          "what": "her SPEED and JUMP ([character] for the thief, [characters.<id>] tables for another), read through gamelab.character at import (not read under GAMELAB_FIXED_STATS)"
+        },
+        {
+          "path": "lab/character.json",
+          "mode": "read",
+          "what": "who plays (`gamelab character use`), read through gamelab.character at import unless GAMELAB_CHARACTER or FIXED_STATS decides"
+        }
+      ],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "FLY_CACHE_SIZE",
+          "value": "20_000",
+          "meaning": "landings kept in the flight cache (about 9 MB when full)"
+        },
+        {
+          "name": "MODELS_KEPT",
+          "value": "4",
+          "meaning": "maps whose walls and landing keys fly keeps at a time"
+        },
+        {
+          "name": "BLIND_RISK",
+          "value": "0.05",
+          "meaning": "the most jumps from standing that may leave short"
+        },
+        {
+          "name": "SWEEP_LAG_GAP",
+          "value": "(-0.013, -0.001)",
+          "meaning": "the jump sweeps' range for the jump lag minus the arrow lag (s)"
+        },
+        {
+          "name": "SWEEP_LAG_GAP_SD",
+          "value": "(0.004, 0.017)",
+          "meaning": "... and for its spread"
+        },
+        {
+          "name": "KICK_JUMPS",
+          "value": "False",
+          "meaning": "allow jumps from standing in the kick's 40-52 ms window"
+        },
+        {
+          "name": "SLOW_TAKEOFF",
+          "value": "0.85",
+          "meaning": "a route jump must also land at this share of her walk (a takeoff three game steps into a run is 0.846)"
+        },
+        {
+          "name": "LANDING_SLOP",
+          "value": "12.0",
+          "meaning": "units early or late a jump from standing may lift off"
+        },
+        {
+          "name": "MIN_HOLD_MS",
+          "value": "30",
+          "meaning": "the shortest arrow hold sent"
+        },
+        {
+          "name": "ROPE_REACH",
+          "value": "95",
+          "meaning": "a rope ending this far above her feet can be grabbed (a guess; the highest tried was 69)"
+        },
+        {
+          "name": "GRAB_SURE",
+          "value": "JUMP_HEIGHT + 5 (82)",
+          "meaning": "a rope ending this far up is surely grabbed (HeavenClient's rule)"
+        },
+        {
+          "name": "LAND_MARGIN",
+          "value": "18",
+          "meaning": "land at least this far onto a platform"
+        },
+        {
+          "name": "KNOCK_VX, KNOCK_VY",
+          "value": "180.0, 220.0",
+          "meaning": "the planner's model of a touch's knock (units/s out and up)"
+        },
+        {
+          "name": "JUMP_ATTACK_MS",
+          "value": "40",
+          "meaning": "a jump throw's attack key comes this long after the jump key"
+        },
+        {
+          "name": "AIR_TURN_MS / AIR_TURN_LEAD_MS",
+          "value": "60 / 60",
+          "meaning": "an in-air turn's arrow after the jump key, and the attack after that arrow"
+        },
+        {
+          "name": "FIXED_STATS",
+          "value": "\"GAMELAB_FIXED_STATS\"",
+          "meaning": "environment variable: use the measured default stats whatever config.toml says"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-21",
+          "what": "No jump from standing is keyed sooner than BLIND_ENDS_MS (150 ms) after its arrow, and KICK_JUMPS stays off.",
+          "why": "In the jump sweeps, of jumps keyed 80, 100 and 120 ms after the arrow, 2 of 4, 3 of 4 and 3 of 4 left short (at 126), and none of the 10 keyed 130 ms or later; the kick at 40-60 ms worked in game but the step model can't promise it."
+        },
+        {
+          "date": "2026-10-25",
+          "what": "A jump that has to turn her taps the arrow AIR_TURN_MS (60) after the jump key, once she's off the ground, not before the jump.",
+          "why": "Tapped before the jump, the tap walked her: jumped 80 ms after it she left at 18-84 units/s and came down 12-53 units on."
+        },
+        {
+          "date": "2026-10-25",
+          "what": "The attack after an in-air turn waits AIR_TURN_LEAD_MS (60) after the arrow.",
+          "why": "Live in the hunt of 2026-10-25 23:43, with the attack 25 ms after the arrow, 10 of 28 air-turned jumps threw the wrong way and none of those killed."
+        },
+        {
+          "date": "2026-11-02",
+          "what": "Her planned walk and climb are her stat window's SPEED by the client's formula (set_speed), with no measuring in the hunt; the climb's shared 117 and the thief's fitted 99.2 are gone.",
+          "why": "The formula and her measured walks and climbs agree (walk 150 against 149.45 over 75 walks; climb 120 against 119.88 over 58); the user: \"Just use panel, no need to measure.\""
+        },
+        {
+          "date": "",
+          "what": "Landings are cached by their rounded start, and models are kept with a serial number.",
+          "why": "Cached by the exact start, a landing found by one call was handed to every later one that rounded the same, so the simulator's scenarios had to start from the same cache to give the same trace; keyed by id(model) alone, a freed model's reused id got the old map's walls and landings (tests failed depending on their order)."
+        }
+      ],
+      "gotchas": [
+        "set_speed rebinds module globals by object identity: a module that computed its own constant from WALK_SPEED must register a @physics.follows hook, or it keeps the old walk.",
+        "A walk change is made only at a settle point, so a chain already running keeps the timings it was planned with.",
+        "Landings are not recomputed when her walk changes: her air steps use Physics.img and her JUMP only, and the cache key has no shoe.",
+        "Under GAMELAB_FIXED_STATS (the tests, goldens and harness) her stats are the measured defaults whatever config.toml says; `python -m gamelab sim` and the hunt take the file's.",
+        "TURN_EXTRA is kept for its name only: nothing plans with it (flow turns her by body.run_time).",
+        "The C flight must stay bit-identical to body.fly; without the DLL (built with MSVC Build Tools the first time it's needed) everything runs in Python, 0.85-0.95 ms a flight against 0.019 in C.",
+        "The elevated key player never loads gamelab.native or any of motion (tests/test_architecture.py checks): the C flight is built and loaded only by the planning processes."
+      ],
+      "tests": [
+        "tests/conftest.py",
+        "tests/test_body.py",
+        "tests/test_panel_speed.py",
+        "tests/test_recordings_physics.py",
+        "tests/test_walk_speed.py",
+        "tests/test_navigation.py",
+        "tests/test_flow.py",
+        "tests/test_control.py",
+        "tests/test_attack.py",
+        "tests/test_character.py",
+        "tests/test_clearance.py",
+        "tests/test_cornered_aim.py",
+        "tests/test_fight.py",
+        "tests/test_jump_reach.py",
+        "tests/test_key_pick.py",
+        "tests/test_knock.py",
+        "tests/test_locate.py",
+        "tests/test_records.py",
+        "tests/test_replan.py",
+        "tests/test_rope_hang.py",
+        "tests/test_sim.py",
+        "tests/test_sim_magic.py",
+        "tests/test_stance_aside.py",
+        "tests/test_statcheck.py",
+        "tests/test_steady.py",
+        "tests/test_target.py"
+      ]
+    },
+    {
+      "path": "gamelab/motion/route.py",
+      "title": "Route: moves between platforms and the quickest way",
+      "tagline": "Every move the physics allows on a map, and Dijkstra over them",
+      "summary": "Builds, once per map, every move that links one platform to another (climbs, rope jumps, jumps up, running jumps, walk-offs, drops), each simulated with the game's physics and costed in seconds. `Planner` then finds routes with Dijkstra over (platform, landing x) nodes, answers 'how long to get there' for the hunt loop, and can offer several distinct ways for route diversity.",
+      "details_md": "**Moves** (`moves(model)`, once per `Planner`). Each `Move` goes from `src` to `dst`, starting at `x`, landing at `land_x`, costing `seconds`. Jumps, walk-offs and drops are flown with `physics.fly`/`flight`, so the landing platform is wherever her feet first cross one. Seven kinds:\n- `climb`: a rope whose bottom ends at most `ROPE_REACH` (95) above her platform, up to the platform it hangs from (`hung_from`). One ending 82-95 up (past `GRAB_SURE`) is kept as grabbed half the time (`GRAB_CHANCE`, unmeasured), each miss costing `MISS_S` (3 s). A rope up to `GRAB_PAST` (30) past a platform's end is jumped at (`_past_end`) if every early, late or slow takeoff still grabs it.\n- `climb_down`: down a rope from its top, falling onto what's below.\n- `rope_jump`: onto a rope, up or down it, then off it sideways (`side_jump`: 1.3 x her walk out, half a jump's speed up) onto a platform (`ROPE_JUMPS`) or another rope (`ROPE_HOPS`), kept only where it ends the same from 15 units higher or lower and at other speeds (`ROPE_SPEEDS`).\n- `jump_up`: straight up through a platform 8 to 65 units overhead, from the middle of the overlap.\n- `jump`: a running jump at full speed off an end (looked for from `JUMP_FROM` 33 back toward `TAKEOFF_EDGE` 15: `END_LOOK`) or from along the platform (every `ALONG_STEP` 10 units, a few takeoffs kept per landing platform). Kept only if `_sure_running_jump` holds; then `_placed` moves its takeoff to where it lands with the most room.\n- `walk_off`: off an end at full speed, kept only if she can slide to a stop where it lands.\n- `drop`: down + jump onto the platform below, from the middle of the overlap, moved to the nearest spot clear of a foothold that forbids dropping (`DROP_ROOM` 8) and of a cliff below with nothing under it (`KNOCK_CARRY` 70), then, where it can, of a rope hanging from the platform below (`LAND_ROPE_CLEAR` 18). `ROPE_CLEAR` (30) from a rope's top on her own platform is kept where she actually drops (`drop_spots`, `drop_clear`).\n\nRunning jumps down more than 10 units to where a walk-off gets anyway are dropped (`_without_needless_jumps`); duplicates count once (`_distinct`). A trap (a place the sure moves give no way back from) gets a less sure running jump out (`_ways_out`, kept at a chance of 0.5 or more).\n\n**Costs.** A move's seconds are its flight, climb or fall plus a fixed extra (`CLIMB_EXTRA_S` 0.6, `JUMP_EXTRA_S` 0.2, `WALK_OFF_EXTRA_S` 0.3, `DROP_EXTRA_S` 0.4; a running jump adds its 150 ms run-up, `RUN_MS`). The search adds a miss allowance (`RISK`) and the walk along her platform to the move's start, |x - start| / `WALK_SPEED`.\n\n**Search.** `_search` is Dijkstra over nodes (platform, landing x rounded to a unit): two landings on one platform are different nodes because the walk on from each differs. `weight(move)` multiplies a move's cost (the navigator draws 1 to 1 + `NOISE` 0.35 per move per trip, so near-equal variants take turns); `penalty(move)` adds seconds (a monster in the way; `keeping_off`: `KEEP_OFF_S` 8 s per move onto a platform to keep off). `times` runs one search to every platform, kept for the last `TIMES_KEPT` (256) starts; `travel`, `arrive` and `arrive_within` answer \"how long to get there\" for the hunt loop and the target planner. A twin is the place it lies on.\n\n**Route diversity** (`ROUTES` 1 by default; `--ways N`). `alternatives` offers up to N distinct ways (`way_of`: the platforms and ropes they go through): the quickest, then the best route through each other move, found with one search out from her and one back from the goal, none over `STRETCH` (35%) dearer. `chances` is a softmax over their times (`TEMPERATURE` 0.1) with a `FLOOR` for ways through stale moves; `choose` draws one; `through` replans along it. `route_record` writes a route as telemetry.\n\n**Helpers others use**: `hung_from`, `grab_height` and `side_jump` (ropes: control.mover, attack.ropes, the navigator), `drop_spots` and `drop_clear` (flow, the mover). `_follow`, a `@physics.follows` hook, re-derives the rope-jump speeds and `GRAB_LEAD` when her walk changes.\n\nWith the C flight a map's moves take 0.25 s to build, not 3.3 (204 moves on the first map, by the README).",
+      "lines": 1178,
+      "key_items": [
+        {
+          "name": "Planner",
+          "kind": "class",
+          "line": 769,
+          "signature": "class Planner",
+          "summary": "A map's moves indexed for search, and the quickest routes over them. Built once per map by control.navigator (again when physics.EPOCH changes), and by analysis.coverage, ui.sources.planned (a still picture of a planned route) and a CLI command in gamelab.__main__.",
+          "details_md": "Keeps `moves`, `by_src`, and for alternatives the landing nodes per platform (`_xs`) and the moves into each node (`_into`). Two small caches: `_times` (route times from a start to every platform) and `_landings` (every landing reached), each holding the last 256 starts."
+        },
+        {
+          "name": "Planner._search",
+          "kind": "method",
+          "line": 1022,
+          "signature": "def _search(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None, weight: Callable[[Move], float] | None, dst_x: float | None = None) -> tuple[list[Move], float] | None",
+          "summary": "Dijkstra over (platform, x landed at) nodes: the quickest moves to dst and their cost in seconds, each edge the walk to the move's start + its seconds + RISK, times weight(move), plus penalty(move).",
+          "details_md": "With `dst_x` it keeps searching until no cheaper node can beat the best landing plus the walk on to dst_x. Returns None when dst can't be reached."
+        },
+        {
+          "name": "moves",
+          "kind": "function",
+          "line": 247,
+          "signature": "def moves(model: MapModel) -> list[Move]",
+          "summary": "Every move the physics allows on the map: rope climbs and climb-downs first, then each place's jumps up, end moves (running jumps and walk-offs) and jumps from along it (de-duplicated, needless jumps down dropped) and its drops, then rope jumps, then ways out of traps."
+        },
+        {
+          "name": "Move",
+          "kind": "dataclass",
+          "line": 218,
+          "signature": "@dataclass(frozen=True) class Move",
+          "summary": "One move from platform src to platform dst: its kind, where it starts and lands, its cost in seconds, and kind-specific details (rope, takeoff, hang height, the chance it lands)."
+        },
+        {
+          "name": "Planner.alternatives",
+          "kind": "method",
+          "line": 807,
+          "signature": "def alternatives(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None = None, weight: Callable[[Move], float] | None = None, n: int | None = None, stretch: float | None = None) -> list[Way]",
+          "summary": "Up to n (ROUTES) distinct ways from (src, x) onto dst, the quickest first, then the best route through each other move, none over STRETCH (35%) dearer and none onto a platform twice.",
+          "details_md": "One search out from her (`_out`) and one back from dst (`_back`), then each move not in the quickest is priced as the cost to reach its start + the move + the cost on from where it lands. Ways that are only another takeoff or a jump for a walk-off between the same platforms count as the same way (`way_of`)."
+        },
+        {
+          "name": "Planner.times",
+          "kind": "method",
+          "line": 925,
+          "signature": "def times(self, src: int, x: float) -> dict[int, float]",
+          "summary": "Seconds of the quickest route from (src, x) to every platform it can reach: one search, kept for the last TIMES_KEPT (256) starts. The hunt loop asks it after most looks."
+        },
+        {
+          "name": "Planner.arrive",
+          "kind": "method",
+          "line": 940,
+          "signature": "def arrive(self, src: int, x: float, dst: int, dst_x: float | None = None, keep_off=()) -> float | None",
+          "summary": "Seconds from (src, x) to standing at a given x on dst: the quickest landing anywhere on dst plus the walk along it, optionally keeping off some platforms (KEEP_OFF_S each). Used for the hunt loop's piles."
+        },
+        {
+          "name": "chances",
+          "kind": "function",
+          "line": 1110,
+          "signature": "def chances(ways: list[Way], temperature: float | None = None, floor: float | None = None, stale: Callable[[Move], bool] | None = None) -> list[float]",
+          "summary": "The chance a trip takes each offered way: a softmax over their times (a way TEMPERATURE, 10%, dearer weighs 1/e), with a FLOOR (20%) for ways through a move she hasn't set off on for STALE_S (120 s)."
+        },
+        {
+          "name": "_sure_running_jump",
+          "kind": "function",
+          "line": 655,
+          "signature": "def _sure_running_jump(model: MapModel, a: Platform, x: float, sign: int) -> tuple[Platform, float, float] | None",
+          "summary": "Where a running jump at full speed off platform a at x lands, if it surely lands on another platform: at least LANDING_ROOM (9) in from its ends, and on it still taking off 12 early/late, 10% slower or at 0.85x."
+        },
+        {
+          "name": "_placed",
+          "kind": "function",
+          "line": 679,
+          "signature": "def _placed(model: MapModel, a: Platform, x0: float, sign: int, land: Platform) -> Move | None",
+          "summary": "Moves a found running jump's takeoff to where it lands with the most room: TAKEOFF_ROOM_WANTED (20) in even leaving up to 22 units early or 12 late, never nearer the end than TAKEOFF_EDGE (15).",
+          "details_md": "From the telemetry of 2026-10-21: of 293 chained jumps up staircase steps, takeoffs 33-36 back missed 4 of 117, 42-45 back 8 of 36. Up such a step the takeoff is now 15 back (it was 33): she lands 34 in, 24 with flow's spread. Failing the full spread, it settles for the slop alone; the run-up starts RUN_UP (20) before."
+        },
+        {
+          "name": "_end_moves",
+          "kind": "function",
+          "line": 323,
+          "signature": "def _end_moves(model: MapModel, a: Platform) -> list[Move]",
+          "summary": "Off each end of a platform: a running jump (looked for along END_LOOK, from 33 units back to 15), and a walk-off, kept only if she can slide to a stop on the platform it lands on.",
+          "details_md": "The walk-off's move starts 5 units in from the end; its flight is flown from just inside the end where a wall rises there (by the game's wall rule), else from just past it: starting inside a cliff's top read as bumping into it, which left out 42 of the first map's 63 walk-offs."
+        },
+        {
+          "name": "_drop_moves",
+          "kind": "function",
+          "line": 388,
+          "signature": "def _drop_moves(model: MapModel, a: Platform) -> list[Move]",
+          "summary": "Drops (down + jump) through a platform onto each platform under it, from the middle of their overlap, moved to the nearest spot clear of footholds that forbid dropping (DROP_ROOM 8) and of cliffs with nothing under them (KNOCK_CARRY 70), then away from ropes hanging from the platform below where it can; kept if the fall lands there."
+        },
+        {
+          "name": "_rope_jumps",
+          "kind": "function",
+          "line": 551,
+          "signature": "def _rope_jumps(model: MapModel, others: list[Move]) -> list[Move]",
+          "summary": "The rope_jump moves: from each way onto a rope (from below, jumping at it past an end, or from its top), up or down it and off it sideways onto a platform or another rope.",
+          "details_md": "Not to where she started nor to the rope's own top platform (that's a climb), and off onto a platform only where no other move between the same platforms is quicker (that dropped 19 of the first map's 24). A hop onto another rope is kept even so: 23 -> 959 -> 1040 -> 17 is the way round when a monster stands at the quicker one."
+        },
+        {
+          "name": "_ways_out",
+          "kind": "function",
+          "line": 716,
+          "signature": "def _ways_out(model: MapModel, moves: list[Move]) -> list[Move]",
+          "summary": "Running jumps out of a trap: a place from which the sure moves never reach the map's main part (the largest set of places that all reach each other) gets, for each place with a way back it can land on, the jump from the middle of the widest stretch of takeoffs landing there, kept if its chance is at least 0.5 and she can slide to a stop on it.",
+          "details_md": "Takeoffs are tried every ESCAPE_STEP (1) unit at full speed; the chance is erf(stretch/2 / (TAKEOFF_SD x √2)), with the stretch's width plus one step; its cost adds (1/chance - 1) misses at MISS_S (3 s); TAKEOFF_SD 5.5 units (her dot's half pixel, the game's step, the lags' spread). On West Rocky Mountain II the jump from 27 onto 25 out of the pit of stairs: 0.90. None on the first map."
+        },
+        {
+          "name": "RISK",
+          "kind": "constant",
+          "line": 132,
+          "signature": "RISK = {\"jump\": 0.25, \"walk_off\": 0.2, \"drop\": 0.25, \"rope_jump\": 0.5}",
+          "summary": "Seconds added to a move's cost for how often it goes wrong: jump 0.25, walk_off 0.2, drop 0.25, rope_jump 0.5 (a guess).",
+          "details_md": "A miss costs about 2-3 s to recover from. Chained, about one move in 15 lands elsewhere, mostly drops and straight-up jumps timed off; moving one move at a time, running jumps missed often and this was 1.5 s."
+        }
+      ],
+      "inputs": [
+        "a MapModel from localization.mapdata: platforms (segments, ends, foothold groups, drop_ok), ropes, walls, twins",
+        "landings from physics.fly / physics.flight (and body.fly with path for rope grabs)",
+        "her walk, jump and climb from physics (WALK_SPEED, JUMP_SPEED, CLIMB_SPEED, ...), rebound on a walk change",
+        "a trip's weights, penalties and keep-off platforms from control.navigator"
+      ],
+      "outputs": [
+        "Move lists (routes) for control.navigator, which hands them to flow.chain or control.mover",
+        "Way lists and their chances for route diversity (Navigator._route)",
+        "route times (times, travel, arrive, arrive_within) for the hunt loop, the tour and the target planner (attack.target)",
+        "route_record dicts for the telemetry 'route' topic, read by analysis.coverage"
+      ],
+      "uses": [
+        "gamelab/motion/physics.py",
+        "gamelab/motion/body.py",
+        "gamelab/localization/mapdata.py",
+        "gamelab/directions.py",
+        "maplehelper/engine.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "JUMP_FROM",
+          "value": "33",
+          "meaning": "a jump off an end is first looked for this far back"
+        },
+        {
+          "name": "TAKEOFF_EDGE",
+          "value": "15",
+          "meaning": "a takeoff never nearer its platform's end than this"
+        },
+        {
+          "name": "TAKEOFF_SPREAD / TAKEOFF_SLOP",
+          "value": "10.0 / 12.0",
+          "meaning": "how much earlier flow may take off, and the slop either way, a placed takeoff must survive"
+        },
+        {
+          "name": "TAKEOFF_ROOM_WANTED",
+          "value": "20",
+          "meaning": "landing room that's enough (no better takeoff is sought)"
+        },
+        {
+          "name": "LANDING_ROOM",
+          "value": "LAND_MARGIN x 0.5 (9)",
+          "meaning": "a running jump lands at least this far in from the landing platform's ends"
+        },
+        {
+          "name": "ALONG_STEP / ALONG_SPREAD / ALONG_KEEP",
+          "value": "10 / 60 / 3",
+          "meaning": "running jumps tried every 10 units along a platform, kept 60 apart, 3 (plus the last) per landing platform"
+        },
+        {
+          "name": "GRAB_CHANCE",
+          "value": "0.5",
+          "meaning": "the chance a rope ending 82-95 above her is taken to be grabbed (assumed: not measured)"
+        },
+        {
+          "name": "GRAB_X",
+          "value": "10.0",
+          "meaning": "she grabs a rope she passes within this many units of, up held"
+        },
+        {
+          "name": "REGRAB_S",
+          "value": "0.3",
+          "meaning": "s after leaving a rope before she can grab one (not measured)"
+        },
+        {
+          "name": "GRAB_PAST",
+          "value": "30",
+          "meaning": "a rope this far past a platform's end or nearer is jumped at from it"
+        },
+        {
+          "name": "ROPE_JUMPS / ROPE_HOPS",
+          "value": "True / True",
+          "meaning": "jumps off a rope onto a platform / onto another rope"
+        },
+        {
+          "name": "CLIMB_EXTRA_S / JUMP_EXTRA_S / WALK_OFF_EXTRA_S / DROP_EXTRA_S",
+          "value": "0.6 / 0.2 / 0.3 / 0.4",
+          "meaning": "seconds each kind of move costs on top of its flight, climb or fall"
+        },
+        {
+          "name": "RISK",
+          "value": "jump 0.25, walk_off 0.2, drop 0.25, rope_jump 0.5",
+          "meaning": "s added for how often a move goes wrong"
+        },
+        {
+          "name": "MISS_S",
+          "value": "3.0",
+          "meaning": "s a missed grab or escape jump costs"
+        },
+        {
+          "name": "ESCAPE_CHANCE / TAKEOFF_SD",
+          "value": "0.5 / 5.5",
+          "meaning": "least chance for a way out of a trap; her takeoff's error (sd, units)"
+        },
+        {
+          "name": "ROPE_CLEAR / DROP_ROOM / KNOCK_CARRY / LAND_ROPE_CLEAR",
+          "value": "30 / 8 / 70 / 18",
+          "meaning": "a drop's distance from a rope's top, a forbidding foothold, a cliff of the platform below, a rope on the platform below"
+        },
+        {
+          "name": "KEEP_OFF_S",
+          "value": "8.0",
+          "meaning": "s added per move onto a platform a trip keeps off"
+        },
+        {
+          "name": "TIMES_KEPT",
+          "value": "256",
+          "meaning": "starts whose route times to every platform are kept"
+        },
+        {
+          "name": "NOISE",
+          "value": "0.35",
+          "meaning": "each trip weighs every move's cost by a random 1 to 1 + NOISE"
+        },
+        {
+          "name": "ROUTES",
+          "value": "1",
+          "meaning": "distinct ways a trip chooses among (1: the quickest by the weights)"
+        },
+        {
+          "name": "TEMPERATURE / STRETCH / FLOOR / STALE_S",
+          "value": "0.1 / 0.35 / 0.2 / 120.0",
+          "meaning": "route diversity's softmax temperature, max extra cost, least chance for a stale move's way, and when a move counts as stale (s)"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-21",
+          "what": "Rope jumps: off a rope sideways onto a platform (ROPE_JUMPS) and onto another rope and up it (ROPE_HOPS); a running jump at a rope just past a platform's end (_past_end).",
+          "why": "The user, watching her hunt live: \"It also never went to platform 17 via two rope hops from platform 23\". Nothing went up the map's right side from 23 but the long way round (23 -> 17 was 15 moves, 18.6 s in the simulator)."
+        },
+        {
+          "date": "2026-10-21",
+          "what": "Each running jump takes off where it lands with the most room (_placed, TAKEOFF_EDGE 15), not a fixed 33 back.",
+          "why": "Of that night's 293 chained jumps up a staircase step, the farther back they took off the more they missed (33-36 back 4 of 117, 42-45 back 8 of 36); flow takes off up to 10 units earlier still."
+        },
+        {
+          "date": "",
+          "what": "A jump off an end is looked for a unit nearer at a time from 33 back down to 15 (END_LOOK).",
+          "why": "On West Rocky Mountain II five jumps land only from the last 15-33 units of a platform; with 17 -> 16 found, 17 to 10 takes 3.4 s, not 22.2."
+        },
+        {
+          "date": "2026-10-31",
+          "what": "A drop avoids landing within LAND_ROPE_CLEAR of a rope hanging from the platform below, where it can.",
+          "why": "Down still held as she lands there climbs her onto the rope (Tree Dungeon's drop 28 -> 30, 6.5 units from 30's rope)."
+        },
+        {
+          "date": "",
+          "what": "Route diversity (ROUTES over 1) is built but stays off by default.",
+          "why": "In the harness (40 seeds of 20 minutes) 3 ways made as much EXP a minute (tour +1.5% ± 1.4%, hunt loop -0.0%) and widened her moves, but picked up fewer of her drops, and none passed the bar on seeds 1-10."
+        }
+      ],
+      "gotchas": [
+        "Dijkstra's nodes are (platform, landing x rounded to a unit), not platforms: the walk on from each landing differs.",
+        "A navigator builds a new Planner when physics.EPOCH changes (her walk changed): 0.1-0.3 s on Tree Dungeon.",
+        "climb_down and rope_jump moves are not chained by flow: control.mover does them closed loop.",
+        "A trip to a twin is a trip to the platform it lies on; no move starts or ends on a twin.",
+        "The rope-jump numbers are not measured in game: REGRAB_S, the side-jump's speeds, RISK['rope_jump'].",
+        "drop_spots falls back to spots near a rope on the platform below when none is clear of it."
+      ],
+      "tests": [
+        "tests/test_navigation.py",
+        "tests/test_flow.py",
+        "tests/test_body.py",
+        "tests/test_control.py",
+        "tests/test_coverage.py",
+        "tests/test_evade.py",
+        "tests/test_grind.py",
+        "tests/test_guard.py",
+        "tests/test_harness.py",
+        "tests/test_jump_reach.py",
+        "tests/test_knock.py",
+        "tests/test_landing.py",
+        "tests/test_loot_chain.py",
+        "tests/test_panel_speed.py",
+        "tests/test_replan.py",
+        "tests/test_retreat.py",
+        "tests/test_rope_hang.py",
+        "tests/test_rope_top.py",
+        "tests/test_sim_tree.py",
+        "tests/test_stay_or_go.py",
+        "tests/test_stranger_take.py",
+        "tests/test_target.py",
+        "tests/test_touches.py"
+      ]
+    },
+    {
+      "path": "gamelab/motion/flow.py",
+      "title": "Flow: several moves as one key timeline",
+      "tagline": "Chains route moves into one continuous, predicted key plan, hopping monsters",
+      "summary": "A player doesn't stop between moves: she runs, jumps on the way, keeps running when she lands and grabs ropes on the run. `Flow.chain` predicts her body over time with the engine's closed forms and the game's physics and writes one key timeline for as many route moves as it can predict, checking every leg against the monsters' bodies, hopping one in the way of a run, and (with a price) landing where monsters are least likely to touch her.",
+      "details_md": "**The chain.** `Flow.chain(moves, start, monsters, ...)` takes route moves and her predicted `Body` (time, x, platform, arrow held, speed, slack) and plans: body now -> leg 1 (keys, where she'll be when) -> leg 2 -> ... -> one look at the end. It returns the `Leg`s, the `Keys` and why it stopped: 'done', 'unpredictable' (climbing down a rope or a rope jump: control.mover does those closed loop), 'monster', or 'long' (`MAX_LEGS` 5, or past `MAX_SECONDS` 3.5 s). With `keep_going` a chain cut for length doesn't stop her: the next is planned on the move.\n\n**Variants** (`VARIANTS`): 'run' (the arrow held through the landing), 'stop' (the arrow let go `ARROW_LAG` 0.1 s before she lands: she slides about 14 units to a stop), 'stand' (a jump up from standing under the platform above). Of the variants no monster can touch, the chain takes the first the next move can follow on from; the last leg tries 'stop' first.\n\n**One leg per kind** (`leg` dispatches):\n- `_jump`: a running jump from the first of its takeoffs (`_takeoffs`) that `_jump_from` makes work: a run-up if needed (`_runup`), the arrow, the jump key (`liftoff`), the flight (`physics.flight`) and `sure_takeoff` (lands `LANDING_ROOM` in, and still on the platform leaving `TAKEOFF_SLOP` 8 units early or late, 10% slower or at 0.85x).\n- `_walk_off` (run off the end, at the speed she has there); `_jump_up` ('run'/'stop': a running jump on the way that lands on the platform above with room; 'stand': stop under it and jump straight up); `_drop` (stop in a clear stretch of `route.drop_spots`, hold down 0.18 s, tap jump 0.1 s after down; she falls through `DROP_LAG` 0.28 s after the jump); `_climb` (jump straight up from under the rope, or run and jump `GRAB_LEAD`, about 42 units, before it so she's over it at the top of her jump; up held to 0.35 s past the predicted top; she stands on the top platform `CLIMB_OVER` 0.23 s after the top, a standing start from there; refused for a rope ending over 87 units up or by a portal); `_walk` (the loot chain's walk through her item drops).\n\n**Her body over time** comes from the engine's closed forms with the median lags: `_seen`, `_ground` (where she is at t), `run_to`, `liftoff` (the jump key: never in the air, never in the blind spot, `physics.sure_jump_ms`), `_stop_within`, `_stop_at` and `_step` (within `STEP_ACCEPT` 8 units of a spot she doesn't step: a tap that short moved her 0 or 7 units in game). Each landing adds `SLACK_PER_LEG` (25 ms) of timing error (a drop 0.1 s more); a jump or drop key after a landing waits `AFTER_LANDING` (30 ms) plus that slack, up to `MAX_SLACK` (0.15 s) of it (`Body.ready_at`), and a run on from a landing starts half a game step later (`body.landing_wait`).\n\n**Monsters.** Each leg keeps where her feet go: runs (`Span`), flights (`bodies.Arc`), climbs (`bodies.Climb`) and stands. `danger` samples that every `DANGER_STEP` (0.05 s) and tests her box (22 either side, 65 tall) against each monster's box wherever `MonsterTrack.reach` says it can be by then, skipping the time before `immune` (her invulnerability after a touch). The last leg is also checked standing `END_LINGER` (1 s) at its end. A monster in the way of a run is hopped (`hop`): timed so she can't touch it on the way up, landing past it on her platform. Where neither works the chain stops before that leg, backing off whole legs until no monster could reach her standing at its end.\n\n**Landing price** (from 2026-10-27). Given a `price` (the navigator's, in seconds, from attack.stance's landing prices) and a first way that lands priced above 0, `_priced` also tries other variants, the route's other moves between the same platforms (`alts`) and wider takeoffs (`_spread`), taking the cheapest by time + price + walk on if one lands priced less. `PRICE_EVERY_MOVE` prices every leg, not only the route's last.\n\n**Keys.** `Keys` holds [ms, key, 'down'/'up'] events and holds; `sorted` merges overlapping holds of a key. `_tap_pick_up` taps pick-up every `PICK_EVERY` (0.15 s) while she runs. `expected`, `airborne` and `span_at` tell the navigator where she should be, so it can tell she's off course. `chain_record` writes telemetry.",
+      "lines": 1190,
+      "key_items": [
+        {
+          "name": "Flow.chain",
+          "kind": "method",
+          "line": 1070,
+          "signature": "def chain(self, moves: list[Move], start: Body, monsters=(), keep_going: bool = False, hops: bool = True, price: Callable[[Leg], float] | None = None, alts: Callable[[Move], list[Move]] | None = None, goal: tuple[int, float] | None = None, spread: bool = True, held: int = 0) -> tuple[list[Leg], Keys, str]",
+          "summary": "As many route moves as can be done in one go from a start body: their legs, the keys, and why it stopped ('done', 'unpredictable', 'monster', 'long').",
+          "details_md": "Per move: every variant whose leg no monster can touch (`danger`), re-ranked by `_priced` if a `price` is given; if no variant is clear, a hop over the monster (`_hop_then`, when `hops`), else the chain stops ('monster' if some variant could be done, 'unpredictable' if none). It takes the first variant the next move can follow on from; after a climb it presses the next run's arrow just before the top (`Keys.press_arrow_early`). Stopped for a monster, it backs off legs until none could reach her standing END_LINGER at the end. Finally the arrow is let go (unless kept going) and pick-up taps added."
+        },
+        {
+          "name": "Flow.leg",
+          "kind": "method",
+          "line": 422,
+          "signature": "def leg(self, m: Move, b: Body, k: Keys, variant: str = \"run\") -> Leg | None",
+          "summary": "One move done one way (variant) from a body, its keys added: dispatches to _jump, _walk_off, _jump_up, _drop, _climb or _walk; None where that way doesn't work or the move can't be predicted (climb_down, rope_jump, hop)."
+        },
+        {
+          "name": "Flow.liftoff",
+          "kind": "method",
+          "line": 399,
+          "signature": "def liftoff(b: Body, d: int, t_off: float) -> tuple[float, float, float, float]",
+          "summary": "When to press jump for her to leave the ground at a time, running that way: never before she has landed, and with a new arrow never in the kick's blind spot (physics.sure_jump_ms). Returns the press, when and where she leaves, and her takeoff speed (with the kick)."
+        },
+        {
+          "name": "Flow._jump_from",
+          "kind": "method",
+          "line": 551,
+          "signature": "def _jump_from(self, m: Move, b: Body, k: Keys, variant: str, takeoff: float) -> Leg | None",
+          "summary": "The running jump from one takeoff: run-up if needed, the arrow, the jump key, the flight, and sure_takeoff (lands with room even leaving 8 units early or late, 10% slower or at 0.85x).",
+          "details_md": "The takeoff can come later and further on than asked (she had to land first, or wait out the blind spot); a takeoff that ends nearer than TAKEOFF_SLOP to her platform's end is refused."
+        },
+        {
+          "name": "Flow._takeoffs",
+          "kind": "method",
+          "line": 530,
+          "signature": "def _takeoffs(self, m: Move, b: Body, d: int, edge: float) -> list[float]",
+          "summary": "Where a running jump may take off, the one to try first first: the move's own or up to 10 before it (off an end, 33 to 45 back), every TAKEOFF_STEP (2) units by nearness to a first pick drawn with the rng."
+        },
+        {
+          "name": "Flow._landing",
+          "kind": "method",
+          "line": 431,
+          "signature": "def _landing(self, m: Move, b: Body, k: Keys, variant: str, t_land: float, lx: float, land: Platform, d: int, v_land: float, spans: list[Span], arc: Arc | None = None) -> Leg",
+          "summary": "Ends a jump or fall leg: running on with the arrow held, or ('stop') letting go ARROW_LAG before landing and sliding to a stop; either way she waits for the game's next step first (body.landing_wait)."
+        },
+        {
+          "name": "Flow._runup",
+          "kind": "method",
+          "line": 451,
+          "signature": "def _runup(self, b: Body, d: int, takeoff: float, k: Keys) -> Body | None",
+          "summary": "Makes sure she can run at a takeoff going that way: stops first if she's running the other way, steps back if she's standing too close (a run-up 8 units longer than MIN_RUNUP, give or take 4). None: no room."
+        },
+        {
+          "name": "Flow._climb",
+          "kind": "method",
+          "line": 694,
+          "signature": "def _climb(self, m: Move, b: Body, k: Keys, variant: str) -> Leg | None",
+          "summary": "A climb up a rope: jump straight up if she stands under it, else run and jump GRAB_LEAD before it; hold up past the predicted top; the next move's arrow may go down PRE_ARROW (0.1 s) before the top if it starts a run (a step's keeps its planned time).",
+          "details_md": "Refused out of reach of a jump and her arms (the rope's bottom more than APEX + 10 above her feet) or by a portal (up there would take it). Her climb rate is physics.CLIMB_SPEED (her stat window's SPEED + 20)."
+        },
+        {
+          "name": "Flow._drop",
+          "kind": "method",
+          "line": 648,
+          "signature": "def _drop(self, m: Move, b: Body, k: Keys, variant: str, at: float | None = None) -> Leg | None",
+          "summary": "A drop: stop in a clear stretch of drop spots (not by a rope's top, a forbidding foothold or a cliff), hold down, tap jump 0.1 s later; she falls through DROP_LAG after the jump and lands where physics.fly says."
+        },
+        {
+          "name": "Flow.danger",
+          "kind": "method",
+          "line": 809,
+          "signature": "def danger(self, leg: Leg, monsters: list[MonsterTrack], linger: float = 0.0, after: float | None = None) -> tuple[MonsterTrack, float] | None",
+          "summary": "The first monster that could touch her on a leg, and when: her box (motion.bodies) every 0.05 s along her path against each monster's box wherever MonsterTrack.reach says it can be by then.",
+          "details_md": "A quick bounding-box pass first keeps only monsters whose reach over the leg's time comes near her path. Times before `immune` (after a touch) and, per monster, before its `counts_from` are skipped; `after` checks only the rest of a running plan."
+        },
+        {
+          "name": "Flow.hop",
+          "kind": "method",
+          "line": 860,
+          "signature": "def hop(self, b: Body, mo: MonsterTrack, d: int, k: Keys) -> Leg | None",
+          "summary": "A running jump over a monster in her way on her platform, landing on the same platform past it, timed so she leaves just outside its reach plus the distance she covers while rising to its height.",
+          "details_md": "Her jump can't clear a pig or slime outright: timed with the top of the jump over them, 6 of 8 hops over slimes touched them. Timed this way any contact comes past its middle, where the knockback pushes her on: 7 hops over monsters standing or walking at her took no damage. A monster walking away from her (her way, faster than 10 units/s) isn't hopped: she closes on it at only about 80 units/s, and 2 of 3 such hops took damage. With HOP_AT_HER a monster seen once is timed as if it walked at her."
+        },
+        {
+          "name": "Flow._priced",
+          "kind": "method",
+          "line": 947,
+          "signature": "def _priced(self, m: Move, b: Body, k: Keys, order: tuple, options: list, monsters, linger: float, price: Callable[[Leg], float], alts, goal: tuple[int, float] | None, last: bool = True, spread: bool = True) -> list",
+          "summary": "The ways of doing a move, cheapest first by when she stands where she lands + the landing's price + her walk on: the move's own variants, the route's other moves between the same platforms, and wider takeoffs.",
+          "details_md": "If the first way lands with no price, the options stay as they were. The chain's last leg is judged both at touchdown and where she comes to stand (`_at_rest`), the dearer of the two."
+        },
+        {
+          "name": "_ground",
+          "kind": "function",
+          "line": 302,
+          "signature": "def _ground(b: Body, d: int, t: float) -> tuple[float, float]",
+          "summary": "Where she is along her platform at time t and how fast she goes, with an arrow held (or let go) from the body's time on: the engine's closed forms with the median lags. The platform's ends aren't looked at."
+        },
+        {
+          "name": "Keys.sorted",
+          "kind": "method",
+          "line": 243,
+          "signature": "def sorted(self) -> list[list]",
+          "summary": "The plan's key events in time order, with overlapping holds of a key merged (a second rope climb's up was otherwise released 4 ms after it was pressed)."
+        },
+        {
+          "name": "Flow.expected",
+          "kind": "method",
+          "line": 1030,
+          "signature": "def expected(legs: list[Leg], t: float) -> int | None",
+          "summary": "The platform she should be on at a time into the plan, or None in the air, on a rope, or near a takeoff or landing (EXPECT_MARGIN 0.12 s plus the slack built up): how the navigator tells she's off course."
+        }
+      ],
+      "inputs": [
+        "route Moves (a route from route.Planner, or the loot chain's walks) from control.navigator",
+        "her start Body, predicted by the navigator from the last look (or from where the previous chain ends)",
+        "MonsterTrack objects from localization.monsters (position, speed, box, reach over time)",
+        "key names (left/right/jump/up/down/pick to her configured keys)",
+        "optional price, alts and goal callbacks from the navigator (attack.stance's landing price)",
+        "landings from physics.flight/fly and the engine's closed forms from motion.body"
+      ],
+      "outputs": [
+        "(legs, Keys, why) for control.navigator, whose key plan goes to the key player through control.client",
+        "Leg predictions (expected, airborne, span_at) the navigator watches the plan against",
+        "chain_record dicts for the telemetry 'chain' topic"
+      ],
+      "uses": [
+        "gamelab/motion/body.py",
+        "gamelab/motion/bodies.py",
+        "gamelab/motion/physics.py",
+        "gamelab/motion/route.py",
+        "gamelab/localization/mapdata.py",
+        "gamelab/localization/monsters.py",
+        "gamelab/directions.py",
+        "maplehelper/engine.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "MAX_LEGS / MAX_SECONDS",
+          "value": "5 / 3.5",
+          "meaning": "a chain this long gets a fresh look before the next one"
+        },
+        {
+          "name": "ARROW_LAG",
+          "value": "0.1",
+          "meaning": "s before a landing the arrow is let go for her to stop there"
+        },
+        {
+          "name": "AFTER_LANDING",
+          "value": "0.03",
+          "meaning": "s after a predicted landing before the next jump key (in the air it's ignored)"
+        },
+        {
+          "name": "SLACK_PER_LEG / MAX_SLACK",
+          "value": "0.025 / 0.15",
+          "meaning": "timing error each predicted landing adds, and its cap"
+        },
+        {
+          "name": "MIN_RUNUP",
+          "value": "15.0",
+          "meaning": "units of run before a running jump from standing"
+        },
+        {
+          "name": "JUMP_FROM_FAR",
+          "value": "45.0",
+          "meaning": "jumps off an end take off between 33 and this far back"
+        },
+        {
+          "name": "TAKEOFF_SLOP / TAKEOFF_STEP",
+          "value": "8.0 / 2.0",
+          "meaning": "a chained jump must still land leaving this many units early or late; takeoffs tried this far apart"
+        },
+        {
+          "name": "STEP_ACCEPT",
+          "value": "8",
+          "meaning": "standing this close to where a move wants her, she doesn't step"
+        },
+        {
+          "name": "STEP_EARLY_MAX_MS",
+          "value": "250",
+          "meaning": "after a climb, an arrow held this long or less is a step and keeps its planned time"
+        },
+        {
+          "name": "UP_EXTRA / CLIMB_OVER / PRE_ARROW",
+          "value": "0.35 / 0.23 / 0.1",
+          "meaning": "up held past a rope's top; she runs this long after the top; the next arrow this long before it"
+        },
+        {
+          "name": "DROP_JUMP_AFTER / DROP_DOWN_HOLD",
+          "value": "0.1 / 0.18",
+          "meaning": "a drop's jump after down, and how long down is held"
+        },
+        {
+          "name": "DANGER_STEP",
+          "value": "0.05",
+          "meaning": "s between the moments danger checks her"
+        },
+        {
+          "name": "END_LINGER",
+          "value": "1.0",
+          "meaning": "s she may stand where a chain ends: no monster may reach her there either"
+        },
+        {
+          "name": "HOP_HALF / HOP_HORIZON",
+          "value": "15 / 3.0",
+          "meaning": "half her width the hop was timed with in game; s ahead a hop is looked for"
+        },
+        {
+          "name": "PICK_EVERY / WALK_PICK_EVERY",
+          "value": "0.15 / 0.12",
+          "meaning": "s between pick-up taps while she runs / on a walk leg"
+        },
+        {
+          "name": "WALK_ON_ROOM",
+          "value": "50.0",
+          "meaning": "units of platform a 'walk' leg's 'run' way needs past the item drop it runs through (a run on and a turn from there stay on it)"
+        },
+        {
+          "name": "EXPECT_MARGIN",
+          "value": "0.12",
+          "meaning": "s around a takeoff or landing when where she should be isn't said"
+        },
+        {
+          "name": "Flow.SPREAD",
+          "value": "40.0",
+          "meaning": "units either way of a move's takeoff that _spread tries (a guess)"
+        },
+        {
+          "name": "PRICE_EVERY_MOVE",
+          "value": "True",
+          "meaning": "price every leg's landing, not only the route's last"
+        },
+        {
+          "name": "SPREAD_FROM_SPOT",
+          "value": "False",
+          "meaning": "_spread's drops and jumps up from the spot itself"
+        },
+        {
+          "name": "RUNUP_SPANS / HOP_AT_HER",
+          "value": "True / True",
+          "meaning": "the run-up's step back checked as its own span; a one-look monster timed as walking at her"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-21",
+          "what": "After a climb, an arrow that starts a step (held STEP_EARLY_MAX_MS or less) stays at its planned time; only a run's arrow goes down before the top.",
+          "why": "Of 25 chains that climbed 36 -> 32 and stepped back for the jump onto 29, 13 went 8-30 units past the planned stop and 17 came down in the basin; with the step at its planned time, the 6 chains after landed every jump."
+        },
+        {
+          "date": "2026-10-21",
+          "what": "A chained jump takes off only where it lands with room from where she really leaves the ground (sure_takeoff, TAKEOFF_SLOP 8), else from another takeoff.",
+          "why": "Of the first map's 81 route jumps, 40 had takeoffs the chains could pick that came down 2-7 units onto the platform; live, jumps 32 -> 29, 29 -> 28 and 16 -> 14 came down short."
+        },
+        {
+          "date": "2026-10-27",
+          "what": "A chain's landings are priced (attack.stance's landing: a monster meeting her there, and whether her first attack there surely takes the nearest), every move of a chain (PRICE_EVERY_MOVE), not only the route's last.",
+          "why": "The user: \"the character should actively try to move away from the mob to attack it.\" Of 76 trip landings within 105 of a monster in 8 runs of the first build, 26 came at a move before the route's last or at the end of a chain cut short."
+        },
+        {
+          "date": "2026-10-28",
+          "what": "The run-up's step back is checked against monsters as its own span (RUNUP_SPANS), and a hop over a monster seen only once is timed as if it walked at her (HOP_AT_HER).",
+          "why": "As one straight span, a step back of up to 23 units behind her was left out of the monster checks; timed as if it stood, a monster came on into her before her jump."
+        },
+        {
+          "date": "2026-10-28",
+          "what": "SPREAD_FROM_SPOT stays off.",
+          "why": "In the harness it leaned the wrong way: 1.2% less EXP, trips 2.9% longer, landings within 105 of a monster 4.7% more; off until the user decides or a live A/B shows it buys something."
+        },
+        {
+          "date": "2026-11-02",
+          "what": "Her climb up a rope is physics.CLIMB_SPEED (her stat window's SPEED + 20), rebuilt by _follow when her walk changes.",
+          "why": "She climbed 119.9 up on that night's frames, against the 130 the minimap's traces had said."
+        }
+      ],
+      "gotchas": [
+        "A chain is planned open loop from one look; errors add up leg by leg (SLACK_PER_LEG), which is why the navigator watches expected/airborne and cuts a plan that goes off course.",
+        "climb_down and rope_jump moves can't be chained (leg returns None for them): the chain stops 'unpredictable' there and control.mover does them closed loop. Hops are made by `hop` inside a chain, never through `leg`.",
+        "danger uses the client's body box (22 either side, 65 tall), but the hop is still timed with HOP_HALF 15, the width it was checked with in game.",
+        "Keys.set_arrow presses the new arrow 1 ms after releasing the old one; overlapping holds of one key are merged by sorted.",
+        "Flow(rng=None) always picks the same takeoffs and spots (the tests, analysis.coverage, ui.sources); the navigator passes its rng unless its move weights' variety is 0 (by default it is route.NOISE, 0.35).",
+        "`immune` is set per chain by whoever plans or watches it (Navigator._immunity): a stale value changes which monsters count."
+      ],
+      "tests": [
+        "tests/test_flow.py",
+        "tests/test_navigation.py",
+        "tests/test_control.py",
+        "tests/test_evade.py",
+        "tests/test_keymap.py",
+        "tests/test_landing.py",
+        "tests/test_loot_chain.py",
+        "tests/test_panel_speed.py",
+        "tests/test_replan.py",
+        "tests/test_sim.py",
+        "tests/test_touches.py"
+      ]
+    },
+    {
+      "path": "gamelab/motion/bodies.py",
+      "title": "Bodies: boxes for touches",
+      "tagline": "Her body box, a monster's, and where her feet go in the air or on a rope",
+      "summary": "The one definition of her body for touches across the stack: the v83 client's standing box, 22 units either side of her feet and 65 tall, tested for strict overlap against a monster's box. It also holds her feet along a planned flight (`Arc`) or climb (`Climb`), which flow.danger samples.",
+      "details_md": "A monster hurts her when its body and hers overlap: none of these maps' monsters has an attack of its own, so the client hurts by the body. So the planner checks a move by her box all along the way her feet go (on the ground, in the air, on a rope) against each monster's box wherever it can be by then (`localization.monsters.MonsterTrack.reach`), on any platform her box passes.\n\n**Her box** (`HER_HALF` 22, `HER_TALL` 65) is the v83 client's for her standing, Box(-22, -65, 22, 0) from her feet (RustMS's port of the decompiled client, `MobAttackRules.h` `user_body`, from FUN_0045183b). Her drawn sprites agree, without hair or equipment: standing -22 to 13 from her feet facing left and 64 tall, 62 jumping, 60-65 on a rope. Other models differ: HeavenClient's touch test takes her as a line 50 tall; the simulator's world has her 15 either side and 55 tall (`sim.world.HER_HALF`, the client's box with `--world client-body`). Nothing logged tells 50, 55 and 65 apart, and taller is the safe side for keeping clear. The one touch on a rope (climbing 11 -> 10 on Tree Dungeon, 2026-10-24) came with her feet 41-58 under platform 10's surface, so her body reaches at least 41 above her feet.\n\n**A monster's box** is the widest and tallest of its kind's frames (`localization.monsters.touch_box`, kept on each MonsterTrack as `half` and `tall`): a Horny or Green Mushroom 28 either side and 56 tall, a pig 34 and 54. A slime's hop (66 tall, 10-17 off the ground) isn't in it.\n\n**The pieces.** `touches(x, y, lo, hi, half, feet, top)` is the overlap test, with the monster's middle anywhere from `lo` to `hi` (its reach over a time). `low_end` is a platform's lowest surface point (map y down: the largest). `Arc` is her feet in the air between two plan times: x in a straight line from x0 to x1 (with the arrow held her speed stays within 9 units/s of what she left with), y by gravity from a start speed `vy` (-555 for a jump, 0 for a fall) up to the fall cap, never below the landing's height on the way down. `Climb` is a steady climb on a rope at one x.\n\nUsers: motion.flow (danger), attack.danger, attack.stance, attack.target, behavior.grind, behavior.hunt, behavior.retreat, control.navigator and sim.world.",
+      "lines": 91,
+      "key_items": [
+        {
+          "name": "touches",
+          "kind": "function",
+          "line": 38,
+          "signature": "def touches(x: float, y: float, lo: float, hi: float, half: float, feet: float, top: float) -> bool",
+          "summary": "Whether her box (feet at x, y) overlaps a monster's whose middle may be anywhere from lo to hi, its feet at `feet`, `half` wide either side and `top` tall. Strict overlap, as the client's rectangles have it."
+        },
+        {
+          "name": "HER_HALF",
+          "kind": "constant",
+          "line": 34,
+          "signature": "HER_HALF = 22.0",
+          "summary": "22.0: half her body's width, the v83 client's standing box."
+        },
+        {
+          "name": "HER_TALL",
+          "kind": "constant",
+          "line": 35,
+          "signature": "HER_TALL = 65.0",
+          "summary": "65.0: how tall she is from her feet up, the v83 client's standing box (her sprites: 64)."
+        },
+        {
+          "name": "Arc",
+          "kind": "dataclass",
+          "line": 51,
+          "signature": "@dataclass(frozen=True) class Arc",
+          "summary": "Her feet in the air between two plan times: from (x0, y0) to (x1, y1), leaving at vy (y down), drawn by gravity and capped at the fall speed; sideways in a straight line."
+        },
+        {
+          "name": "Arc.at",
+          "kind": "method",
+          "line": 64,
+          "signature": "def at(self, t: float, gravity: float, fall: float) -> tuple[float, float]",
+          "summary": "Where her feet are at t on the arc (clamped to its time): x in line, y by gravity up to the fall cap, never past the landing's height on the way down."
+        },
+        {
+          "name": "Climb",
+          "kind": "dataclass",
+          "line": 80,
+          "signature": "@dataclass(frozen=True) class Climb",
+          "summary": "Her feet on a rope at one x between two plan times, from y0 to y1 at a steady rate (flow's ROPE_SPEED)."
+        },
+        {
+          "name": "low_end",
+          "kind": "function",
+          "line": 45,
+          "signature": "def low_end(p: Platform) -> float",
+          "summary": "The lowest map y (the largest) of a platform's surface; Platform.top is the highest. Used to tell whether her path comes near a monster's platform at all."
+        }
+      ],
+      "inputs": [
+        "her feet (x, y) along a planned path (flow.Flow.path)",
+        "a monster's reach (lo, hi) and box (half, tall) from localization.monsters.MonsterTrack",
+        "Platform objects from localization.mapdata (low_end)"
+      ],
+      "outputs": [
+        "the overlap test and her box size for flow.danger, attack.danger, attack.stance, attack.target, behavior.grind, behavior.hunt, behavior.retreat",
+        "Arc and Climb pieces of a planned leg, for flow.danger, control.navigator (its own rope climbs, its lift-off check) and sim.world"
+      ],
+      "uses": [
+        "gamelab/localization/mapdata.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "HER_HALF",
+          "value": "22.0",
+          "meaning": "half her body's width (units)"
+        },
+        {
+          "name": "HER_TALL",
+          "value": "65.0",
+          "meaning": "her height from her feet up (units)"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "",
+          "what": "Her box for touches is the v83 client's standing box (22 either side, 65 tall), one definition for the whole stack.",
+          "why": "It is the client's own (RustMS's port of the decompile) and her sprites agree; nothing logged tells 50, 55 and 65 tall apart, and taller is the safe side. Before, the planner checked her runs alone, 15 units either side of her, against the monsters of the platform she ran on."
+        }
+      ],
+      "gotchas": [
+        "The simulator's world uses a different body (15 either side, 55 tall) unless run with `--world client-body`.",
+        "Her prone box ((-46, -31, 0, 0) from her feet) isn't used: lying down to drop she's checked as standing.",
+        "A slime's hop (66 tall, 10-17 off the ground) is not in its box.",
+        "Arc moves x in a straight line; it is a picture of the flight for touch checks, not the flight itself (physics.flight is)."
+      ],
+      "tests": [
+        "tests/test_danger.py",
+        "tests/test_flow.py",
+        "tests/test_harness.py",
+        "tests/test_keymap.py",
+        "tests/test_replan.py",
+        "tests/test_rope_hang.py",
+        "tests/test_rope_top.py",
+        "tests/test_ropes.py"
+      ]
+    },
+    {
+      "path": "gamelab/motion/steady.py",
+      "title": "Steady: her measured walks and climbs",
+      "tagline": "Offline estimator of her steady walk and climb speeds from a run's places",
+      "summary": "Finds her steady walks and climbs in a run's telemetry, one place at a time, fits a line to each and reports her walk on flat ground and her climb rate with robust spreads. It feeds analysis.walkfit, which checks the client's formula against what she did; her planner doesn't measure (the user, 2026-11-02: \"Just use panel, no need to measure.\").",
+      "details_md": "**Input.** Her places, in time order (`Place`: t, map x and y, her platform id, her mode 'ground'/'air'/'rope', how she was placed 'tag'/'camera'/'dot'). `place_of` turns a scene record's `her` into one; records from before the mode was written (the thief's of 10-25 to 30) had `grounded`, and with a map model a place off the ground within `ROPE_DX` (4) of a rope that covers her y counts as 'rope'.\n\n**Walks** (`Walks.add`, `_flush`). A stretch of places on one platform, on the ground, placed by her name tag or the camera (`PLACED_BY`: not the minimap's dot), at most `GAP_S` (0.2 s) apart, each step moving one way at 90-220 units/s (`WALK_BAND`), lasting at least `STEADY_S` (0.8 s) over `MIN_PLACES` (6) places. A knock or fall puts her in the air and ends the stretch; a misplaced look is off the line and the stretch isn't taken. A least-squares line (`_fit`) is fitted from `SETTLE_S` (0.25 s) after its start (her run-up) to `TAIL_S` (0.15 s) before its end (her braking), with no place more than `FIT_UNITS` (6) off it and at least `FIT_LEAST` (4) places. Its slope is her x speed. `ground_factor` takes a platform's slopes out by the v83 rule (RustMS `move_shoe`: uphill she walks her walk along the slope, downhill (1 + s²) of it, s the slope's sine; her x speed is that times the cosine), giving a `Walk` whose `limit` is her walk on flat ground (the shoe's vmax).\n\n**Climbs** (`Climbs`). Places in mode 'rope' within `ROPE_DX` of the stretch's first x, 60-200 units/s (`CLIMB_BAND`), at least `CLIMB_STEADY_S` (0.4 s) and `CLIMB_PLACES` (5), fitted from `CLIMB_SETTLE_S` (0.1) to `CLIMB_TAIL_S` (0.1) before the end within `CLIMB_FIT` (4): an `Ascent`, up (`UP` -1) and down (`DOWN` +1) apart.\n\n**Summaries.** `measure(places, model)` runs both over a run. `estimate(values)` gives the median, its quartiles and the median's standard error (1.2533 x 1.4826 x the median absolute deviation / √n); a stretch is one value however long. `map_model` loads and caches a map's model (its slopes and ropes) for walkfit, None without game data.\n\n**What it found.** The magician's hour of 2026-11-02: 66 walks, median 149.44 (bootstrap 90% 149.1-150.0); the thief's Tree Dungeon runs of 10-25 to 30: 243 walks, 151.19, against the client's 150 and 151.25 for SPEED 100 and 101. Raw, with each walk's braking tail and slopes left in, 148.2 (81 walks). Climbs that hour: 42 up, median 120.1; 5 down, 119.6 (the formula: 120). The thief's climbs of 10-25 to 27 were placed by the minimap's dot alone (its 4-unit steps), so none is taken.",
+      "lines": 316,
+      "key_items": [
+        {
+          "name": "Walks",
+          "kind": "class",
+          "line": 158,
+          "signature": "class Walks",
+          "summary": "Her steady walks as her places come in (`add` one at a time in time order, `end` when they stop); with a map model, its platforms' slopes are taken out."
+        },
+        {
+          "name": "Walks.add",
+          "kind": "method",
+          "line": 172,
+          "signature": "def add(self, q: Place) -> Walk | None",
+          "summary": "Takes in one place: extends the current stretch if it's on the same platform, within GAP_S, at a walking speed and the same way; otherwise flushes it. Returns the Walk a stretch ended, if one was taken."
+        },
+        {
+          "name": "Walks._flush",
+          "kind": "method",
+          "line": 196,
+          "signature": "def _flush(self) -> Walk | None",
+          "summary": "Turns a finished stretch into a Walk if it is long enough (STEADY_S, MIN_PLACES) and fits a line from SETTLE_S after its start to TAIL_S before its end within FIT_UNITS, slopes taken out."
+        },
+        {
+          "name": "Climbs",
+          "kind": "class",
+          "line": 219,
+          "signature": "class Climbs",
+          "summary": "Her steady climbs as her places come in: the same scheme as Walks, on a rope at one x, up and down apart."
+        },
+        {
+          "name": "_fit",
+          "kind": "function",
+          "line": 89,
+          "signature": "def _fit(ts: list[float], vs: list[float], start: float, end: float, most: float) -> tuple[float, int] | None",
+          "summary": "The least-squares slope through (t, value) points between two times, and how many points, if there are FIT_LEAST or more and none is `most` or more off the line; else None."
+        },
+        {
+          "name": "ground_factor",
+          "kind": "function",
+          "line": 108,
+          "signature": "def ground_factor(platform: Platform | None, x0: float, x1: float, way: int) -> float",
+          "summary": "Her walk on flat ground over her x speed on a platform's stretch, by the v83 slope rule averaged over every unit of x: 1 on flat ground or with no platform."
+        },
+        {
+          "name": "measure",
+          "kind": "function",
+          "line": 276,
+          "signature": "def measure(places: Iterable[Place], model: MapModel | None = None, slopes: bool = True, tail: float = TAIL_S, gap: float = GAP_S) -> tuple[list[Walk], list[Ascent]]",
+          "summary": "Every steady walk and climb in a sequence of places: what analysis.walkfit calls over a run's records."
+        },
+        {
+          "name": "estimate",
+          "kind": "function",
+          "line": 305,
+          "signature": "def estimate(values: list[float]) -> Estimate | None",
+          "summary": "The median of the stretches' values with its quartiles and the median's standard error from the median absolute deviation (Estimate); None with no values."
+        },
+        {
+          "name": "place_of",
+          "kind": "function",
+          "line": 72,
+          "signature": "def place_of(t: float, her: dict | None, model: MapModel | None = None) -> Place | None",
+          "summary": "A scene record's `her` at a time as a Place, or None if it didn't place her; reads old records' `grounded` and finds a rope under her with a map model."
+        },
+        {
+          "name": "PLACED_BY",
+          "kind": "constant",
+          "line": 39,
+          "signature": "PLACED_BY = (\"tag\", \"camera\")",
+          "summary": "('tag', 'camera'): only places from her name tag or the camera make a stretch, not the minimap's dot."
+        }
+      ],
+      "inputs": [
+        "her places from a run's telemetry scene records (the perception service's or the hunt's), via analysis.walkfit",
+        "a map model from localization.mapdata (slopes, ropes), loaded by map_model"
+      ],
+      "outputs": [
+        "Walk and Ascent stretches and Estimate summaries for analysis.walkfit"
+      ],
+      "uses": [
+        "gamelab/localization/mapdata.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "GAP_S",
+          "value": "0.2",
+          "meaning": "s between two places of a stretch at most (scene records come about 7.5 a second)"
+        },
+        {
+          "name": "WALK_BAND",
+          "value": "(90.0, 220.0)",
+          "meaning": "units/s from place to place of a walk"
+        },
+        {
+          "name": "STEADY_S / MIN_PLACES",
+          "value": "0.8 / 6",
+          "meaning": "a walk this long at least, over this many places"
+        },
+        {
+          "name": "SETTLE_S / TAIL_S",
+          "value": "0.25 / 0.15",
+          "meaning": "s left out at a walk's start (run-up) and end (braking)"
+        },
+        {
+          "name": "FIT_UNITS / FIT_LEAST",
+          "value": "6.0 / 4",
+          "meaning": "no place further off the line; least places fitted"
+        },
+        {
+          "name": "ROPE_DX",
+          "value": "4.0",
+          "meaning": "units: her x on one rope, give or take"
+        },
+        {
+          "name": "CLIMB_BAND",
+          "value": "(60.0, 200.0)",
+          "meaning": "units/s from place to place of a climb"
+        },
+        {
+          "name": "CLIMB_STEADY_S / CLIMB_PLACES",
+          "value": "0.4 / 5",
+          "meaning": "a climb this long at least, over this many places"
+        },
+        {
+          "name": "CLIMB_SETTLE_S / CLIMB_TAIL_S / CLIMB_FIT",
+          "value": "0.1 / 0.1 / 4.0",
+          "meaning": "a climb's start and end left out; its fit tolerance"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-11-02",
+          "what": "Her planner doesn't measure her walk and climb; this estimator is for offline checks only (analysis.walkfit).",
+          "why": "Shown that the client's formula and the measures agree and that following a measure online mostly chases its noise, the user: \"Just use panel, no need to measure.\""
+        }
+      ],
+      "gotchas": [
+        "Only name-tag and camera places count; the thief's early climbs, placed by the minimap dot alone, give no Ascent.",
+        "Without a map model (no game data) Tree Dungeon's slopes are not taken out, and limit equals the raw x speed.",
+        "UP is -1 and DOWN +1 because map y points down."
+      ],
+      "tests": [
+        "tests/test_steady.py",
+        "tests/test_walkfit.py"
+      ]
+    },
+    {
+      "path": "gamelab/motion/__init__.py",
+      "title": "The motion package",
+      "tagline": "Only a docstring: what motion holds and what it may import",
+      "summary": "The package's docstring names its parts (body, physics, route, flow), says the closed loops that carry its plans out are control.navigator and control.mover, and that motion may import only localization and the shared modules (tests/test_architecture.py enforces it).",
+      "details_md": "No code: a 7-line docstring. It describes the package as getting from A to B: how the game moves her step by step (body), her physics and where a jump or fall lands (physics), the moves that link platforms and the quickest route over them (route), and several moves turned into one continuous key timeline (flow).\n\nThe layer rule it states is checked by `tests/test_architecture.py`: every file under `gamelab/motion/` may import only `gamelab.localization` (`ALLOWED[\"motion\"] = {\"localization\"}`) besides itself and the shared modules (`capture`, `character`, `classes`, `directions`, `gcstats`, `native`, `paths`, `screen`, `telemetry`, `window`). Of those, motion uses `character` (her stats), `native` (the C flight), `paths` (config.toml) and `directions` (left and right); from outside gamelab it takes `maplehelper.config` (her stats' record type) and `maplehelper.engine`'s LEFT and RIGHT. That keeps motion free of perception, fighting and keys: pure planning that attack, control, behavior, ui, analysis and sim call.",
+      "lines": 7,
+      "key_items": [],
+      "inputs": [],
+      "outputs": [],
+      "uses": [],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [],
+      "decisions": [],
+      "gotchas": [
+        "bodies.py and steady.py are not named in the docstring but live in the package.",
+        "The elevated key player must not load any of motion: tests/test_architecture.py starts it in a child process and checks no gamelab.motion module (nor gamelab.native) was imported."
+      ],
+      "tests": [
+        "tests/test_architecture.py"
+      ]
+    }
+  ],
+  "data_types": [
+    {
+      "name": "Shoe",
+      "module": "gamelab/motion/body.py",
+      "line": 103,
+      "summary": "How the game moves her (or a monster): her limits and accelerations. Made by physics.shoe_of from her stats; used by every closed form, by fly, by the simulator's world and (as a key) by the C flight.",
+      "fields": [
+        {
+          "name": "vmax",
+          "type": "float",
+          "meaning": "walking speed, units/s: 125 x (SPEED + bonus)/100"
+        },
+        {
+          "name": "acc",
+          "type": "float",
+          "meaning": "speeding up or turning round with an arrow on the ground: 1400 units/s²"
+        },
+        {
+          "name": "drag",
+          "type": "float",
+          "meaning": "braking with no arrow (or above vmax): 800 units/s²"
+        },
+        {
+          "name": "vjump",
+          "type": "float",
+          "meaning": "the jump's upward speed: 555 x JUMP/100"
+        },
+        {
+          "name": "gravity",
+          "type": "float",
+          "meaning": "2000 units/s²"
+        },
+        {
+          "name": "fall",
+          "type": "float",
+          "meaning": "the fall-speed cap: 670 units/s"
+        },
+        {
+          "name": "air_acc",
+          "type": "float",
+          "meaning": "an arrow in the air: 200 units/s² toward ..."
+        },
+        {
+          "name": "air_speed",
+          "type": "float",
+          "meaning": "... at most 8.9 units/s that way"
+        },
+        {
+          "name": "air_drag",
+          "type": "float",
+          "meaning": "no arrow in the air: 1 units/s²"
+        },
+        {
+          "name": "air_drag_fall",
+          "type": "float",
+          "meaning": "... or 100 once she falls at the cap"
+        },
+        {
+          "name": "kick",
+          "type": "float",
+          "meaning": "0.8: the jump's kick, as a share of vmax"
+        },
+        {
+          "name": "rope_vx",
+          "type": "float",
+          "meaning": "1.3: a jump off a rope, out, as a share of vmax"
+        },
+        {
+          "name": "rope_vy",
+          "type": "float",
+          "meaning": "0.5: ... and up, as a share of vjump"
+        }
+      ]
+    },
+    {
+      "name": "Lags",
+      "module": "gamelab/motion/body.py",
+      "line": 140,
+      "summary": "Median delays from a key to the game acting on it, the wait for its 30 ms step included. physics.LAGS is the one the planner uses; the simulator spreads them by the sd_* fields.",
+      "fields": [
+        {
+          "name": "on",
+          "type": "float",
+          "meaning": "arrow pressed: 0.066 s"
+        },
+        {
+          "name": "off",
+          "type": "float",
+          "meaning": "arrow let go: 0.068 s"
+        },
+        {
+          "name": "jump",
+          "type": "float",
+          "meaning": "jump key to leaving the ground: 0.065 s"
+        },
+        {
+          "name": "drop",
+          "type": "float",
+          "meaning": "jump key with down held to falling through: 0.28 s"
+        },
+        {
+          "name": "sd_on, sd_off, sd_jump",
+          "type": "float",
+          "meaning": "spread (0.0077 s) of when the game sees each key, before the wait for its step"
+        }
+      ]
+    },
+    {
+      "name": "Flight",
+      "module": "gamelab/motion/body.py",
+      "line": 536,
+      "summary": "Where an arc through the air ends, from body.fly; physics.flight keeps (platform, land_x, seconds, vx_land) of it in its cache.",
+      "fields": [
+        {
+          "name": "platform",
+          "type": "Platform | None",
+          "meaning": "where she lands (None: nowhere within the time limit)"
+        },
+        {
+          "name": "land_x",
+          "type": "float",
+          "meaning": "map x of the landing"
+        },
+        {
+          "name": "seconds",
+          "type": "float",
+          "meaning": "s in the air"
+        },
+        {
+          "name": "vx_land",
+          "type": "float",
+          "meaning": "sideways speed as she lands (0 after a wall stopped her)"
+        },
+        {
+          "name": "path",
+          "type": "tuple[(x, y), ...]",
+          "meaning": "her feet after every step, when asked for"
+        },
+        {
+          "name": "speeds",
+          "type": "tuple[(vx, vy), ...]",
+          "meaning": "her speeds then (the simulator flies on from any step with another arrow)"
+        }
+      ]
+    },
+    {
+      "name": "Replay",
+      "module": "gamelab/motion/body.py",
+      "line": 651,
+      "summary": "Her body on flat ground under a key timeline (body.replay): what analysis.physics_check puts against her tracked recordings.",
+      "fields": [
+        {
+          "name": "points",
+          "type": "list[(t, x, y)]",
+          "meaning": "her position after every 5 ms tick"
+        },
+        {
+          "name": "takeoffs",
+          "type": "list[(t, ground speed, takeoff speed)]",
+          "meaning": "each lift-off, with the kick applied"
+        }
+      ]
+    },
+    {
+      "name": "Jump",
+      "module": "gamelab/motion/physics.py",
+      "line": 420,
+      "summary": "One kind of jump a key plan makes, from standing, timed from the jump key (physics.jump_of). attack.reach and attack.stance use it, with physics.pose, to know where she is when an attack from a jump starts.",
+      "fields": [
+        {
+          "name": "kind",
+          "type": "str",
+          "meaning": "'up', 'forward' (the kick), 'back' (the jump back) or 'run' (at full speed already)"
+        },
+        {
+          "name": "way",
+          "type": "int",
+          "meaning": "+1 right, -1 left, 0 up"
+        },
+        {
+          "name": "vx",
+          "type": "float",
+          "meaning": "her sideways speed leaving the ground"
+        },
+        {
+          "name": "lead_s",
+          "type": "float",
+          "meaning": "s from the plan's first key (the arrow) to the jump key"
+        },
+        {
+          "name": "run",
+          "type": "float",
+          "meaning": "how far she has gone along `way` by lift-off"
+        }
+      ]
+    },
+    {
+      "name": "Move",
+      "module": "gamelab/motion/route.py",
+      "line": 218,
+      "summary": "One move between platforms, made by route.moves and searched by route.Planner; flow plans each as a leg and control.mover does the ones flow can't predict. flow adds the kinds 'hop' and 'walk'.",
+      "fields": [
+        {
+          "name": "kind",
+          "type": "str",
+          "meaning": "climb | climb_down | jump_up | jump | walk_off | drop | rope_jump (flow: hop, walk)"
+        },
+        {
+          "name": "src, dst",
+          "type": "int",
+          "meaning": "platform ids"
+        },
+        {
+          "name": "x",
+          "type": "float",
+          "meaning": "where on src she starts the move"
+        },
+        {
+          "name": "land_x",
+          "type": "float",
+          "meaning": "where on dst she ends up"
+        },
+        {
+          "name": "direction",
+          "type": "str",
+          "meaning": "left/right for jumps and walk-offs"
+        },
+        {
+          "name": "seconds",
+          "type": "float",
+          "meaning": "the move's cost (flight, climb or fall plus its extra)"
+        },
+        {
+          "name": "rope_x, rope_top, rope_bottom",
+          "type": "float | None",
+          "meaning": "the rope, for climbs and rope moves"
+        },
+        {
+          "name": "takeoff",
+          "type": "float | None",
+          "meaning": "running jumps: where she leaves the ground"
+        },
+        {
+          "name": "hang",
+          "type": "float | None",
+          "meaning": "rope_jump: her feet's y on the rope where she jumps off"
+        },
+        {
+          "name": "onto",
+          "type": "Rope | None",
+          "meaning": "rope_jump: the rope she jumps onto (None: a platform)"
+        },
+        {
+          "name": "chance",
+          "type": "float",
+          "meaning": "how likely it lands on dst (below 1 for ways out of traps and unsure grabs)"
+        }
+      ]
+    },
+    {
+      "name": "Way",
+      "module": "gamelab/motion/route.py",
+      "line": 239,
+      "summary": "One of the ways from a place onto a platform (Planner.alternatives, quickest, through): what route diversity chooses among.",
+      "fields": [
+        {
+          "name": "moves",
+          "type": "tuple[Move, ...]",
+          "meaning": "its moves"
+        },
+        {
+          "name": "cost",
+          "type": "float",
+          "meaning": "what they cost the trip, weights and penalties included"
+        },
+        {
+          "name": "via",
+          "type": "Move | None",
+          "meaning": "the move it is the best route through (None: the quickest)"
+        }
+      ]
+    },
+    {
+      "name": "Body",
+      "module": "gamelab/motion/flow.py",
+      "line": 146,
+      "summary": "Her predicted state at a moment of a chain: where each leg starts and ends. The navigator makes the first from its last look (or where the previous chain ends).",
+      "fields": [
+        {
+          "name": "t",
+          "type": "float",
+          "meaning": "s from the start of the plan"
+        },
+        {
+          "name": "x",
+          "type": "float",
+          "meaning": "map x"
+        },
+        {
+          "name": "platform",
+          "type": "Platform",
+          "meaning": "the platform she's on"
+        },
+        {
+          "name": "run",
+          "type": "int",
+          "meaning": "running that way with the arrow held (+1, -1) or 0"
+        },
+        {
+          "name": "landed",
+          "type": "bool",
+          "meaning": "she touches down at t (the next jump or drop key must come after)"
+        },
+        {
+          "name": "slack",
+          "type": "float",
+          "meaning": "how far off t may be by now (errors add up leg by leg)"
+        },
+        {
+          "name": "early_arrow",
+          "type": "float | None",
+          "meaning": "after a climb: the next arrow may go down this early"
+        },
+        {
+          "name": "v",
+          "type": "float | None",
+          "meaning": "her speed along the ground (signed); None means full speed if running, else standing"
+        }
+      ]
+    },
+    {
+      "name": "Span",
+      "module": "gamelab/motion/flow.py",
+      "line": 171,
+      "summary": "Her on the ground of one platform between two moments, moving linearly: a leg's runs and stands, for touch checks and for the navigator's watch.",
+      "fields": [
+        {
+          "name": "platform",
+          "type": "int",
+          "meaning": "platform id"
+        },
+        {
+          "name": "t0, t1",
+          "type": "float",
+          "meaning": "start and end, s into the plan"
+        },
+        {
+          "name": "x0, x1",
+          "type": "float",
+          "meaning": "map x at start and end"
+        }
+      ]
+    },
+    {
+      "name": "Leg",
+      "module": "gamelab/motion/flow.py",
+      "line": 186,
+      "summary": "One move as planned by flow: her body where it starts and ends, and every piece of the way her feet go (for Flow.danger and the navigator).",
+      "fields": [
+        {
+          "name": "move",
+          "type": "Move",
+          "meaning": "the route move (or a hop)"
+        },
+        {
+          "name": "start, end",
+          "type": "Body",
+          "meaning": "her body at the leg's start and end"
+        },
+        {
+          "name": "spans",
+          "type": "list[Span]",
+          "meaning": "her runs on the ground"
+        },
+        {
+          "name": "air",
+          "type": "list[Arc]",
+          "meaning": "her flights"
+        },
+        {
+          "name": "rope",
+          "type": "list[Climb]",
+          "meaning": "her climbs up a rope"
+        },
+        {
+          "name": "stands",
+          "type": "list[Span]",
+          "meaning": "where she stands meanwhile (lift-off, a drop's lying down, a landing's slide, a climb-over)"
+        }
+      ]
+    },
+    {
+      "name": "Keys",
+      "module": "gamelab/motion/flow.py",
+      "line": 200,
+      "summary": "The key events of one plan, with the arrow tracked so a run carries on across legs. Its sorted() events become the key plan the navigator sends to the key player.",
+      "fields": [
+        {
+          "name": "names",
+          "type": "dict[str, str]",
+          "meaning": "left/right/jump/up/down/pick to her configured key names"
+        },
+        {
+          "name": "events",
+          "type": "list[list]",
+          "meaning": "[ms, key, 'down' | 'up'] or [ms, key, 'hold', end ms]"
+        },
+        {
+          "name": "arrow",
+          "type": "int",
+          "meaning": "the arrow held now: -1, 0 or +1"
+        }
+      ]
+    },
+    {
+      "name": "Arc",
+      "module": "gamelab/motion/bodies.py",
+      "line": 51,
+      "summary": "Her feet in the air between two plan times (a leg's flight, Leg.air): sampled by Flow.danger; the navigator also uses a jump's arc start to check, from her glanced positions, that she really lifted off.",
+      "fields": [
+        {
+          "name": "t0, t1",
+          "type": "float",
+          "meaning": "s into the plan"
+        },
+        {
+          "name": "x0, y0",
+          "type": "float",
+          "meaning": "where she leaves"
+        },
+        {
+          "name": "x1, y1",
+          "type": "float",
+          "meaning": "where she lands"
+        },
+        {
+          "name": "vy",
+          "type": "float",
+          "meaning": "vertical speed leaving (y down: -555 a jump, 0 a fall)"
+        }
+      ]
+    },
+    {
+      "name": "Climb",
+      "module": "gamelab/motion/bodies.py",
+      "line": 80,
+      "summary": "Her feet on a rope between two plan times, climbing steadily.",
+      "fields": [
+        {
+          "name": "t0, t1",
+          "type": "float",
+          "meaning": "s into the plan"
+        },
+        {
+          "name": "x",
+          "type": "float",
+          "meaning": "the rope's x"
+        },
+        {
+          "name": "y0, y1",
+          "type": "float",
+          "meaning": "her feet's y at start and end"
+        }
+      ]
+    },
+    {
+      "name": "Place",
+      "module": "gamelab/motion/steady.py",
+      "line": 61,
+      "summary": "Her place at a moment, as steady's estimator takes it from a telemetry scene record (steady.place_of).",
+      "fields": [
+        {
+          "name": "t",
+          "type": "float",
+          "meaning": "s"
+        },
+        {
+          "name": "x, y",
+          "type": "float",
+          "meaning": "map position"
+        },
+        {
+          "name": "platform",
+          "type": "int | None",
+          "meaning": "her platform's id (None off one)"
+        },
+        {
+          "name": "mode",
+          "type": "str | None",
+          "meaning": "'ground', 'air' or 'rope'"
+        },
+        {
+          "name": "how",
+          "type": "str | None",
+          "meaning": "how she was placed: 'tag', 'camera', 'dot'"
+        }
+      ]
+    },
+    {
+      "name": "Walk",
+      "module": "gamelab/motion/steady.py",
+      "line": 133,
+      "summary": "One steady walk found by steady.Walks, for analysis.walkfit.",
+      "fields": [
+        {
+          "name": "t",
+          "type": "float",
+          "meaning": "when it started (s)"
+        },
+        {
+          "name": "platform",
+          "type": "int | None",
+          "meaning": "its platform"
+        },
+        {
+          "name": "way",
+          "type": "int",
+          "meaning": "+1 right, -1 left"
+        },
+        {
+          "name": "span",
+          "type": "float",
+          "meaning": "how far it went (units)"
+        },
+        {
+          "name": "v",
+          "type": "float",
+          "meaning": "her x speed over it (units/s)"
+        },
+        {
+          "name": "ground",
+          "type": "float",
+          "meaning": "the slope factor (ground_factor)"
+        },
+        {
+          "name": "limit",
+          "type": "float",
+          "meaning": "her walk on flat ground: v x ground"
+        },
+        {
+          "name": "n",
+          "type": "int",
+          "meaning": "places fitted"
+        }
+      ]
+    },
+    {
+      "name": "Ascent",
+      "module": "gamelab/motion/steady.py",
+      "line": 148,
+      "summary": "One steady climb found by steady.Climbs.",
+      "fields": [
+        {
+          "name": "t",
+          "type": "float",
+          "meaning": "when it started (s)"
+        },
+        {
+          "name": "way",
+          "type": "int",
+          "meaning": "UP (-1) or DOWN (+1)"
+        },
+        {
+          "name": "span",
+          "type": "float",
+          "meaning": "how far (units)"
+        },
+        {
+          "name": "v",
+          "type": "float",
+          "meaning": "her climb speed (units/s)"
+        },
+        {
+          "name": "n",
+          "type": "int",
+          "meaning": "places fitted"
+        }
+      ]
+    },
+    {
+      "name": "Estimate",
+      "module": "gamelab/motion/steady.py",
+      "line": 295,
+      "summary": "A robust summary over stretches (steady.estimate): what walkfit reports.",
+      "fields": [
+        {
+          "name": "value",
+          "type": "float",
+          "meaning": "the median"
+        },
+        {
+          "name": "q1, q3",
+          "type": "float",
+          "meaning": "its quartiles"
+        },
+        {
+          "name": "se",
+          "type": "float | None",
+          "meaning": "the median's standard error (None with one value)"
+        },
+        {
+          "name": "n",
+          "type": "int",
+          "meaning": "how many stretches"
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "map-to-graph",
+      "title": "How a map becomes a route graph",
+      "summary": "Every move between platforms is found by flying candidate jumps, walk-offs and drops with the game's physics, keeping only those that land surely, and costing each in seconds.",
+      "trigger": "control.navigator builds route.Planner(model) for the map (and builds it again when physics.EPOCH changes after her walk changed).",
+      "steps": [
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "Planner",
+          "text": "The constructor calls moves(model), then indexes the moves by source platform (`by_src`) and by landing node (platform, landing x rounded to a unit: `_xs`, `_into`) for the searches.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "moves",
+          "text": "Builds the moves in this order: the rope moves; then for each place (a platform that isn't a twin) its jumps up, end moves and jumps from along it, then its drops; then the rope jumps; then the ways out of traps.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "_rope_moves",
+          "text": "For each rope with a platform at its top (`hung_from`): a climb from every platform it can be grabbed from (a rope ending 82-95 up kept at a 0.5 chance), or jumped at past a platform's end (`_past_end`), and a climb-down onto what's below.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "_jump_up_moves",
+          "text": "Straight up through each platform 8 to 65 units overhead, from the middle of the overlap, kept if the flight lands on it.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "_end_moves",
+          "text": "Off each end: a running jump looked for from 33 units back, a unit nearer at a time down to 15 (END_LOOK), the first that surely lands; and a walk-off flown at full speed, kept only if she can slide to a stop where it lands.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "_sure_running_jump",
+          "text": "Each candidate jump is flown at full speed and must land 9 units (LANDING_ROOM) in from the ends of another platform, and still land on it taking off 12 units early or late, 10% slower or at 0.85x (physics.sure_landing).",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/physics.py",
+          "symbol": "flight",
+          "text": "Every flight (through physics.fly) has its start rounded and looked up in the 20,000-landing cache; walls are the game's rule for the platform's group; a miss is flown in C (native.fly) when the DLL is built, else by body.fly.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/body.py",
+          "symbol": "fly",
+          "text": "The flight itself: 5 ms air steps, stopped sideways by the walls given, landing on the first platform whose surface her feet cross.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "_placed",
+          "text": "A found jump's takeoff is moved (within 30 units, never nearer the end than 15) to where it still lands 20 units in even if she takes off up to 22 units early (flow's 10-unit spread plus 12 of slop) or 12 late; failing that, under the slop alone. The move starts RUN_UP (20) before the takeoff.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "_along_jumps",
+          "text": "Running jumps from every 10 units along the platform, kept 60 apart and up to 3 (plus the last) per landing platform, each placed by _placed.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "_without_needless_jumps",
+          "text": "The place's jumps, de-duplicated (`_distinct`), lose any running jump more than 10 units down to where walking off that end gets anyway.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "_drop_moves",
+          "text": "Drops onto each platform underneath, from the middle of the overlap, moved clear of footholds that forbid dropping and of cliffs with nothing under them, then away from ropes on the platform below where it can; kept if the fall lands there.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "_rope_jumps",
+          "text": "Jumps off each rope sideways onto a platform or onto another rope and up it, tried every 5 units up it and kept where they end the same 15 units higher or lower and at other speeds; one onto a platform is kept only where no other move between the same platforms is quicker.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "_ways_out",
+          "text": "A place from which the sure moves never reach the map's main part gets, per place with a way back, the running jump from the middle of the widest stretch of takeoffs landing there, kept if its chance is at least 0.5, each miss costed at 3 s.",
+          "process": ""
+        }
+      ]
+    },
+    {
+      "id": "trip-route",
+      "title": "How a trip picks its route",
+      "summary": "Dijkstra over (platform, landing x) nodes finds the quickest route, weighed by the trip's random weights and penalized for monsters and platforms to keep off; with route diversity on (ROUTES over 1, off by default), a softmax picks among several distinct ways at the trip's first plan.",
+      "trigger": "control.navigator plans or replans a trip to a platform (Navigator._route).",
+      "steps": [
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator._route",
+          "text": "With ROUTES 1 (the default), or a trip with a deadline that goes the quickest way, it asks Planner.plan, the moves weighed by the trip's random 1 to 1.35 each (Navigator.weight, kept through its replans) and penalized for monsters in the way and platforms to keep off. With ROUTES over 1, at the trip's first plan, it asks Planner.alternatives and route.choose instead.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "Planner.plan",
+          "text": "Maps a twin to its place and runs the search; with `dst_x` the walk on from where she lands to that x counts too.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "Planner._search",
+          "text": "Dijkstra: each edge is the walk to the move's start at WALK_SPEED, plus the move's seconds, plus its RISK, times its weight, plus its penalty; the route is read back from the goal.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "Planner.alternatives",
+          "text": "(ROUTES over 1) The quickest first; then one search out from her (`_out`) and one back from the goal (`_back`) price the best route through every other move, and distinct ways (`way_of`: the platforms and ropes they go through) within 35% (STRETCH) of the quickest, onto no platform twice, are kept, up to ROUTES.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "chances",
+          "text": "A softmax over the ways' times (a way 10% dearer weighs 1/e as much), with at least 20% (FLOOR) for a way through a move she hasn't set off on for 2 minutes (STALE_S), half of all chances at most between them.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "choose",
+          "text": "Draws one with the navigator's rng. The trip keeps to it through replans (Planner.through its move) until she has set off on that move or is past it, or it got more than STRETCH of the quickest dearer, or would take her back: then the quickest from where she is.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "route_record",
+          "text": "The route, where it was planned from, what it kept off and avoided, and the ways it chose among go to telemetry as a 'route' record, which analysis.coverage reads.",
+          "process": ""
+        }
+      ]
+    },
+    {
+      "id": "moves-to-keys",
+      "title": "How route moves become one key timeline",
+      "summary": "flow predicts her body move by move with the engine's closed forms and the game's physics, choosing for each move the way the next can follow, checking every leg against the monsters, and writes all the keys as one plan.",
+      "trigger": "control.navigator hands Flow.chain the route's moves, her predicted body and the monster tracks from its last look.",
+      "steps": [
+        {
+          "module": "gamelab/motion/flow.py",
+          "symbol": "Flow.chain",
+          "text": "For each move, until 5 legs or 3.5 s: try its variants ('run', 'stop', 'stand'; for the chain's last leg 'stop' first) on a copy of the keys, keeping each whose leg no monster can touch.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/flow.py",
+          "symbol": "Flow.leg",
+          "text": "Dispatches by kind to _jump, _walk_off, _jump_up, _drop, _climb or _walk; a climb-down or a rope jump returns None, which ends the chain as 'unpredictable' (control.mover does those closed loop).",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/flow.py",
+          "symbol": "Flow._jump_from",
+          "text": "For a running jump: a run-up if needed (_runup), the arrow, the jump key from liftoff (never in the 150 ms blind spot: physics.sure_jump_ms), the flight from physics.flight, and sure_takeoff.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/flow.py",
+          "symbol": "Flow._landing",
+          "text": "Lands her running on with the arrow held, or stopping (the arrow let go 0.1 s before), after the game's next step; adds 25 ms of slack.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/flow.py",
+          "symbol": "Flow.danger",
+          "text": "Samples her feet every 0.05 s along the leg's spans, arcs, climbs and stands (and, for the last leg, standing 1 s at its end), and tests her box against each monster's reach at that time.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/bodies.py",
+          "symbol": "touches",
+          "text": "The overlap test: her 44 x 65 box against the monster's box anywhere in its reach.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/flow.py",
+          "symbol": "Flow._priced",
+          "text": "With a landing price from the navigator and the first clear way landing priced above 0: other variants, the route's other moves between the same platforms and wider takeoffs are tried, and the cheapest by time + price + walk on wins if it lands priced less.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/flow.py",
+          "symbol": "Flow._hop_then",
+          "text": "If no variant is clear (and `hops` is on), try a hop over the monster in the way of its run on her platform (Flow.hop), then the move from where she lands, both checked against the other monsters.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/flow.py",
+          "symbol": "Flow.chain",
+          "text": "Of the clear variants, the first the next move can follow on from is kept. Stopped for a monster, legs are backed off until none could reach her standing at the end; the arrow is let go (unless a chain cut for length keeps going) and pick-up taps added.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/flow.py",
+          "symbol": "Keys.sorted",
+          "text": "The events, holds merged, in time order: the navigator sends them as one key plan to the key player and watches her against Flow.expected.",
+          "process": ""
+        }
+      ]
+    },
+    {
+      "id": "speed-change",
+      "title": "How her walk changes mid-hunt",
+      "summary": "Her planned walk and climb follow her stat window's SPEED by the client's formula; a change is applied only where no chain runs, and rebinds every walk-dependent name in every module at once.",
+      "trigger": "behavior.hunter has her stat window's SPEED: at its start the one her stats file kept from her last read (else her profile's), or one read later in the hunt loop.",
+      "steps": [
+        {
+          "module": "gamelab/motion/physics.py",
+          "symbol": "propose",
+          "text": "behavior.hunter proposes the SPEED (Hunter._speed_set), with a callback told the old and new (walk, climb, SPEED) once it's made; a newer proposal replaces an older one.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/physics.py",
+          "symbol": "settle",
+          "text": "At a settle point where no chain of hers runs (at once at a hunter's start; in the hunt loop at the start of its next pass, Hunt.run, or of a navigator's pass, Navigator._follow_walk) the proposal is made: settle calls set_speed.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/physics.py",
+          "symbol": "set_speed",
+          "text": "A new shoe from shoe_of at that SPEED (her profile's own if it's her profile's SPEED) and the climb from climb_of, handed to _apply.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/physics.py",
+          "symbol": "_apply",
+          "text": "If the walk or climb changed: _derive recomputes every name in WALK_NAMES (SHOE, WALK_SPEED, CLIMB_SPEED, RUN_LAG, STOP_RUN, BLIND_ENDS_MS, KICK_SPEED, ...).",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/physics.py",
+          "symbol": "_apply",
+          "text": "Every loaded gamelab module whose global of one of those names still holds the old object gets the new one.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/motion/route.py",
+          "symbol": "_follow",
+          "text": "The @physics.follows hooks run in import order: route's (ROPE_VX, ROPE_VY, GRAB_LEAD, ROPE_JUMP_SLIDE), flow's (GRAB_LEAD, ROPE_SPEED), control.actions' and control.navigator's. Then EPOCH goes up.",
+          "process": ""
+        },
+        {
+          "module": "gamelab/control/navigator.py",
+          "symbol": "Navigator._follow_walk",
+          "text": "At its next pass's start a navigator sees EPOCH changed and builds a new route.Planner (its takeoffs, landings and costs: 0.1-0.3 s on Tree Dungeon). Landings already cached stay valid: her air steps don't use her walk.",
+          "process": ""
+        }
+      ]
+    }
+  ],
+  "not_done": [
+    "KICK_JUMPS stays off: jumps keyed 40-52 ms after the arrow usually leave at full speed by the kick, but not reliably enough to plan on; about 20 jumps keyed 50-55 ms after the arrow in game should confirm it first.",
+    "The regrab delay after leaving a rope (route.REGRAB_S, 0.3 s) isn't measured. HeavenClient refuses a grab for 1,000 ms; if the game does too, the planner would keep no rope-to-rope hop (ROPE_HOPS would go off).",
+    "The rope side-jump's speeds (Shoe.rope_vx 1.3 x her walk out, rope_vy half a jump's speed up), turning round on the ground and the fall-cap drag are the decompile's alone; the minimap's one traced rope jump agrees only weakly.",
+    "ROPE_REACH (95) is a guess: the highest grab tried in game was a rope 69 up. A rope ending 82-95 above her is planned as grabbed half the time (GRAB_CHANCE).",
+    "The down-jump's kick and grace aren't modelled: a drop falls through straight down, from rest, DROP_LAG (0.28 s, from 4 drops at 60 fps) after the jump key. Cosmic's server bots fitted a kick of 196 units/s and a 350 ms grace from the game's movement packets, which would move where and when drops land (12 of the first map's 61 drops fall 60 units or less).",
+    "The landing slide isn't measured: the engine brakes her at 800 units/s² on landing (13.9 units from full speed), where Cosmic halves her sideways speed instead.",
+    "The release lag isn't settled: the jump sweeps fit it at 68 ms (2 ms after the press's), while her recorded walks want about 12 ms after; a recorded walk of a few lengths, let go at a known time, would tell.",
+    "Her body's height for touches (50, 55 or 65 units) can't be told apart from the logs; the planner takes the client's 65.",
+    "Chained jumps still land elsewhere now and then: a chain is planned open loop from one look and errors add up over its legs (7 in 384 chains on the tour's 10 harness seeds, 3 in 175 of the hunt loop's).",
+    "A drop goes from the middle of the overlap even where another platform lies under part of it (11 -> 20 drops 6 units from the end of 12), so flow can't chain it; the middle of the stretch that lands on the right platform would hold.",
+    "Route diversity (ROUTES over 1) stays off by default: in the harness it widened her moves but picked up fewer drops, and passed no bar.",
+    "SPREAD_FROM_SPOT stays off until the user decides or a live A/B shows it buys something.",
+    "To check in game: that jumps keyed 150 ms after the arrow leave at full speed (none at 126), that she runs about 2-3 units less after a landing (LANDING_ENDS_STEP), and the mover's 46 ms nudges by a rope (1.8 or 7.0 units, not 5).",
+    "Map friction below 1 (icy maps) and SPEED below 100 are untested for this client: no map in the game data has fs, and the decompile's lower end of 80 is used."
+  ]
+}

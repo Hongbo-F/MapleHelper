@@ -10,8 +10,9 @@ loop's STOP too, and waits to say what came of it: she goes to the chosen place 
 stop, with no page. The game not in front: the request stands, nothing brings it forward, and she goes when it's back;
 after behavior.hunter.STOP_WAIT_S the hunt ends with a note (paths.PARK_NOTE) for the guard, so the babysitter's pet feeder comes back.
 With no hunt running it parks her (`nav --park`, for the babysitter's regex to hold the pet feeder meanwhile). A hunt that
-ends on its own time parks too (`tour --loop`); one killed or crashed leaves its entry behind (paths.HUNT, `over` removes
-a clean end's) and the guard's next pass takes that for a note.
+ends on its own time parks too (`tour --loop`); one killed, crashed, ended by an error or by Ctrl+C leaves its entry
+behind (paths.HUNT, `over` removes a clean end's) and the guard's next pass takes that for a note: she was left where
+the hunt had her, so she parks.
 
 The guard (`Guard`, in `pet --every`): the babysitter keeps that running exactly while no hunt runs, it's attached to the
 perception service and it knows the map, so no new process, and nothing but the service's newest state each GUARD_S (no
