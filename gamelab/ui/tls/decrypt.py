@@ -982,6 +982,31 @@ def main():
     print("written to", out)
 
 
+# A capture directory holds the recorder's original output names or the renamed
+# native-exe names (capture.pcap/tzsp.raw -> frames.pcap/stream.raw).  Resolve either.
+PCAP_NAMES = ("capture.pcap", "frames.pcap")
+RAW_NAMES = ("tzsp.raw", "stream.raw")
+
+
+def find_capture_pcap(d):
+    """The capture pcap inside dir d, trying both the original and renamed names.
+    Falls back to the original name (for a clean 'not found' message by the caller)."""
+    for n in PCAP_NAMES:
+        p = os.path.join(d, n)
+        if os.path.isfile(p):
+            return p
+    return os.path.join(d, PCAP_NAMES[0])
+
+
+def find_capture_raw(d):
+    """The capture's router-stream raw file beside the pcap (original or renamed name), or None."""
+    for n in RAW_NAMES:
+        p = os.path.join(d, n)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def frame_sources(a):
     """Build the connections with every frame's source decided by the rules of the module docstring.
     Returns (conns, a line saying how the sources were decided)."""
@@ -989,9 +1014,9 @@ def frame_sources(a):
         conns, _s = build_conns(a.pcap, trust_all=True)
         return conns, "--local: every frame is this PC's (big frames intact)"
     here = os.path.dirname(os.path.abspath(a.pcap))
-    raw = a.tzsp_raw or os.path.join(here, "tzsp.raw")
+    raw = a.tzsp_raw or find_capture_raw(here)
     note = ""
-    if os.path.isfile(raw):
+    if raw and os.path.isfile(raw):
         router, n = load_router_frames(raw)
         conns, s = build_conns(a.pcap, router=router)
         if s["router"] or not router:
@@ -1007,7 +1032,9 @@ def frame_sources(a):
             s = json.load(open(summary, encoding="utf-8"))
         except (OSError, ValueError):
             s = {}
-        if s.get("local_capture") and not s.get("capture"):
+        # original recorder: local_capture set + no capture; native exe: a local section + no stream section
+        local_only = (s.get("local_capture") and not s.get("capture")) or (s.get("local") and not s.get("stream"))
+        if local_only:
             conns, _s = build_conns(a.pcap, trust_all=True)
             return conns, note + "summary.json: a --local recording, every frame is this PC's (big frames intact)"
     conns, _s = build_conns(a.pcap)

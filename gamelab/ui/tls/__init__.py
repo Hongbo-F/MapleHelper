@@ -2,7 +2,7 @@
 
     /tls/                       the page (static/: index.html, app.js, app.css): the captures, a list of the requests
                                 (HTTP/1.x, HTTP/2, WebSocket messages) or of the TLS connections, and one in full
-    /tls/api/captures           the .pcap files under ROOT, keyed ones and the newest first
+    /tls/api/captures           the .pcap files under the capture roots (ROOTS), keyed ones and the newest first
     /tls/api/open?cap=&local=&reload=   decrypt one (in the background) / how far it is, and whether its files have
                                 changed since (`stale`: a recording still going)
     /tls/api/summary?cap=       its connections and items (ui.tls.view)
@@ -13,8 +13,10 @@
     /tls/api/csauth?cap=        its x-csauth calls as a timeline per computer, each event the diff against the
                                 computer's state (ui.tls.csauth)
 
-`local` is 1 / 0 / missing: frames over 1500 B trusted (captured on this PC) / not / by the capture's folder. ROOT is
-GAMELAB_TLS_ROOT, else the recorder's captures folder in the repo (.analysis/captures). Who may read it: ui.tls.access
+`local` is 1 / 0 / missing: frames over 1500 B trusted (captured on this PC) / not / by the capture's folder. Captures are
+looked for under ROOTS: the repo's .analysis/captures (or GAMELAB_TLS_ROOT) AND the native recorder's dump dir D:\\data\\runs
+(+ %USERPROFILE%\\data-runs), or exactly GAMELAB_TLS_ROOTS if set. Both recorders' file names are read (frames.pcap/stream.raw
+and capture.pcap/tzsp.raw). Who may read it: ui.tls.access
 (Cloudflare Access for what comes through the tunnel). The decryption is ui.tls.decrypt and ui.tls.ngs, imported on the
 first request (they need `cryptography`), so the mini-map runs without them.
 
@@ -31,7 +33,30 @@ from pathlib import Path
 
 from ... import paths
 
-ROOT = Path(os.environ.get("GAMELAB_TLS_ROOT") or paths.REPO / ".analysis" / "captures")
+def _roots():
+    """Where captures are looked for, newest-recorder location included.  Override the whole list with
+    GAMELAB_TLS_ROOTS (os.pathsep-separated); else the repo's .analysis/captures (or GAMELAB_TLS_ROOT) PLUS the
+    hardened native recorder's default dump dir D:\\data\\runs and its %USERPROFILE%\\data-runs fallback.  Dirs
+    that don't exist are skipped at discovery time, so listing them all is harmless."""
+    env = os.environ.get("GAMELAB_TLS_ROOTS")
+    if env:
+        return [Path(p) for p in env.split(os.pathsep) if p]
+    out, seen = [], set()
+    cands = [Path(os.environ.get("GAMELAB_TLS_ROOT") or paths.REPO / ".analysis" / "captures"),
+             Path(r"D:\data\runs")]
+    prof = os.environ.get("USERPROFILE")
+    if prof:
+        cands.append(Path(prof) / "data-runs")
+    for p in cands:
+        k = os.path.normcase(str(p))
+        if k not in seen:
+            seen.add(k)
+            out.append(p)
+    return out
+
+
+ROOTS = _roots()
+ROOT = ROOTS[0]       # the primary location (back-compat; the captures list spans all of ROOTS)
 STATIC = Path(__file__).with_name("static")
 FILES = {"": ("index.html", "text/html; charset=utf-8"), "index.html": ("index.html", "text/html; charset=utf-8"),
          "app.js": ("app.js", "text/javascript; charset=utf-8"), "app.css": ("app.css", "text/css; charset=utf-8")}
@@ -48,7 +73,7 @@ def library():
     with _library_lock:
         if _library is None:
             from .view import Library
-            _library = Library([str(ROOT)])
+            _library = Library([str(r) for r in ROOTS])
         return _library
 
 
