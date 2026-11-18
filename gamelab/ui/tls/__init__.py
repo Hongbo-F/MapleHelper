@@ -14,8 +14,8 @@
                                 computer's state (ui.tls.csauth)
 
 `local` is 1 / 0 / missing: frames over 1500 B trusted (captured on this PC) / not / by the capture's folder. Captures are
-looked for under ROOTS: the repo's .analysis/captures (or GAMELAB_TLS_ROOT) AND the native recorder's dump dir D:\\data\\runs
-(+ %USERPROFILE%\\data-runs), or exactly GAMELAB_TLS_ROOTS if set. Both recorders' file names are read (frames.pcap/stream.raw
+looked for under ROOTS: the native recorder's dump dir D:\\data\\runs (+ %USERPROFILE%\\data-runs), preceded by
+GAMELAB_TLS_ROOT if set, or exactly GAMELAB_TLS_ROOTS if set. Both recorders' file names are read (frames.pcap/stream.raw
 and capture.pcap/tzsp.raw). Who may read it: ui.tls.access
 (Cloudflare Access for what comes through the tunnel). The decryption is ui.tls.decrypt and ui.tls.ngs, imported on the
 first request (they need `cryptography`), so the mini-map runs without them.
@@ -34,16 +34,19 @@ from pathlib import Path
 from ... import paths
 
 def _roots():
-    """Where captures are looked for, newest-recorder location included.  Override the whole list with
-    GAMELAB_TLS_ROOTS (os.pathsep-separated); else the repo's .analysis/captures (or GAMELAB_TLS_ROOT) PLUS the
-    hardened native recorder's default dump dir D:\\data\\runs and its %USERPROFILE%\\data-runs fallback.  Dirs
-    that don't exist are skipped at discovery time, so listing them all is harmless."""
+    """Where captures are looked for.  Override the whole list with GAMELAB_TLS_ROOTS (os.pathsep-separated); else
+    the native recorder's default dump dir D:\\data\\runs and its %USERPROFILE%\\data-runs fallback, preceded by
+    GAMELAB_TLS_ROOT if that is set.  Dirs that don't exist are skipped at discovery time, so listing them all is
+    harmless."""
     env = os.environ.get("GAMELAB_TLS_ROOTS")
     if env:
         return [Path(p) for p in env.split(os.pathsep) if p]
     out, seen = [], set()
-    cands = [Path(os.environ.get("GAMELAB_TLS_ROOT") or paths.REPO / ".analysis" / "captures"),
-             Path(r"D:\data\runs")]
+    cands = []
+    extra = os.environ.get("GAMELAB_TLS_ROOT")
+    if extra:
+        cands.append(Path(extra))
+    cands.append(Path(r"D:\data\runs"))
     prof = os.environ.get("USERPROFILE")
     if prof:
         cands.append(Path(prof) / "data-runs")
